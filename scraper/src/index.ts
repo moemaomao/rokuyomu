@@ -82,4 +82,10 @@ app.get('/:sourceId/chapter/*', async (req, res) => {
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-app.listen(PORT, () => console.log(`[mikoroku-scraper] :${PORT}`));
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[mikoroku-scraper] :${PORT}`);
+  });
+}
+
+export default app;
