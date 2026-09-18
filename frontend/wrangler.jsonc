@@ -1,0 +1,41 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "rokuyomu",
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"compatibility_date": "2025-12-23",
+	"compatibility_flags": [
+		"nodejs_als",
+		"nodejs_compat"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"observability": {
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"invocation_logs": true,
+			"persist": true
+		},
+		"traces": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"persist": true
+		}
+	},
+	"kv_namespaces": [
+		{
+			"binding": "MIKOROKU_CACHE",
+			"id": "bed9746f9fc74d819eaa01aa31b9cf94"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"*/20 * * * *"
+		]
+	},
+	"vars": {
+		"SCRAPER_BASE_URL": "http://localhost:3000"
+	}
+}

@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+
+/* ===== Global Theme Variables for Header Components ===== --> */
+:root, html.light {
+    --bg-card: #ffffff;
+    --text-color: #18181b;
+    --border-color: #e4e4e7;
+    --bg-subtle: #f4f4f5;
+    --text-muted: #71717a;
+    --hover-bg: #f4f4f5;
+}
+
+html.dark {
+    --bg-card: #18181b;
+    --text-color: #f4f4f5;
+    --border-color: #27272a;
+    --bg-subtle: #27272a;
+    --text-muted: #a1a1aa;
+    --hover-bg: #27272a;
+}
+
+body {
+    background-color: inherit;
+    color: inherit;
+}
+
+/* Custom scrollbar (Default Dark) */
+::-webkit-scrollbar {
+    width: 6px;
+    background-color: #111;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.shine-effect {
+    animation: shine 3s linear infinite;
+}
+
+@keyframes shine {
+    0% {
+        transform: translateX(-150%) skewX(-25deg);
+    }
+    100% {
+        transform: translateX(500%) skewX(-25deg);
+    }
+}
+
+/* ===== Dark Theme ===== */
+html.dark {
+    color-scheme: dark;
+    background-color: #09090b;
+}
+
+/* ===== Light Theme ===== */
+html.light {
+    color-scheme: light;
+    background-color: #ffffff;
+}
+
+html.light body,
+html.light .theme-root {
+    background-color: #ffffff;
+    color: #18181b;
+}
+
+html.light header.theme-header {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border-color: #e4e4e7 !important;
+}
+
+html.light .theme-card {
+    background: #ffffff !important;
+    border-color: #e4e4e7 !important;
+    color: #18181b !important;
+}
+
+html.light .theme-muted {
+    color: #71717a !important;
+}
+
+html.light .theme-input {
+    background: #ffffff !important;
+    border-color: #d4d4d8 !important;
+    color: #18181b !important;
+}
+
+html.light aside.theme-sidebar {
+    background: #ffffff !important;
+    border-color: #e4e4e7 !important;
+}
+
+html.light ::-webkit-scrollbar {
+    background-color: #f4f4f5;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+    background: #d4d4d8;
+}

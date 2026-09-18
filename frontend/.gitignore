@@ -1,0 +1,6 @@
+node_modules
+
+.svelte-kit
+node_modules
+.wrangler/
+
