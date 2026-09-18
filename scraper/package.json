@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.js --packages=external",
-    "vercel-build": "npm run build"
+  "dev": "tsx watch src/index.ts",
+  "start": "tsx src/index.ts",
+  "build": "echo 'skip'",
+  "vercel-build": "echo 'skip'"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
