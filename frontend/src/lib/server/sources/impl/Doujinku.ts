@@ -28,11 +28,12 @@ export class DoujinkuSource extends BaseSource {
 	private readonly DEFAULT_LANG = 'id';
 
 	private getCookie(): string {
-	const raw =
-		(typeof process !== 'undefined' ? process.env?.DOUJINKU_COOKIE : undefined) ||
-		'';
-	return String(raw).trim();
-}
+		const raw =
+			(env.DOUJINKU_COOKIE as string | undefined) ||
+			(typeof process !== 'undefined' ? process.env?.DOUJINKU_COOKIE : undefined) ||
+			'';
+		return String(raw).trim();
+	}
 
 	/** Override fetchHtml supaya inject cookie CF bila ada */
 	protected async fetchHtml(path: string): Promise<string> {

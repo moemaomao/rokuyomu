@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "rokuyomu",
+	"name": "6yomu",
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"compatibility_date": "2025-12-23",
 	"compatibility_flags": [
@@ -36,6 +36,6 @@
 		]
 	},
 	"vars": {
-		"SCRAPER_BASE_URL": "http://localhost:3000"
+		"SCRAPER_BASE_URL": "https://rokuyomu.vercel.app"
 	}
 }

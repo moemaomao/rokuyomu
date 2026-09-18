@@ -5,7 +5,7 @@
  */
 import express from 'express';
 import cors from 'cors';
-import { getSource, getSourceList } from './sources/index';
+import { getSource, getSourceList } from './sources/index.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;

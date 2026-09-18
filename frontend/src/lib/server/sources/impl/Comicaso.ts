@@ -1,5 +1,6 @@
 import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types';
+import { env } from '$env/dynamic/private';
 
 /**
  * Comicaso (v3.comicaso.pro) adapter – API based + challenge cookie
@@ -33,12 +34,15 @@ export class ComicasoSource extends BaseSource {
 
 	// ── Cookie ───────────────────────────────────────────────────────────────
 
-private getCookie(): string {
-	const raw =
-		(typeof process !== 'undefined' ? process.env?.COMICASO_COOKIE : undefined) ||
-		'';
-	return String(raw).trim();
-}
+	private getCookie(): string {
+		const raw =
+			(env.COMICASO_COOKIE as string | undefined) ||
+			(typeof process !== 'undefined'
+				? process.env?.COMICASO_COOKIE
+				: undefined) ||
+			'';
+		return String(raw).trim();
+	}
 
 	// ── HTTP ─────────────────────────────────────────────────────────────────
 
