@@ -1,7 +1,10 @@
 {
-  "version": 2,
   "buildCommand": "npm run build",
+  "outputDirectory": "public",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api" }
+    {
+      "source": "/(.*)",
+      "destination": "/api"
+    }
   ]
 }
