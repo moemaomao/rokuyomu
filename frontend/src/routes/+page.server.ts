@@ -198,6 +198,14 @@ if (isMulti) {
   });
 }
 
+const seen = new Set<string>();
+mangas = mangas.filter((m) => {
+	const key = `${m.sourceId ?? ''}:${m.id}`;
+	if (seen.has(key)) return false;
+	seen.add(key);
+	return true;
+});
+
 return {
   mangas,
   sources,

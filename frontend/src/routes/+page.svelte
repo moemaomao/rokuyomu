@@ -296,7 +296,7 @@
 			<div
 				class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-8"
 			>
-				{#each mangas as manga (manga.sourceId + manga.id)}
+				{#each mangas as manga, i (`${manga.sourceId ?? 'x'}:${manga.id}:${i}`)}
 					<a
 						href="/manga/{manga.sourceId}{manga.id}{selectedLang !== 'all'
 							? `?lang=${selectedLang}`
