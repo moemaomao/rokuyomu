@@ -1,4 +1,4 @@
-import { getAllSources } from '$lib/server/sources';
+import { getAllSourceIds } from '$lib/server/sources';
 import { remoteLatest } from '$lib/server/scraperClient';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
 import type { Manga } from '$lib/server/sources/types';
@@ -86,7 +86,7 @@ async function syncOneSource(
 }
 
 export async function syncPopularSources(kv: KVNamespace) {
-	const available = new Set(getAllSources().map((s) => s.id));
+	const available = new Set(getAllSourceIds());
 	const targets = PRIORITY_SOURCES.filter((id) => available.has(id));
 
 	const results = [];

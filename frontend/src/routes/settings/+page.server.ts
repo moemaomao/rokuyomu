@@ -1,9 +1,6 @@
-import { getAllSources } from '$lib/server/sources';
+import { getSourceList } from '$lib/server/sources';
 
 export const load = async () => {
-	const sources = getAllSources().map((s) => ({
-		id: s.id,
-		name: s.name
-	}));
+	const sources = getSourceList();
 	return { sources };
 };

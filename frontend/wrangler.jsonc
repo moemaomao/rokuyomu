@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "6yomu",
+	"name": "rokuyomu",
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"compatibility_date": "2025-12-23",
 	"compatibility_flags": [
