@@ -255,6 +255,14 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(() => {
+		if (typeof window !== 'undefined') {
+			const u = new URL(window.location.href);
+			if (u.searchParams.has('server')) {
+				u.searchParams.delete('server');
+				const clean = u.pathname + (u.search ? u.search : '') + u.hash;
+				history.replaceState(history.state, '', clean);
+			}
+		}
 		syncTheme();
 		const obs = new MutationObserver(syncTheme);
 		obs.observe(document.documentElement, {

@@ -14,8 +14,6 @@
 
 	let sortNewest = $state(true);
 	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
-	let activeServer = $state<'sv1' | 'sv2' | 'es'>('sv1');
-	let showServerNotice = $state(true);
 	let bookmarked = $state(false);
 
 	let chapters = $derived(
@@ -80,7 +78,6 @@
 			.trim()
 			.slice(0, 160)
 	);
-	// og:image harus URL absolut publik; cover sumber biasanya sudah https
 	let pageImage = $derived(
 		manga?.cover && /^https?:\/\//i.test(String(manga.cover).trim())
 			? String(manga.cover).trim()
@@ -528,80 +525,10 @@
 					</section>
 				{/if}
 
-				{#if showServerNotice}
-					<section class="detail-card mt-5 rounded-xl border p-4">
-						<div class="mb-3 flex items-center justify-between">
-							<h2 class="text-sm font-bold tracking-wide text-amber-600 dark:text-amber-300">
-								PERHATIAN
-							</h2>
-							<button
-								type="button"
-								class="detail-muted rounded-md p-1 hover:opacity-80"
-								onclick={() => (showServerNotice = false)}>✕</button
-							>
-						</div>
-						<div class="space-y-3 text-[12px]">
-							<div class="flex gap-3">
-								<div
-									class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-500"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /></svg>
-								</div>
-								<div>
-									<p class="font-semibold text-blue-600 dark:text-blue-400">Server 1</p>
-									<p class="detail-muted">Server utama untuk membaca chapter. (Rekomendasi)</p>
-								</div>
-							</div>
-							<div class="flex gap-3">
-								<div
-									class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-600"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /></svg>
-								</div>
-								<div>
-									<p class="font-semibold text-amber-600 dark:text-amber-400">Server 2</p>
-									<p class="detail-muted">Server alternatif jika chapter di Server 1 bermasalah.</p>
-								</div>
-							</div>
-						</div>
-					</section>
-				{/if}
 
 				<!-- Controls -->
 				<div class="mt-6 flex items-center justify-between gap-2">
 					<div class="flex items-center gap-2">
-						<button
-							type="button"
-							class="relative flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border transition {activeServer === 'sv1'
-								? 'border-blue-500 bg-blue-500 text-white'
-								: 'border-blue-400/35 bg-white/5 text-blue-500'}"
-							onclick={() => (activeServer = 'sv1')}
-							title="Server 1"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /></svg>
-							<span class="absolute -top-1 -right-1 text-[8px] font-extrabold">1</span>
-						</button>
-						<button
-							type="button"
-							class="relative flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border transition {activeServer === 'sv2'
-								? 'border-amber-500 bg-amber-500 text-white'
-								: 'border-amber-400/35 bg-white/5 text-amber-500'}"
-							onclick={() => (activeServer = 'sv2')}
-							title="Server 2"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /></svg>
-							<span class="absolute -top-1 -right-1 text-[8px] font-extrabold">2</span>
-						</button>
-						<button
-							type="button"
-							class="relative flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border transition {activeServer === 'es'
-								? 'border-red-500 bg-red-500 text-white'
-								: 'border-red-400/35 bg-white/5 text-red-500'}"
-							onclick={() => (activeServer = 'es')}
-							title="Emergency Server"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
-						</button>
 					</div>
 
 					<div class="flex items-center gap-2">
@@ -694,7 +621,7 @@
 						>
 							{#each chapters as chapter}
 								<a
-									href="/reader/{source}{chapter.id}?server={activeServer}"
+									href="/reader/{source}{chapter.id}"
 									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105"
 								>
 									{#if chapterCover(chapter)}
@@ -729,7 +656,7 @@
 						<div class="grid grid-cols-3 gap-2.5 pb-8 md:grid-cols-4 lg:grid-cols-6">
 							{#each chapters as chapter}
 								<a
-									href="/reader/{source}{chapter.id}?server={activeServer}"
+									href="/reader/{source}{chapter.id}"
 									class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 hover:border-blue-500/40"
 								>
 									<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
@@ -752,7 +679,7 @@
 						<div class="flex flex-col gap-2.5 pb-8">
 							{#each chapters as chapter}
 								<a
-									href="/reader/{source}{chapter.id}?server={activeServer}"
+									href="/reader/{source}{chapter.id}"
 									class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40"
 								>
 									<div class="h-full w-[90px] shrink-0 overflow-hidden bg-zinc-300 dark:bg-zinc-900">
