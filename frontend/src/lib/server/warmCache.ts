@@ -1,6 +1,5 @@
 /**
  * @deprecated Use refreshPopularSources from '$lib/server/refreshSources'.
- * Thin wrapper kept for existing imports (/api/warm, cron).
  */
 
 import {
@@ -8,8 +7,9 @@ import {
 	type RefreshResult
 } from '$lib/server/refreshSources';
 
+/** Cron warm: skip scrape jika KV masih valid. */
 export async function warmPopularSources(kv: KVNamespace) {
-	const report = await refreshPopularSources(kv, { force: true });
+	const report = await refreshPopularSources(kv, { force: false });
 
 	return report.results.map(
 		(r: RefreshResult): { id: string; ok: boolean; count: number } => ({

@@ -1,9 +1,20 @@
+/**
+ * Unified popular-source cache refresh.
+ *
+ * - Default: skip scrape jika key KV masih ada (TTL belum habis).
+ * - force=true: selalu scrape ulang + kv.put (manual / admin).
+ *
+ * Cache key MUST match +page.server.ts single-source browse:
+ *   browse:{sourceId}:p{page}:q:lall:tall:lim{BROWSE_LIMIT}
+ */
+
 import { getAllSourceIds } from '$lib/server/sources';
 import { remoteLatest } from '$lib/server/scraperClient';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
 import type { Manga } from '$lib/server/sources/types';
 
 export const BROWSE_LIMIT = 24;
+
 export const LIST_CACHE_TTL = 60 * 45; // 45 min
 
 const TIMEOUT_MS = 8000;
@@ -64,6 +75,7 @@ export type RefreshResult = {
 };
 
 export type RefreshOptions = {
+	
 	force?: boolean;
 };
 
@@ -116,38 +128,22 @@ async function fetchList(sourceId: string, page: number): Promise<Manga[]> {
 		);
 }
 
-async function refreshOneForce(
+
+async function refreshOne(
 	sourceId: string,
 	page: number,
-	kv: KVNamespace
+	kv: KVNamespace,
+	force: boolean
 ): Promise<RefreshResult> {
 	const cacheKey = browseListCacheKey(sourceId, page);
 
 	try {
-		const list = await fetchList(sourceId, page);
-		await kv.put(cacheKey, JSON.stringify(list), {
-			expirationTtl: LIST_CACHE_TTL
-		});
-		return { sourceId, page, ok: true, count: list.length };
-	} catch (e: unknown) {
-		const message = e instanceof Error ? e.message : String(e);
-		console.error(`[Refresh] ${sourceId} p${page} failed:`, message);
-		return { sourceId, page, ok: false, count: 0, error: message };
-	}
-}
-
-async function refreshOneCacheAside(
-	sourceId: string,
-	page: number,
-	kv: KVNamespace
-): Promise<RefreshResult> {
-	const cacheKey = browseListCacheKey(sourceId, page);
-
-	try {
-		const existing = await kv.get(cacheKey, 'json');
-		if (existing !== null) {
-			const count = Array.isArray(existing) ? existing.length : 0;
-			return { sourceId, page, ok: true, count, skipped: true };
+		if (!force) {
+			const existing = await kv.get(cacheKey, 'json');
+			if (existing !== null) {
+				const count = Array.isArray(existing) ? existing.length : 0;
+				return { sourceId, page, ok: true, count, skipped: true };
+			}
 		}
 
 		const list = await fetchList(sourceId, page);
@@ -163,14 +159,13 @@ async function refreshOneCacheAside(
 }
 
 /**
- * Refresh popular browse caches.
- * @param force
+ * @param force              
  */
 export async function refreshPopularSources(
 	kv: KVNamespace,
 	options: RefreshOptions = {}
 ) {
-	const force = options.force !== false;
+	const force = options.force === true;
 	const available = new Set(getAllSourceIds());
 	const targets = POPULAR_SOURCES.filter((id) => available.has(id));
 
@@ -182,20 +177,21 @@ export async function refreshPopularSources(
 
 	for (const sourceId of targets) {
 		for (const page of PAGES) {
-			const res = force
-				? await refreshOneForce(sourceId, page, kv)
-				: await refreshOneCacheAside(sourceId, page, kv);
+			const res = await refreshOne(sourceId, page, kv, force);
 			results.push(res);
-			await new Promise((r) => setTimeout(r, DELAY_MS));
+			if (!res.skipped) {
+				await new Promise((r) => setTimeout(r, DELAY_MS));
+			}
 		}
 	}
 
 	const success = results.filter((r) => r.ok).length;
 	const skipped = results.filter((r) => r.skipped).length;
+	const scraped = results.filter((r) => r.ok && !r.skipped).length;
 	const failed = results.filter((r) => !r.ok).length;
 
 	console.log(
-		`[Refresh] done success=${success} skipped=${skipped} failed=${failed}`
+		`[Refresh] done scraped=${scraped} skipped=${skipped} failed=${failed} success=${success}`
 	);
 
 	return {
@@ -203,6 +199,7 @@ export async function refreshPopularSources(
 		force,
 		total: results.length,
 		success,
+		scraped,
 		skipped,
 		failed,
 		results
