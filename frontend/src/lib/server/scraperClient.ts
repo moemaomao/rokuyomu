@@ -1,12 +1,3 @@
-/**
- * Hybrid scraper client
- *
- * - Source di WORKER_SOURCE_IDS  → parse lokal di CF Worker (Cheerio)
- * - Source lainnya               → HTTP ke external Node scraper (Vercel/Render)
- *
- * Worker tetap ringan: mayoritas request hanya `fetch()` JSON + KV.
- */
-
 import { env } from '$env/dynamic/private';
 import type { Manga, MangaDetails } from '$lib/server/sources/types';
 import { isWorkerSource, getWorkerSource } from '$lib/server/workerSources';
@@ -40,7 +31,6 @@ async function scraperFetch<T>(path: string): Promise<T> {
 	return (await res.json()) as T;
 }
 
-// ── Public API (dipakai +page.server / api / warmCache) ────────────────────
 
 export async function remoteSourceList(): Promise<Array<{ id: string; name: string }>> {
 	return scraperFetch('/sources');
@@ -51,7 +41,7 @@ export async function remoteLatest(
 	page: number,
 	opts: { lang?: string; type?: string; q?: string } = {}
 ): Promise<Manga[]> {
-	// Hybrid: blocked-on-Vercel sources → Worker lokal
+
 	if (isWorkerSource(sourceId)) {
 		const adapter = getWorkerSource(sourceId);
 		const q = opts.q?.trim();
@@ -109,5 +99,29 @@ export async function remoteChapterPages(sourceId: string, chapterId: string): P
 	return scraperFetch(`/${encodeURIComponent(sourceId)}/chapter/${id}`);
 }
 
-/** Helper: cek apakah source ini dijalankan di Worker */
+
+export async function remoteMangaFromChapter(
+	sourceId: string,
+	chapterId: string
+): Promise<string | null> {
+	const chapter = chapterId.startsWith('/') ? chapterId : `/${chapterId.replace(/^\/+/, '')}`;
+	if (isWorkerSource(sourceId)) {
+		const adapter = getWorkerSource(sourceId) as {
+			resolveMangaIdFromChapter?: (id: string) => Promise<string | null>;
+		};
+		if (typeof adapter.resolveMangaIdFromChapter === 'function') {
+			return adapter.resolveMangaIdFromChapter(chapter);
+		}
+		return null;
+	}
+	try {
+		const data = await scraperFetch<{ mangaId: string | null }>(
+			`/${encodeURIComponent(sourceId)}/manga-from-chapter?chapter=${encodeURIComponent(chapter)}`
+		);
+		return data?.mangaId || null;
+	} catch {
+		return null;
+	}
+}
+
 export { isWorkerSource, WORKER_SOURCE_IDS } from '$lib/server/workerSources';

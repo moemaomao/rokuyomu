@@ -80,6 +80,32 @@ app.get('/:sourceId/chapter/*', async (req, res) => {
   }
 });
 
+app.get('/:sourceId/manga-from-chapter', async (req, res) => {
+  try {
+    const { sourceId } = req.params;
+    const chapter = String(req.query.chapter || '').trim();
+    if (!chapter) {
+      return res.status(400).json({ error: 'chapter query required' });
+    }
+    const adapter = getSource(sourceId) as any;
+    if (typeof adapter.resolveMangaIdFromChapter === 'function') {
+      const mangaId = await adapter.resolveMangaIdFromChapter(chapter);
+      return res.json({ mangaId: mangaId || null });
+    }
+    
+    const hierarchical = chapter.replace(
+      /\/(chapter|ch|episode|ep)[-/_]?[\d.-]*\/?$/i,
+      ''
+    );
+    const mangaId =
+      hierarchical !== chapter && hierarchical.length > 1 ? hierarchical : null;
+    res.json({ mangaId });
+  } catch (e: any) {
+    console.error('[manga-from-chapter]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'resolve failed' });
+  }
+});
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
 if (!process.env.VERCEL) {

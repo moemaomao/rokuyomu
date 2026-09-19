@@ -1,9 +1,8 @@
-/**
- * Chapter Reader Page - Server Load Function
- * Tidak lagi memakai getSource / adapter lokal.
- */
-
-import { remoteChapterPages, remoteMangaDetails } from '$lib/server/scraperClient';
+import {
+	remoteChapterPages,
+	remoteMangaDetails,
+	remoteMangaFromChapter
+} from '$lib/server/scraperClient';
 import { isValidSource } from '$lib/server/sources';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
@@ -19,11 +18,7 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	sektedoujin: '/manga'
 };
 
-/** Base URL hardcoded (pengganti adapter.baseUrl) */
-const SOURCE_BASE_URL: Record<string, string> = {
-	weloma: 'https://weloma.net',
-	zonatmo: 'https://zonatmo.org'
-};
+const NEEDS_REMOTE_MANGA_RESOLVE = new Set(['weloma', 'zonatmo']);
 
 function parseChapterNum(input: string): number | null {
 	const m =
@@ -44,7 +39,16 @@ function parseRootChapter(chapterId: string): { slug: string; num: number } | nu
 	return { slug: m[1], num };
 }
 
-async function resolveMangaId(source: string, chapterId: string): Promise<string> {
+async function resolveMangaId(
+	source: string,
+	chapterId: string,
+	explicitMangaId?: string | null
+): Promise<string> {
+	if (explicitMangaId?.trim()) {
+		const id = explicitMangaId.trim();
+		return id.startsWith('/') ? id : `/${id.replace(/^\/+/, '')}`;
+	}
+
 	const prefix = ROOT_CHAPTER_PREFIX[source];
 	if (prefix) {
 		const parsed = parseRootChapter(chapterId);
@@ -64,7 +68,7 @@ async function resolveMangaId(source: string, chapterId: string): Promise<string
 		return hierarchical;
 	}
 
-	// Shinigami: resolve via API
+	// Shinigami: JSON API
 	if (source === 'shinigami' || chapterId.startsWith('/chapter/')) {
 		const cid = chapterId.replace(/^\/chapter\//, '').replace(/^\//, '');
 		if (cid && /^[a-f0-9-]{36}$/i.test(cid)) {
@@ -85,80 +89,22 @@ async function resolveMangaId(source: string, chapterId: string): Promise<string
 					if (mid) return `/series/${mid}`;
 				}
 			} catch (e) {
-				debug.error('[Reader] Failed to resolve Shinigami mangaId:', e);
+				debug.error('[Reader] Shinigami resolve failed:', e);
 			}
 		}
 	}
 
-	// Weloma: fetch HTML chapter page untuk ambil link manga
-	if (source === 'weloma' || chapterId.startsWith('/c/')) {
-		try {
-			const base = SOURCE_BASE_URL.weloma;
-			const path = chapterId.startsWith('http') ? chapterId : `${base}${chapterId}`;
-			const res = await fetch(path, {
-				headers: {
-					'User-Agent':
-						'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-					Referer: base
-				}
-			});
-			if (res.ok) {
-				const html = await res.text();
-				const m = html.match(/href="(\/m\/[A-Za-z0-9]+)"/i);
-				if (m?.[1]) return m[1];
-			}
-		} catch (e) {
-			debug.error('[Reader] Failed to resolve Weloma mangaId from chapter:', e);
-		}
-	}
-
-	// ZonaTMO: fetch HTML untuk ambil /library/manga/...
 	if (
-		source === 'zonatmo' ||
+		NEEDS_REMOTE_MANGA_RESOLVE.has(source) ||
+		chapterId.startsWith('/c/') ||
 		chapterId.includes('/view_uploads/') ||
 		chapterId.includes('/viewer/')
 	) {
-		try {
-			const base = SOURCE_BASE_URL.zonatmo;
-			const path = chapterId.startsWith('http')
-				? chapterId
-				: `${base}${chapterId.startsWith('/') ? '' : '/'}${chapterId}`;
-
-			const res = await fetch(path, {
-				headers: {
-					'User-Agent':
-						'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-					Referer: base,
-					'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
-				},
-				redirect: 'follow'
-			});
-
-			if (res.ok) {
-				const html = await res.text();
-				const m =
-					html.match(
-						/href=["']((?:https?:\/\/[^"']*)?\/library\/manga\/\d+\/[^"'?#]+)/i
-					) || html.match(/["'](\/library\/manga\/\d+\/[^"'?#]+)["']/i);
-				if (m?.[1]) {
-					let mid = m[1];
-					if (mid.startsWith('http')) {
-						try {
-							mid = new URL(mid).pathname;
-						} catch {
-							/* keep */
-						}
-					}
-					if (!mid.startsWith('/')) mid = `/${mid}`;
-					return mid.split('?')[0].replace(/\/+$/, '');
-				}
-			}
-		} catch (e) {
-			debug.error('[Reader] Failed to resolve ZonaTMO mangaId from chapter:', e);
-		}
+		const resolved = await remoteMangaFromChapter(source, chapterId);
+		if (resolved) return resolved;
 	}
 
-	return hierarchical;
+	return hierarchical.length > 1 ? hierarchical : chapterId;
 }
 
 function findChapterIndex(
@@ -194,22 +140,23 @@ function findChapterIndex(
 	return chapters.findIndex((ch) => Math.abs((ch.number ?? 0) - n) < 0.001);
 }
 
-export const load: PageServerLoad = async ({ params, setHeaders }) => {
+export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 	const { source, id } = params;
-	const chapterId = `/${id}`;
+	const chapterId = `/${Array.isArray(id) ? id.join('/') : id}`;
 
 	if (!source || !isValidSource(source)) {
 		throw error(404, { message: 'Source not found' });
 	}
 
 	try {
-		const mangaId = await resolveMangaId(source, chapterId);
+		const explicitManga = url.searchParams.get('manga');
+		const mangaId = await resolveMangaId(source, chapterId, explicitManga);
 		const mangaSlug = mangaId.startsWith('/') ? mangaId.slice(1) : mangaId;
 
 		const [pages, mangaDetails] = await Promise.all([
 			remoteChapterPages(source, chapterId),
 			remoteMangaDetails(source, mangaId).catch((e) => {
-				debug.error(`[Reader] Failed to fetch manga details for ${mangaId}:`, e);
+				debug.error(`[Reader] manga details failed for ${mangaId}:`, e);
 				return null;
 			})
 		]);

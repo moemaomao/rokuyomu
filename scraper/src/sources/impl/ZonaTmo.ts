@@ -439,6 +439,37 @@ export class ZonaTmoSource extends BaseSource {
 		return pages;
 	}
 
+async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+	let path = this.cleanId(chapterId);
+	if (!path.startsWith('/')) path = `/${path}`;
+	if (!path.includes('/view_uploads/') && !path.includes('/viewer/')) {
+		const onlyNum = path.replace(/\//g, '');
+		if (/^\d+$/.test(onlyNum)) path = `/view_uploads/${onlyNum}`;
+	}
+	try {
+		const html = await this.fetchHtml(path);
+		const m =
+			html.match(
+				/href=["']((?:https?:\/\/[^"']*)?\/library\/manga\/\d+\/[^"'?#]+)/i
+			) || html.match(/["'](\/library\/manga\/\d+\/[^"'?#]+)["']/i);
+		if (!m?.[1]) return null;
+		let mid = m[1];
+		if (mid.startsWith('http')) {
+			try {
+				mid = new URL(mid).pathname;
+			} catch {
+				
+			}
+		}
+		if (!mid.startsWith('/')) mid = `/${mid}`;
+		return mid.split('?')[0].replace(/\/+$/, '');
+	} catch (e) {
+		console.error('[zonatmo] resolveMangaIdFromChapter failed:', e);
+		return null;
+	}
+}
+
+
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		let path = this.cleanId(chapterId);
 		if (!path.startsWith('/')) path = `/${path}`;

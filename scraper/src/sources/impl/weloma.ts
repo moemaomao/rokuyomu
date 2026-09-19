@@ -400,6 +400,31 @@ export class WelomaSource extends BaseSource {
 		};
 	}
 
+async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+	const path = this.cleanId(
+		chapterId.startsWith('/c/')
+			? chapterId
+			: chapterId.startsWith('http')
+				? chapterId
+				: `/c/${chapterId.replace(/^\//, '')}`
+	);
+	try {
+		const html = await this.fetchHtml(path);
+		const $ = cheerio.load(html);
+		const href =
+			$('a[href*="/m/"]').first().attr('href') ||
+			html.match(/href="(\/m\/[A-Za-z0-9]+)"/i)?.[1] ||
+			'';
+		if (!href) return null;
+		const m = href.match(/\/m\/[A-Za-z0-9]+/i);
+		return m ? m[0] : null;
+	} catch (e) {
+		console.error('[weloma] resolveMangaIdFromChapter failed:', e);
+		return null;
+	}
+}
+
+
 	// ── Pages ────────────────────────────────────────────────────────────────
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
