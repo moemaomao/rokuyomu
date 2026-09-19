@@ -9,14 +9,8 @@ import type { Manga, MangaDetails } from '../types';
  * Config        : /api/v2/config  (image / thumb servers)
  *
  * ID format: "/{numericId}"
- *
- * Homepage badge:
- *   - latestChapter → num_pages (Ch. N)
- *   - lang → ISO code (en/ja/zh/…) untuk flag di samping badge chapter
- *
- * List response hanya punya tag_ids (bukan tags penuh),
- * jadi bahasa di-resolve lewat LANG_TAG_ID_MAP + fallback judul.
  */
+
 export class NhentaiSource extends BaseSource {
 	id = 'nhentai';
 	name = 'nhentai.net';
@@ -416,7 +410,7 @@ export class NhentaiSource extends BaseSource {
 			type,
 			status: 'Completed',
 			lang,
-			latestChapter: pageCount > 0 ? pageCount : 1
+			latestChapter: 1
 		};
 	}
 
@@ -536,7 +530,7 @@ export class NhentaiSource extends BaseSource {
 			type: category,
 			status: 'Completed',
 			lang: language,
-			latestChapter: pageCount > 0 ? pageCount : 1,
+			latestChapter: 1,
 			description: [
 				g.title?.english &&
 					g.title.english !== title &&
