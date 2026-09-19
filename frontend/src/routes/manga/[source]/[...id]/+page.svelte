@@ -11,41 +11,115 @@
 
 	const VIEW_KEY = 'mikoroku-chapter-view';
 	const SORT_KEY = 'mikoroku-chapter-sort';
-	const INITIAL_CHAPTERS = 20;
 	const LOAD_MORE_STEP = 30;
 
 	let sortNewest = $state(true);
 	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
 	let bookmarked = $state(false);
-	let visibleCount = $state(INITIAL_CHAPTERS);
 	let loadMoreEl: HTMLElement | null = $state(null);
+	let loadingMore = $state(false);
 
-	let chapters = $derived(
-		[...(manga?.chapters || [])].sort((a, b) =>
-			sortNewest ? b.number - a.number : a.number - b.number
-		)
-	);
+	// Chapter list from server (already sliced). Append via /api/chapters.
+	let loadedChapters = $state<any[]>([]);
+	let chapterTotal = $state(0);
+	let chapterOffset = $state(0);
+	let hasMoreChapters = $state(false);
 
-	let displayedChapters = $derived(chapters.slice(0, visibleCount));
-	let hasMoreChapters = $derived(visibleCount < chapters.length);
-	let remainingChapters = $derived(Math.max(0, chapters.length - visibleCount));
+	let mangaIdPath = $derived((data as any).mangaId as string || manga?.id || '');
+	let selectedLang = $derived(((data as any).selectedLang as string) || 'all');
 
-	let lastMangaId = $state<string | undefined>(undefined);
+	let displayedChapters = $derived(loadedChapters);
+	let remainingChapters = $derived(Math.max(0, chapterTotal - loadedChapters.length));
+
+	// Sync from server load data when manga changes
 	$effect(() => {
-		const id = manga?.id as string | undefined;
-		if (id !== lastMangaId) {
-			lastMangaId = id;
-			visibleCount = INITIAL_CHAPTERS;
-		}
+		const m = manga;
+		const total = (data as any).chapterTotal as number | undefined;
+		const offset = (data as any).chapterOffset as number | undefined;
+		const more = (data as any).hasMoreChapters as boolean | undefined;
+		if (!m) return;
+		loadedChapters = [...(m.chapters || [])];
+		chapterTotal = total ?? loadedChapters.length;
+		chapterOffset = offset ?? loadedChapters.length;
+		hasMoreChapters = more ?? false;
+		sortNewest = true;
 	});
 
-	function loadMoreChapters() {
-		if (visibleCount >= chapters.length) return;
-		visibleCount = Math.min(visibleCount + LOAD_MORE_STEP, chapters.length);
+	type ChaptersApiResponse = {
+		chapters?: any[];
+		total?: number;
+		offset?: number;
+		limit?: number;
+		hasMore?: boolean;
+		sort?: string;
+	};
+
+	async function fetchChapterPage(offset: number, limit: number, newest: boolean, replace = false) {
+		if (!source || !mangaIdPath) return;
+		loadingMore = true;
+		try {
+			const params = new URLSearchParams({
+				source,
+				id: mangaIdPath,
+				lang: selectedLang,
+				offset: String(offset),
+				limit: String(limit),
+				sort: newest ? 'newest' : 'oldest'
+			});
+			const res = await fetch(`/api/chapters?${params}`);
+			if (!res.ok) throw new Error(await res.text());
+			const json = (await res.json()) as ChaptersApiResponse;
+			const batch = Array.isArray(json.chapters) ? json.chapters : [];
+			if (replace) {
+				loadedChapters = batch;
+			} else {
+				loadedChapters = [...loadedChapters, ...batch];
+			}
+			chapterTotal = typeof json.total === 'number' ? json.total : chapterTotal;
+			chapterOffset = offset + batch.length;
+			hasMoreChapters = Boolean(json.hasMore);
+		} catch (e) {
+			console.error('[load more chapters]', e);
+		} finally {
+			loadingMore = false;
+		}
 	}
 
-	function showAllChapters() {
-		visibleCount = chapters.length;
+	function loadMoreChapters() {
+		if (loadingMore || !hasMoreChapters) return;
+		fetchChapterPage(chapterOffset, LOAD_MORE_STEP, sortNewest, false);
+	}
+
+	async function showAllChapters() {
+		if (loadingMore || !hasMoreChapters) return;
+		// load remaining in chunks
+		loadingMore = true;
+		try {
+			while (hasMoreChapters) {
+				const params = new URLSearchParams({
+					source,
+					id: mangaIdPath,
+					lang: selectedLang,
+					offset: String(chapterOffset),
+					limit: String(LOAD_MORE_STEP),
+					sort: sortNewest ? 'newest' : 'oldest'
+				});
+				const res = await fetch(`/api/chapters?${params}`);
+				if (!res.ok) break;
+				const json = (await res.json()) as ChaptersApiResponse;
+				const batch = Array.isArray(json.chapters) ? json.chapters : [];
+				if (!batch.length) break;
+				loadedChapters = [...loadedChapters, ...batch];
+				chapterTotal = typeof json.total === 'number' ? json.total : chapterTotal;
+				chapterOffset = chapterOffset + batch.length;
+				hasMoreChapters = Boolean(json.hasMore);
+				if (!json.hasMore) break;
+			}
+		} catch (e) {
+			console.error('[show all chapters]', e);
+		} finally {
+			loadingMore = false;
+		}
 	}
 
 	function parseMeta(desc: string | undefined): Record<string, string> {
@@ -194,12 +268,15 @@
 
 	function toggleSort() {
 		sortNewest = !sortNewest;
-		visibleCount = INITIAL_CHAPTERS; // reset pagination when sort changes
 		try {
 			localStorage.setItem(SORT_KEY, String(sortNewest));
 		} catch {
 			/* ignore */
 		}
+		// re-fetch first page with new sort (server-side)
+		chapterOffset = 0;
+		hasMoreChapters = true;
+		fetchChapterPage(0, 20, sortNewest, true);
 	}
 
 	function chapterCover(chapter: any): string {
@@ -263,6 +340,7 @@
 		return () => window.removeEventListener('bookmarks-changed', onChange);
 	});
 
+	// Soft infinite scroll: only after user has scrolled a bit, load one batch at a time
 	$effect(() => {
 		const el = loadMoreEl;
 		if (!el || !hasMoreChapters) return;
@@ -271,10 +349,12 @@
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (!entries[0]?.isIntersecting || locked) return;
+				// Jangan auto-load di atas fold — user harus scroll dulu
 				if (window.scrollY < 80) return;
 				locked = true;
 				observer.unobserve(el);
 				loadMoreChapters();
+				// re-arm setelah DOM update (effect jalan lagi karena hasMore/offset berubah)
 			},
 			{ rootMargin: '120px', threshold: 0.15 }
 		);
@@ -424,7 +504,7 @@
 									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
 									<span
 										><strong class="detail-label">Chapter:</strong>
-										<span class="detail-value">{manga.chapters.length} Chapters</span></span
+										<span class="detail-value">{chapterTotal || manga.chapters?.length || 0} Chapters</span></span
 									>
 								</div>
 							{/if}
@@ -660,7 +740,7 @@
 					<div class="detail-divider h-px flex-1"></div>
 				</div>
 
-								{#if chapters.length}
+								{#if displayedChapters.length || chapterTotal}
 					{#if viewMode === 'grid-thumb'}
 						<div
 							class="grid w-full grid-cols-4 gap-2.5 pb-8 sm:grid-cols-5 md:grid-cols-6 md:gap-3.5 lg:grid-cols-8 lg:gap-4"
@@ -767,9 +847,10 @@
 							<button
 								type="button"
 								onclick={loadMoreChapters}
-								class="detail-load-more load-more-btn shrink-0 rounded-xl border px-5 py-2.5 text-sm font-semibold transition hover:border-blue-500/50"
+								disabled={loadingMore}
+								class="detail-load-more load-more-btn shrink-0 rounded-xl border px-5 py-2.5 text-sm font-semibold transition hover:border-blue-500/50 disabled:opacity-60"
 							>
-								Load more (+{Math.min(LOAD_MORE_STEP, remainingChapters)}) · {remainingChapters} left
+								{loadingMore ? 'Loading…' : `Load more (+${Math.min(LOAD_MORE_STEP, remainingChapters)}) · ${remainingChapters} left`}
 							</button>
 							<span class="load-more-line load-more-line-right" aria-hidden="true"></span>
 						</div>
@@ -778,7 +859,7 @@
 							onclick={showAllChapters}
 							class="detail-muted text-xs underline-offset-2 hover:underline"
 						>
-							Show all {chapters.length} chapters
+							Show all {chapterTotal} chapters
 						</button>
 					</div>
 				{/if}
@@ -842,6 +923,7 @@
 		border-color: rgba(59, 130, 246, 0.45);
 	}
 
+	/* garis lurus nyambung ke border tombol, ujung luar meruncing */
 	.load-more-row {
 		gap: 0;
 	}

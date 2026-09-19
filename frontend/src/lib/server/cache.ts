@@ -32,6 +32,20 @@ export async function getCached<T>(
 	return data;
 }
 
+export async function readCache<T>(
+	key: string,
+	kv?: KVNamespace | null
+): Promise<T | null> {
+	if (!kv) return null;
+	try {
+		const cached = await kv.get(key, 'json');
+		return cached !== null ? (cached as T) : null;
+	} catch (err) {
+		console.error('[KV] read failed:', key, err);
+		return null;
+	}
+}
+
 export async function deleteCache(key: string, kv?: KVNamespace | null): Promise<void> {
 	if (!kv) return;
 	try {
