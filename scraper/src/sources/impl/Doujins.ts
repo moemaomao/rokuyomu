@@ -289,32 +289,49 @@ export class DoujinsSource extends BaseSource {
 	}
 
 	async getLatestManga(
-		page: number,
-		_opts?: { lang?: string; type?: string }
-	): Promise<Manga[]> {
-		try {
-			const p = Math.max(1, Number(page) || 1);
-			const daySec = 86400;
-			const todayStart = Math.floor(Date.now() / 1000 / daySec) * daySec;
-			const end = todayStart - (p - 1) * daySec;
+	page: number,
+	_opts?: { lang?: string; type?: string }
+): Promise<Manga[]> {
+	try {
+		const p = Math.max(1, Number(page) || 1);
+		const need = p * this.PER_PAGE;
+		const daySec = 86400;
+		const todayStart = Math.floor(Date.now() / 1000 / daySec) * daySec;
+
+		const all: Manga[] = [];
+		const seen = new Set<string>();
+		const maxDays = 90; 
+
+		for (let daysBack = 0; daysBack < maxDays && all.length < need; daysBack++) {
+			const end = todayStart - daysBack * daySec;
 			const start = end - daySec;
 
 			const html = await this.fetchHtml(
 				`/folders?start=${start}&end=${end}`
 			);
-			const list = this.parseFoldersJson(html)
-				.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-				.slice(0, this.PER_PAGE);
+			const list = this.parseFoldersJson(html);
 
-			console.log(
-				`[doujins] latest page=${p} day=${start}-${end} → ${list.length} items`
-			);
-			return list;
-		} catch (e) {
-			console.error('[doujins] getLatestManga', e);
-			return [];
+			for (const m of list) {
+				if (seen.has(m.id)) continue;
+				seen.add(m.id);
+				all.push(m);
+			}
 		}
+
+		all.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+		const startIdx = (p - 1) * this.PER_PAGE;
+		const list = all.slice(startIdx, startIdx + this.PER_PAGE);
+
+		console.log(
+			`[doujins] latest page=${p} → ${list.length} items (scanned ${all.length} total)`
+		);
+		return list;
+	} catch (e) {
+		console.error('[doujins] getLatestManga', e);
+		return [];
 	}
+}
 
 	async searchManga(
 		query: string,

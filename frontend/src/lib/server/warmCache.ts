@@ -73,7 +73,7 @@ async function warmOneSource(
 		return { id: sourceId, ok: true, count: data.length };
 	} catch (err) {
 		console.error(`[Warm] ${sourceId} failed:`, err);
-		return { id: sourceId, ok: false, count: 0 };
+		return { id: sourceId, ok: false, count: 0 }; 
 	}
 }
 
