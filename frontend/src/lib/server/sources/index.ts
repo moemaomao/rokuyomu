@@ -13,6 +13,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'madarascans', name: 'Madara Scans' },
 	{ id: 'manhuagui', name: 'Manhuagui' },
 	{ id: 'jmcomic', name: 'Jmcomic' },
+	{ id: 'rawuwu', name: 'RawUwU' },
 	{ id: 'gdscans', name: 'GDScans' },
 	{ id: 'mangamura', name: 'MangaMura' },
 	{ id: 'ksgroupscans', name: 'KS Group Scans' },
