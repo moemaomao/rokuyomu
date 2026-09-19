@@ -11,16 +11,42 @@
 
 	const VIEW_KEY = 'mikoroku-chapter-view';
 	const SORT_KEY = 'mikoroku-chapter-sort';
+	const INITIAL_CHAPTERS = 20;
+	const LOAD_MORE_STEP = 30;
 
 	let sortNewest = $state(true);
 	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
 	let bookmarked = $state(false);
+	let visibleCount = $state(INITIAL_CHAPTERS);
+	let loadMoreEl: HTMLElement | null = $state(null);
 
 	let chapters = $derived(
 		[...(manga?.chapters || [])].sort((a, b) =>
 			sortNewest ? b.number - a.number : a.number - b.number
 		)
 	);
+
+	let displayedChapters = $derived(chapters.slice(0, visibleCount));
+	let hasMoreChapters = $derived(visibleCount < chapters.length);
+	let remainingChapters = $derived(Math.max(0, chapters.length - visibleCount));
+
+	let lastMangaId = $state<string | undefined>(undefined);
+	$effect(() => {
+		const id = manga?.id as string | undefined;
+		if (id !== lastMangaId) {
+			lastMangaId = id;
+			visibleCount = INITIAL_CHAPTERS;
+		}
+	});
+
+	function loadMoreChapters() {
+		if (visibleCount >= chapters.length) return;
+		visibleCount = Math.min(visibleCount + LOAD_MORE_STEP, chapters.length);
+	}
+
+	function showAllChapters() {
+		visibleCount = chapters.length;
+	}
 
 	function parseMeta(desc: string | undefined): Record<string, string> {
 		const out: Record<string, string> = {};
@@ -168,6 +194,7 @@
 
 	function toggleSort() {
 		sortNewest = !sortNewest;
+		visibleCount = INITIAL_CHAPTERS; // reset pagination when sort changes
 		try {
 			localStorage.setItem(SORT_KEY, String(sortNewest));
 		} catch {
@@ -234,6 +261,25 @@
 		};
 		window.addEventListener('bookmarks-changed', onChange);
 		return () => window.removeEventListener('bookmarks-changed', onChange);
+	});
+
+	$effect(() => {
+		const el = loadMoreEl;
+		if (!el || !hasMoreChapters) return;
+
+		let locked = false;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries[0]?.isIntersecting || locked) return;
+				if (window.scrollY < 80) return;
+				locked = true;
+				observer.unobserve(el);
+				loadMoreChapters();
+			},
+			{ rootMargin: '120px', threshold: 0.15 }
+		);
+		observer.observe(el);
+		return () => observer.disconnect();
 	});
 </script>
 
@@ -619,7 +665,7 @@
 						<div
 							class="grid w-full grid-cols-4 gap-2.5 pb-8 sm:grid-cols-5 md:grid-cols-6 md:gap-3.5 lg:grid-cols-8 lg:gap-4"
 						>
-							{#each chapters as chapter}
+							{#each displayedChapters as chapter}
 								<a
 									href="/reader/{source}{chapter.id}"
 									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105"
@@ -654,7 +700,7 @@
 						</div>
 					{:else if viewMode === 'grid-text'}
 						<div class="grid grid-cols-3 gap-2.5 pb-8 md:grid-cols-4 lg:grid-cols-6">
-							{#each chapters as chapter}
+							{#each displayedChapters as chapter}
 								<a
 									href="/reader/{source}{chapter.id}"
 									class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 hover:border-blue-500/40"
@@ -677,7 +723,7 @@
 						</div>
 					{:else}
 						<div class="flex flex-col gap-2.5 pb-8">
-							{#each chapters as chapter}
+							{#each displayedChapters as chapter}
 								<a
 									href="/reader/{source}{chapter.id}"
 									class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40"
@@ -711,6 +757,31 @@
 							{/each}
 						</div>
 					{/if}
+				{#if hasMoreChapters}
+					<div
+						bind:this={loadMoreEl}
+						class="flex flex-col items-center gap-3 pb-12 pt-4"
+					>
+						<div class="load-more-row flex w-full items-center">
+							<span class="load-more-line load-more-line-left" aria-hidden="true"></span>
+							<button
+								type="button"
+								onclick={loadMoreChapters}
+								class="detail-load-more load-more-btn shrink-0 rounded-xl border px-5 py-2.5 text-sm font-semibold transition hover:border-blue-500/50"
+							>
+								Load more (+{Math.min(LOAD_MORE_STEP, remainingChapters)}) · {remainingChapters} left
+							</button>
+							<span class="load-more-line load-more-line-right" aria-hidden="true"></span>
+						</div>
+						<button
+							type="button"
+							onclick={showAllChapters}
+							class="detail-muted text-xs underline-offset-2 hover:underline"
+						>
+							Show all {chapters.length} chapters
+						</button>
+					</div>
+				{/if}
 				{:else}
 					<p class="detail-muted py-12 text-center text-sm">Belum ada chapter</p>
 				{/if}
@@ -748,6 +819,76 @@
 	}
 	.detail-divider {
 		background: rgba(255, 255, 255, 0.35);
+	}
+	.detail-load-more {
+		background: rgba(255, 255, 255, 0.06);
+		border-color: rgba(255, 255, 255, 0.28);
+		color: #e4e4e7;
+		position: relative;
+		z-index: 1;
+	}
+	.detail-load-more:hover {
+		background: rgba(59, 130, 246, 0.15);
+		border-color: rgba(59, 130, 246, 0.55);
+		color: #fff;
+	}
+	:global(html.light) .detail-load-more {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.18);
+		color: #18181b;
+	}
+	:global(html.light) .detail-load-more:hover {
+		background: rgba(59, 130, 246, 0.12);
+		border-color: rgba(59, 130, 246, 0.45);
+	}
+
+	.load-more-row {
+		gap: 0;
+	}
+	.load-more-line {
+		flex: 1 1 0;
+		height: 1px;
+		min-width: 24px;
+		position: relative;
+		background: rgba(255, 255, 255, 0.28);
+	}
+	.load-more-line-left {
+		mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 100%);
+		-webkit-mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 100%);
+	}
+	.load-more-line-right {
+		mask-image: linear-gradient(to left, transparent 0%, #000 18%, #000 100%);
+		-webkit-mask-image: linear-gradient(to left, transparent 0%, #000 18%, #000 100%);
+	}
+	.load-more-line-left::before,
+	.load-more-line-right::after {
+		content: '';
+		position: absolute;
+		top: 50%;
+		width: 0;
+		height: 0;
+		border-style: solid;
+		transform: translateY(-50%);
+	}
+	.load-more-line-left::before {
+		left: 0;
+		border-width: 3px 8px 3px 0;
+		border-color: transparent rgba(255, 255, 255, 0.28) transparent transparent;
+	}
+	.load-more-line-right::after {
+		right: 0;
+		border-width: 3px 0 3px 8px;
+		border-color: transparent transparent transparent rgba(255, 255, 255, 0.28);
+	}
+
+	:global(html.light) .load-more-line {
+		background: rgba(0, 0, 0, 0.2);
+	}
+	:global(html.light) .load-more-line-left::before {
+		border-color: transparent rgba(0, 0, 0, 0.2) transparent transparent;
+	}
+	:global(html.light) .load-more-line-right::after {
+		border-color: transparent transparent transparent rgba(0, 0, 0, 0.2);
 	}
 	.detail-cover {
 		background: #18181b;
