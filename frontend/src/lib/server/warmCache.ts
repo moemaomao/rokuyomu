@@ -13,7 +13,36 @@ const WARM_SOURCES = [
     'hentaiera',
     'hitomi',
     'imhentai',
-    'asmhentai'
+    'asmhentai',
+	// diblokir Vercel → hybrid Worker
+	'klz9',
+	'rawkuma',
+	'athreascans',
+	'flamecomics',
+	'hentairead',
+	'kingcomix',
+	'manhuarmtl',
+	'onemanga',
+	'simplyhentai',
+	'weebcentral',
+	'ainzscans',
+	'bacakomik',
+	'bacami',
+	'crotpedia',
+	'doujinku',
+	'holodek',
+	'ikiru',
+	'kiryuu',
+	'komikindo',
+	'komikstation',
+	'lumos',
+	'luvyaa',
+	'manhwadesu',
+	'manhwaindo',
+	'ngomik',
+	'pixhentai',
+	'sasangeyou',
+	'siikomik'
 ];
 
 const LIST_CACHE_TTL = 60 * 45;

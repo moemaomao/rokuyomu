@@ -18,7 +18,34 @@ const PRIORITY_SOURCES = [
 	'weebcentral',
 	'asmhentai',
 	'ehentai',
-	'nhentai'
+	'nhentai',
+	// diblokir Vercel → hybrid Worker
+	'klz9',
+	'rawkuma',
+	'athreascans',
+	'hentairead',
+	'kingcomix',
+	'manhuarmtl',
+	'onemanga',
+	'simplyhentai',
+	'ainzscans',
+	'bacakomik',
+	'bacami',
+	'crotpedia',
+	'doujinku',
+	'holodek',
+	'ikiru',
+	'kiryuu',
+	'komikindo',
+	'komikstation',
+	'lumos',
+	'luvyaa',
+	'manhwadesu',
+	'manhwaindo',
+	'ngomik',
+	'pixhentai',
+	'sasangeyou',
+	'siikomik'
 ];
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
