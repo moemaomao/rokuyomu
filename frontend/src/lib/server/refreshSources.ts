@@ -26,11 +26,9 @@ const POPULAR_SOURCES = [
 	'hitomi',
 	'mangadex',
 	'asura',
-	'komiku',
 	'mangakakalot',
 	'nhentai',
 	'asmhentai',
-	'westmanga',
 	'madarascans',
 	'hentaiera',
 	'imhentai',
@@ -62,7 +60,9 @@ const POPULAR_SOURCES = [
 	'ngomik',
 	'pixhentai',
 	'sasangeyou',
-	'siikomik'
+	'siikomik',
+	'lectortmo',
+	'zonatmo'
 ] as const;
 
 export type RefreshResult = {
