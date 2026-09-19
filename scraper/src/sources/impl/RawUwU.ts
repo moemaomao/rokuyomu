@@ -6,17 +6,17 @@ import * as cheerio from 'cheerio';
  * RawUwU adapter (rawuwu.net)
  *
  * Domain  : https://rawuwu.net
- * Latest  : /spa/latest-manga?page=N   (JSON)
- * Search  : /spa/search?q={query}&page=N  (JSON)
- * Detail  : /spa/manga/{id}            (JSON)
- * Chapter : /read/{id}/chapter-{n}     (HTML, butuh cookie read=1)
+ * Latest  : /spa/latest-manga?page=N
+ * Search  : /spa/search?q={query}&page=N
+ * Detail  : /spa/manga/{id}
+ * Chapter : /read/{id}/chapter-{n}   (Cookie: read=1)
  *
  * ID format:
  *   manga   : "/raw/{id}"
  *   chapter : "/read/{id}/chapter-{n}"
  *
  * Bahasa default: ja (raw JP)
- * Image server  : https://s1.rawuwu.net/ + relative data-src
+ * Alt titles dari field manga_others_name (dipisah koma).
  */
 export class RawUwUSource extends BaseSource {
 	id = 'rawuwu';
@@ -25,37 +25,35 @@ export class RawUwUSource extends BaseSource {
 
 	private readonly DEFAULT_LANG = 'ja';
 	private readonly IMG_SERVER = 'https://s1.rawuwu.net/';
-	private readonly FALLBACK_IMG_SERVER = 'https://1748489710.b-cdn.net/';
 
 	// ── HTTP ─────────────────────────────────────────────────────────────────
 
-	private reqHeaders(extra: Record<string, string> = {}): Record<string, string> {
-	return {
-		'User-Agent':
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-		Accept: 'application/json, text/html, */*',
-		'Accept-Language': 'en-US,en;q=0.9',
-		Referer: `${this.baseUrl}/`,
-		Origin: this.baseUrl,
-		'X-Requested-With': 'XMLHttpRequest',
-		...extra
-	};
-}
+	private spaHeaders(extra: Record<string, string> = {}): Record<string, string> {
+		return {
+			...this.headers,
+			Accept: 'application/json, text/html, */*',
+			Referer: `${this.baseUrl}/`,
+			Origin: this.baseUrl,
+			'X-Requested-With': 'XMLHttpRequest',
+			...extra
+		};
+	}
 
-	private async getJson<T = any>(path: string): Promise<T> {
+	private async spaJson<T = unknown>(path: string): Promise<T> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const res = await fetch(url, { headers: this.reqHeaders() });
+		const res = await fetch(url, { headers: this.spaHeaders() });
 		if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
 		return res.json() as Promise<T>;
 	}
 
-	private async getChapterHtml(path: string): Promise<string> {
+	/** Chapter HTML butuh cookie read=1 (bypass gate "Continue") */
+	private async chapterHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
 		const res = await fetch(url, {
-	headers: this.reqHeaders({
-		Accept: 'text/html,application/xhtml+xml',
-		Cookie: 'read=1'
-	      })
+			headers: this.spaHeaders({
+				Accept: 'text/html,application/xhtml+xml',
+				Cookie: 'read=1'
+			})
 		});
 		if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
 		return res.text();
@@ -88,29 +86,40 @@ export class RawUwUSource extends BaseSource {
 
 	private preferFullCover(url: string): string {
 		if (!url) return '';
-		// thumb → full: /img/thumb/... → /img/...
-		return url.replace('/img/thumb/', '/img/').replace(/-300x\d+\./, '-482x482.');
+		return url
+			.replace('/img/thumb/', '/img/')
+			.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '-482x482$1$2');
 	}
 
-	private mapListItem(g: any): Manga | null {
+	/** Parse manga_others_name → daftar alt title bersih */
+	private parseAltTitles(raw?: string | null): string[] {
+		if (!raw) return [];
+		return String(raw)
+			.split(/[,，、;|／/]/)
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0)
+			.filter((s, i, arr) => arr.indexOf(s) === i);
+	}
+
+	private mapListItem(g: Record<string, unknown>): Manga | null {
 		const id = g?.manga_id;
-		if (!id) return null;
+		if (id == null) return null;
 
 		const title = String(g.manga_name || g.ja_manga_name || '').trim();
 		if (!title) return null;
 
 		const cover = this.preferFullCover(
-			g.manga_cover_img || g.manga_cover_img_full || ''
+			String(g.manga_cover_img || g.manga_cover_img_full || '')
 		);
 
-		const chs: any[] = Array.isArray(g.manga_chapters) ? g.manga_chapters : [];
+		const chs = Array.isArray(g.manga_chapters) ? g.manga_chapters : [];
 		const latest =
-			chs.length > 0
-				? String(chs[0].chapter_number ?? '')
+			chs.length > 0 && chs[0] && typeof chs[0] === 'object'
+				? String((chs[0] as { chapter_number?: unknown }).chapter_number ?? '')
 				: undefined;
 
 		return {
-			id: this.toMangaId(id),
+			id: this.toMangaId(id as number | string),
 			sourceId: this.id,
 			title,
 			cover,
@@ -129,7 +138,7 @@ export class RawUwUSource extends BaseSource {
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			const data = await this.getJson<{ manga_list?: any[] }>(
+			const data = await this.spaJson<{ manga_list?: Record<string, unknown>[] }>(
 				`/spa/latest-manga?page=${p}`
 			);
 			const list = (data?.manga_list || [])
@@ -152,7 +161,7 @@ export class RawUwUSource extends BaseSource {
 		if (!q) return this.getLatestManga(page, opts);
 
 		try {
-			const data = await this.getJson<{ manga_list?: any[] }>(
+			const data = await this.spaJson<{ manga_list?: Record<string, unknown>[] }>(
 				`/spa/search?q=${encodeURIComponent(q)}&page=${page}`
 			);
 			const list = (data?.manga_list || [])
@@ -173,31 +182,50 @@ export class RawUwUSource extends BaseSource {
 		const id = this.extractMangaNumericId(mangaId);
 		if (!id) throw new Error(`Invalid rawuwu id: ${mangaId}`);
 
-		const data = await this.getJson<{
-			detail?: any;
-			tags?: any[];
-			authors?: any[];
-			chapters?: any[];
+		const data = await this.spaJson<{
+			detail?: Record<string, unknown>;
+			tags?: { tag_name?: string }[];
+			authors?: { author_name?: string; name?: string }[];
+			chapters?: {
+				chapter_id?: string;
+				chapter_title?: string;
+				chapter_number?: number;
+				chapter_date_published?: string;
+			}[];
 		}>(`/spa/manga/${id}`);
 
 		const d = data?.detail || {};
 		const title = String(d.manga_name || '').trim() || `Manga ${id}`;
-		const cover =
-			d.manga_cover_img_full ||
-			d.manga_cover_img_normal ||
-			d.manga_cover_img ||
-			'';
+		const altTitles = this.parseAltTitles(
+			d.manga_others_name as string | undefined
+		);
+
+		const cover = this.preferFullCover(
+			String(
+				d.manga_cover_img_full ||
+					d.manga_cover_img_normal ||
+					d.manga_cover_img ||
+					''
+			)
+		);
 
 		const genres = (data?.tags || [])
-			.map((t: any) => String(t.tag_name || '').trim())
+			.map((t) => String(t.tag_name || '').trim())
 			.filter(Boolean);
 
 		const authors = (data?.authors || [])
-			.map((a: any) => String(a.author_name || a.name || '').trim())
+			.map((a) => String(a.author_name || a.name || '').trim())
 			.filter(Boolean);
 
-		// manga_status: false = ongoing, true = completed (dari observasi API)
 		const status = d.manga_status === true ? 'Completed' : 'Ongoing';
+
+		const synopsis = String(d.manga_description || '').trim();
+		const description = [
+			...altTitles.map((t) => `AltTitle: ${t}`),
+			synopsis
+		]
+			.filter(Boolean)
+			.join('\n');
 
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
@@ -205,6 +233,7 @@ export class RawUwUSource extends BaseSource {
 		for (const ch of data?.chapters || []) {
 			const num = ch.chapter_number;
 			if (num == null) continue;
+
 			const chId = this.toChapterId(id, num);
 			if (seen.has(chId)) continue;
 			seen.add(chId);
@@ -224,7 +253,6 @@ export class RawUwUSource extends BaseSource {
 			});
 		}
 
-		// newest first
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 
 		return {
@@ -237,7 +265,7 @@ export class RawUwUSource extends BaseSource {
 			latestChapter:
 				chapters.length > 0 ? String(chapters[0].number) : undefined,
 			lang: this.DEFAULT_LANG,
-			description: String(d.manga_description || '').trim(),
+			description,
 			authors,
 			genres,
 			chapters
@@ -246,18 +274,10 @@ export class RawUwUSource extends BaseSource {
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		try {
-			// /read/{id}/chapter-{n}
-			let path = chapterId.startsWith('/')
-				? chapterId
-				: `/${chapterId}`;
-			if (!path.startsWith('/read/')) {
-				// fallback kalau cuma dapat path aneh
-				path = path.startsWith('/') ? path : `/${path}`;
-			}
+			let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+			path = path.replace(/\/+$/, '');
 
-			const html = await this.getChapterHtml(
-				path.endsWith('/') ? path : path
-			);
+			const html = await this.chapterHtml(path);
 			const $ = cheerio.load(html);
 
 			const pages: string[] = [];
@@ -265,14 +285,13 @@ export class RawUwUSource extends BaseSource {
 
 			const push = (src?: string | null) => {
 				if (!src || src.startsWith('data:')) return;
-				let url = this.absImg(src.split('?')[0]);
+				const url = this.absImg(src.split('?')[0]);
 				if (!url || seen.has(url)) return;
 				if (/logo|icon|avatar|emoji/i.test(url)) return;
 				seen.add(url);
 				pages.push(url);
 			};
 
-			// Primary: .chapter-imgs img[data-src]
 			$('.chapter-imgs img, .page-wrapper img, .chapter-img img').each(
 				(_, img) => {
 					const $img = $(img);
@@ -284,7 +303,6 @@ export class RawUwUSource extends BaseSource {
 				}
 			);
 
-			// Fallback: relative data/... paths di HTML
 			if (pages.length === 0) {
 				const re =
 					/(?:data-src|src)="(data\/[^"]+\.(?:webp|jpg|jpeg|png))"/gi;
