@@ -10,6 +10,7 @@
 		LANG_FILTER_SOURCES
 	} from '$lib/utils/sourceMeta';
 	import { isBrokenSource } from '$lib/stores/brokenSources';
+	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 
 	type SourceItem = { id: string; name: string };
 
@@ -67,6 +68,10 @@
 	// ── State ────────────────────────────────────────────────────────────────
 	let searchInput = $state('');
 	let activeDropdown = $state<'source' | 'lang' | 'type' | null>(null);
+
+	// Age gate (R18 / NSFW)
+	let showAgeGate = $state(false);
+	let pendingSourceId = $state<string | null>(null);
 
 	// ── Derived ──────────────────────────────────────────────────────────────
 	let isMultiMode = $derived(!currentSource);
@@ -164,40 +169,64 @@
 		navigate(buildParams({ type: id }));
 	}
 
+	async function doSelectSource(id: string) {
+		setImpl(id);
+		selectedLang = 'all';
+		selectedType = 'all';
+		loading = true;
+		try {
+			await goto(`/?source=${id}`, {
+				invalidateAll: true,
+				keepFocus: true
+			});
+		} finally {
+			loading = false;
+		}
+	}
+
+	function confirmAge() {
+		setNsfwConfirmed(true);
+		showAgeGate = false;
+		const id = pendingSourceId;
+		pendingSourceId = null;
+		if (id) doSelectSource(id);
+	}
+
+	function cancelAgeGate() {
+		showAgeGate = false;
+		pendingSourceId = null;
+	}
+
 	async function selectSource(id: string) {
-  closeDropdown();
-  if (id === currentSource) return;
+		closeDropdown();
+		if (id === currentSource) return;
 
-  setImpl(id);
-  selectedLang = 'all';
-  selectedType = 'all';
-  loading = true;
-  try {
-    await goto(`/?source=${id}`, {
-      invalidateAll: true,
-      keepFocus: true
-    });
-  } finally {
-    loading = false;
-  }
-}
+		const meta = getSourceMeta(id);
+		if (meta.isR18 && !isNsfwConfirmed()) {
+			pendingSourceId = id;
+			showAgeGate = true;
+			return;
+		}
 
-async function selectMulti() {
-  closeDropdown();
-  selectedLang = 'all';
-  selectedType = 'all';
-  setMultiMode();
-  loading = true;
-  try {
-    await goto('/', {
-      invalidateAll: true,
-      keepFocus: true,
-      noScroll: false
-    });
-  } finally {
-    loading = false;
-  }
-}
+		await doSelectSource(id);
+	}
+
+	async function selectMulti() {
+		closeDropdown();
+		selectedLang = 'all';
+		selectedType = 'all';
+		setMultiMode();
+		loading = true;
+		try {
+			await goto('/', {
+				invalidateAll: true,
+				keepFocus: true,
+				noScroll: false
+			});
+		} finally {
+			loading = false;
+		}
+	}
 
 	function handleSearch(e: SubmitEvent) {
 		e.preventDefault();
@@ -485,6 +514,47 @@ async function selectMulti() {
 			Clear all
 		</button>
 	</p>
+{/if}
+
+
+<!-- Age Gate Modal (R18) -->
+{#if showAgeGate}
+	<div
+		class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="age-gate-title"
+	>
+		<div class="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+			<div class="mb-4 flex items-center justify-center">
+				<span class="rounded-lg bg-red-600 px-3 py-1 text-sm font-bold tracking-wide text-white">R18</span>
+			</div>
+			<h2 id="age-gate-title" class="mb-2 text-center text-lg font-bold text-white">
+				You must be 18+ to see it
+			</h2>
+			<p class="mb-6 text-center text-sm text-zinc-400">
+				This source contains adult / NSFW content.
+				<br />
+				By continuing you confirm that you are at least 18 years old.
+			</p>
+			<div class="flex flex-col gap-2 sm:flex-row">
+				<button
+					type="button"
+					onclick={cancelAgeGate}
+					class="flex-1 rounded-xl border border-zinc-600 bg-zinc-800 px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-[0.98]"
+				>
+					Cancel
+				</button>
+				<button
+					type="button"
+					onclick={confirmAge}
+					class="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-500 active:scale-[0.98]"
+				>
+					I am 18+
+				</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 <style>

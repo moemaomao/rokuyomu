@@ -4,6 +4,7 @@
 	import { getPreferredSources, setPreferredSources } from '$lib/stores/preferredSources';
 	import { getSourceMeta, groupSourcesByLang, LANG_LABELS } from '$lib/utils/sourceMeta';
 	import { isBrokenSource } from '$lib/stores/brokenSources';
+	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 	import type { PageData } from './$types';
 
 	const { data }: { data: PageData } = $props();
@@ -15,6 +16,9 @@
 	let saved = $state(false);
 	let showLimitToast = $state(false);
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	let showAgeGate = $state(false);
+	let pendingR18Id = $state<string | null>(null);
 
 	let grouped = $derived(groupSourcesByLang(data.sources));
 	let atLimit = $derived(preferred.length >= MAX_PREFERRED);
@@ -41,18 +45,41 @@
 		}, 2500);
 	}
 
-	function toggle(id: string) {
-		if (preferred.includes(id)) {
-			preferred = preferred.filter((s) => s !== id);
-			saved = false;
-			return;
-		}
+	function doToggleOn(id: string) {
 		if (preferred.length >= MAX_PREFERRED) {
 			flashLimitToast();
 			return;
 		}
 		preferred = [...preferred, id];
 		saved = false;
+	}
+
+	function confirmAge() {
+		setNsfwConfirmed(true);
+		showAgeGate = false;
+		const id = pendingR18Id;
+		pendingR18Id = null;
+		if (id) doToggleOn(id);
+	}
+
+	function cancelAgeGate() {
+		showAgeGate = false;
+		pendingR18Id = null;
+	}
+
+	function toggle(id: string) {
+		if (preferred.includes(id)) {
+			preferred = preferred.filter((s) => s !== id);
+			saved = false;
+			return;
+		}
+		const meta = getSourceMeta(id);
+		if (meta.isR18 && !isNsfwConfirmed()) {
+			pendingR18Id = id;
+			showAgeGate = true;
+			return;
+		}
+		doToggleOn(id);
 	}
 
 	function save() {
@@ -64,7 +91,6 @@
 	}
 
 	function selectAll() {
-		// Only fill up to max
 		const ids = data.sources.map((s) => s.id);
 		const next = [...preferred];
 		for (const id of ids) {
@@ -235,4 +261,45 @@
 			</div>
 		</div>
 	{/if}
+
+	<!-- Age Gate Modal (R18 preferred source) -->
+	{#if showAgeGate}
+		<div
+			class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="age-gate-title"
+		>
+			<div class="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+				<div class="mb-4 flex items-center justify-center">
+					<span class="rounded-lg bg-red-600 px-3 py-1 text-sm font-bold tracking-wide text-white">R18</span>
+				</div>
+				<h2 id="age-gate-title" class="mb-2 text-center text-lg font-bold text-white">
+					You must be 18+ to see it
+				</h2>
+				<p class="mb-6 text-center text-sm text-zinc-400">
+					This source contains adult / NSFW content.
+					<br />
+					By continuing you confirm that you are at least 18 years old.
+				</p>
+				<div class="flex flex-col gap-2 sm:flex-row">
+					<button
+						type="button"
+						onclick={cancelAgeGate}
+						class="flex-1 rounded-xl border border-zinc-600 bg-zinc-800 px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-[0.98]"
+					>
+						Cancel
+					</button>
+					<button
+						type="button"
+						onclick={confirmAge}
+						class="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-500 active:scale-[0.98]"
+					>
+						I am 18+
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 </div>

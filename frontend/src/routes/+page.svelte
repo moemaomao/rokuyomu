@@ -5,6 +5,8 @@
 	import { onMount } from 'svelte';
 	import { ChevronLeft, ChevronRight, Loader2, ArrowRight } from 'lucide-svelte';
 	import BrowseHeader from '$lib/components/BrowseHeader.svelte';
+	import { getSourceMeta } from '$lib/utils/sourceMeta';
+	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 
 	const { data }: { data: PageData } = $props();
 
@@ -27,6 +29,9 @@
 	let isDarkMode = $state(true);
 	let jumpPageInput = $state('');
 
+	let showAgeGate = $state(false);
+	let nsfwBlocked = $state(false);
+
 	let selectedLang = $state($page.url.searchParams.get('lang') || 'all');
 	let selectedType = $state($page.url.searchParams.get('type') || 'all');
 
@@ -37,17 +42,45 @@
 		loading = false;
 	});
 
+	function checkR18Gate() {
+		const src = currentSource || '';
+		if (src && getSourceMeta(src).isR18 && !isNsfwConfirmed()) {
+			nsfwBlocked = true;
+			showAgeGate = true;
+		} else {
+			nsfwBlocked = false;
+			showAgeGate = false;
+		}
+	}
+
+	function confirmAge() {
+		setNsfwConfirmed(true);
+		showAgeGate = false;
+		nsfwBlocked = false;
+	}
+
+	function cancelAgeGate() {
+		showAgeGate = false;
+		goto('/', { invalidateAll: true });
+	}
+
 	onMount(() => {
 		const updateTheme = () => {
 			isDarkMode = document.documentElement.classList.contains('dark');
 		};
 		updateTheme();
+		checkR18Gate();
 		const observer = new MutationObserver(updateTheme);
 		observer.observe(document.documentElement, {
 			attributes: true,
 			attributeFilter: ['class']
 		});
 		return () => observer.disconnect();
+	});
+
+	$effect(() => {
+		const _ = currentSource;
+		if (typeof window !== 'undefined') checkR18Gate();
 	});
 
 	function proxyImage(url: string, sourceId?: string): string {
@@ -233,6 +266,54 @@
 		bind:selectedType
 	/>
 
+	<!-- Age Gate Modal (direct URL R18) -->
+	{#if showAgeGate}
+		<div
+			class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="age-gate-title"
+		>
+			<div class="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+				<div class="mb-4 flex items-center justify-center">
+					<span class="rounded-lg bg-red-600 px-3 py-1 text-sm font-bold tracking-wide text-white">R18</span>
+				</div>
+				<h2 id="age-gate-title" class="mb-2 text-center text-lg font-bold text-white">
+					You must be 18+ to see it
+				</h2>
+				<p class="mb-6 text-center text-sm text-zinc-400">
+					This source contains adult / NSFW content.
+					<br />
+					By continuing you confirm that you are at least 18 years old.
+				</p>
+				<div class="flex flex-col gap-2 sm:flex-row">
+					<button
+						type="button"
+						onclick={cancelAgeGate}
+						class="flex-1 rounded-xl border border-zinc-600 bg-zinc-800 px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-[0.98]"
+					>
+						Go back
+					</button>
+					<button
+						type="button"
+						onclick={confirmAge}
+						class="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-500 active:scale-[0.98]"
+					>
+						I am 18+
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if nsfwBlocked}
+		<div class="flex min-h-[50vh] w-full flex-col items-center justify-center gap-3 py-20 text-center">
+			<span class="rounded-lg bg-red-600 px-3 py-1 text-sm font-bold text-white">R18</span>
+			<p class="text-sm font-medium {isDarkMode ? 'text-zinc-300' : 'text-zinc-600'}">
+				Content is hidden until you confirm you are 18 or older.
+			</p>
+		</div>
+	{:else}
 	<!-- Multi-source indicator -->
 	{#if isMulti}
 		<div
@@ -465,5 +546,7 @@
 				</form>
 			</div>
 		</div>
+	{/if}
+
 	{/if}
 </div>
