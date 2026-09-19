@@ -11,8 +11,12 @@ import * as cheerio from 'cheerio';
  *  Image Set=32, Cosplay=64, Asian Porn=128, Non-H=256, Western=512
  *  All = 1023
  *
- * - Homepage: 24 item + lang flag badge (Ch.1)
- * - Pages: collect imgkeys → API showpage (bukan scrape HTML per gambar)
+ * Rate-limit friendly:
+ * - delay antar request
+ * - retry + backoff pada 429/503/ban HTML
+ * - concurrency showpage rendah
+ * - enrich gdata list OFF by default
+ * - cookie dari env EHENTAI_COOKIE (jangan hardcode)
  */
 export class EhentaiSource extends BaseSource {
 	id = 'ehentai';
@@ -21,6 +25,11 @@ export class EhentaiSource extends BaseSource {
 	private apiUrl = 'https://api.e-hentai.org/api.php';
 	private readonly PER_PAGE = 24;
 	private static readonly CAT_ALL = 1023;
+	private static readonly MIN_DELAY_MS = 450;
+	private static readonly MAX_RETRIES = 3;
+	private static readonly SHOWPAGE_CONCURRENCY = 3;
+	private lastFetchAt = 0;
+
 	private static readonly CAT_BITS: Record<string, number> = {
 		misc: 1,
 		doujinshi: 2,
@@ -35,8 +44,15 @@ export class EhentaiSource extends BaseSource {
 		western: 512
 	};
 
+	/** Cookie dari env — set EHENTAI_COOKIE di scraper / Worker */
+	private cookie(): string {
+		const fromEnv =
+			(typeof process !== 'undefined' ? process.env?.EHENTAI_COOKIE : '') || '';
+		return String(fromEnv).trim();
+	}
+
 	protected getHeaders(): Record<string, string> {
-		return {
+		const h: Record<string, string> = {
 			'User-Agent':
 				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 			Accept:
@@ -44,23 +60,70 @@ export class EhentaiSource extends BaseSource {
 			'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
 			Referer: this.baseUrl + '/',
 			'Cache-Control': 'no-cache',
-			Pragma: 'no-cache',
-			Cookie: 'ipb_member_id=0205118; ipb_pass_hash=cead3ccaa9993b8ecc7074c5a7500c;'
+			Pragma: 'no-cache'
 		};
+		const c = this.cookie();
+		if (c) h.Cookie = c;
+		return h;
+	}
+
+	private async pace(): Promise<void> {
+		const now = Date.now();
+		const wait = EhentaiSource.MIN_DELAY_MS - (now - this.lastFetchAt);
+		if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+		this.lastFetchAt = Date.now();
+	}
+
+	private isBannedHtml(html: string): boolean {
+		const s = html.slice(0, 5000).toLowerCase();
+		return (
+			s.includes('your ip address has been temporarily banned') ||
+			s.includes('this ip address has been banned') ||
+			s.includes('exceeded the maximum number of pages') ||
+			(s.includes('banned') && s.includes('e-hentai'))
+		);
 	}
 
 	protected override async fetchHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const res = await fetch(url, {
-			headers: {
-				...this.getHeaders(),
-				Referer: this.baseUrl + '/'
+		let lastErr: Error | null = null;
+
+		for (let attempt = 0; attempt < EhentaiSource.MAX_RETRIES; attempt++) {
+			await this.pace();
+			try {
+				const res = await fetch(url, {
+					headers: {
+						...this.getHeaders(),
+						Referer: this.baseUrl + '/'
+					}
+				});
+
+				if (res.status === 429 || res.status === 503) {
+					const backoff = 1200 * Math.pow(2, attempt) + Math.random() * 400;
+					await new Promise((r) => setTimeout(r, backoff));
+					lastErr = new Error(`EH rate limited ${res.status}`);
+					continue;
+				}
+
+				if (!res.ok) {
+					throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+				}
+
+				const html = await res.text();
+				if (this.isBannedHtml(html)) {
+					const backoff = 2500 * Math.pow(2, attempt);
+					await new Promise((r) => setTimeout(r, backoff));
+					lastErr = new Error('EH IP temporarily banned');
+					continue;
+				}
+				return html;
+			} catch (e: any) {
+				lastErr = e instanceof Error ? e : new Error(String(e));
+				const backoff = 800 * Math.pow(2, attempt);
+				await new Promise((r) => setTimeout(r, backoff));
 			}
-		});
-		if (!res.ok) {
-			throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
 		}
-		return res.text();
+		throw lastErr || new Error(`Failed to fetch ${url}`);
 	}
 
 	private absUrl(href: string): string {
@@ -127,9 +190,9 @@ export class EhentaiSource extends BaseSource {
 			dutch: 'nl',
 			arabic: 'ar',
 			turkish: 'tr',
-			'日本語': 'ja',
-			'한국어': 'ko',
-			'中文': 'zh',
+			日本語: 'ja',
+			한국어: 'ko',
+			中文: 'zh',
 			ja: 'ja',
 			en: 'en',
 			'en-us': 'en',
@@ -201,6 +264,7 @@ export class EhentaiSource extends BaseSource {
 	}
 
 	private async postApi<T = any>(body: Record<string, unknown>): Promise<T> {
+		await this.pace();
 		const res = await fetch(this.apiUrl, {
 			method: 'POST',
 			headers: {
@@ -210,6 +274,23 @@ export class EhentaiSource extends BaseSource {
 			},
 			body: JSON.stringify(body)
 		});
+
+		if (res.status === 429 || res.status === 503) {
+			await new Promise((r) => setTimeout(r, 2000 + Math.random() * 500));
+			await this.pace();
+			const retry = await fetch(this.apiUrl, {
+				method: 'POST',
+				headers: {
+					...this.getHeaders(),
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body: JSON.stringify(body)
+			});
+			if (!retry.ok) throw new Error(`EH API ${retry.status}`);
+			return retry.json();
+		}
+
 		if (!res.ok) throw new Error(`EH API ${res.status}`);
 		return res.json();
 	}
@@ -348,21 +429,14 @@ export class EhentaiSource extends BaseSource {
 		startPath: string,
 		page: number
 	): Promise<cheerio.CheerioAPI> {
-		const p = Math.max(1, page);
+		const p = Math.max(1, Math.min(page, 10)); // cap walk depth
 		let path = startPath;
 		let html = await this.fetchHtml(path);
 		let $ = cheerio.load(html);
 
-		console.log(
-			`[ehentai] fetchListPage "${path}" → ${html.length} bytes | has itg: ${html.includes('table.itg')}`
-		);
-
 		for (let i = 1; i < p; i++) {
 			const next = this.getNextCursor($);
-			if (!next) {
-				console.warn(`[ehentai] no next cursor at page ${i}`);
-				break;
-			}
+			if (!next) break;
 
 			const base = startPath.includes('?')
 				? startPath.replace(/&?next=\d+/g, '').replace(/\?$/, '')
@@ -371,17 +445,13 @@ export class EhentaiSource extends BaseSource {
 			path = `${base}${join}next=${next}`;
 			html = await this.fetchHtml(path);
 			$ = cheerio.load(html);
-
-			console.log(
-				`[ehentai] page ${i + 1} → ${html.length} bytes | has itg: ${html.includes('table.itg')}`
-			);
 		}
 		return $;
 	}
 
 	async getLatestManga(
 		page: number,
-		opts?: { lang?: string; type?: string }
+		opts?: { lang?: string; type?: string; enrich?: boolean }
 	): Promise<Manga[]> {
 		try {
 			let query = '';
@@ -391,11 +461,12 @@ export class EhentaiSource extends BaseSource {
 			const start = this.buildListPath(query || undefined, opts?.type);
 			const $ = await this.fetchListPage(start, page);
 			let list = this.parseList($);
-			list = await this.enrichWithGdata(list);
 
-			console.log(
-				`[ehentai] getLatestManga page=${page} → ${list.length} (slice ${this.PER_PAGE})`
-			);
+			// gdata enrich mahal → default OFF (list/warm)
+			if (opts?.enrich) {
+				list = await this.enrichWithGdata(list);
+			}
+
 			return list.slice(0, this.PER_PAGE);
 		} catch (e) {
 			console.error('[ehentai] getLatestManga error:', e);
@@ -405,7 +476,7 @@ export class EhentaiSource extends BaseSource {
 
 	async searchManga(
 		query: string,
-		opts?: { page?: number; lang?: string; type?: string }
+		opts?: { page?: number; lang?: string; type?: string; enrich?: boolean }
 	): Promise<Manga[]> {
 		const q = (query || '').trim();
 		const page = Math.max(1, opts?.page || 1);
@@ -419,9 +490,9 @@ export class EhentaiSource extends BaseSource {
 			const start = this.buildListPath(search, opts?.type);
 			const $ = await this.fetchListPage(start, page);
 			let list = this.parseList($);
-			list = await this.enrichWithGdata(list);
-
-			console.log(`[ehentai] searchManga "${q}" page=${page} → ${list.length}`);
+			if (opts?.enrich) {
+				list = await this.enrichWithGdata(list);
+			}
 			return list.slice(0, this.PER_PAGE);
 		} catch (e) {
 			console.error('[ehentai] searchManga error:', e);
@@ -627,16 +698,16 @@ export class EhentaiSource extends BaseSource {
 
 		collect($0);
 
-		const MAX_THUMB_PAGES = 50;
+		const thumbPagesNeeded =
+			totalImages > 0 ? Math.ceil(totalImages / 40) : 8;
+		const MAX_THUMB_PAGES = Math.min(20, Math.max(1, thumbPagesNeeded));
+
 		for (let p = 1; p < MAX_THUMB_PAGES; p++) {
 			if (totalImages > 0 && imgkeys.size >= totalImages) break;
 
 			try {
 				const html = await this.fetchHtml(`${path}?p=${p}`);
 				const added = collect(cheerio.load(html));
-				console.log(
-					`[ehentai] thumb p=${p} +${added} (total ${imgkeys.size}/${totalImages || '?'})`
-				);
 				if (added === 0) break;
 			} catch (e) {
 				console.warn(`[ehentai] thumb p=${p} failed`, e);
@@ -644,9 +715,6 @@ export class EhentaiSource extends BaseSource {
 			}
 		}
 
-		console.log(
-			`[ehentai] collected ${imgkeys.size} imgkeys (expected ${totalImages || '?'})`
-		);
 		if (!imgkeys.size) return [];
 
 		const firstPage = Math.min(...imgkeys.keys());
@@ -658,13 +726,13 @@ export class EhentaiSource extends BaseSource {
 		const showkey = sk?.[1] || '';
 
 		if (!showkey) {
-			console.error('[ehentai] showkey not found — cookie mungkin expired');
+			console.error('[ehentai] showkey not found — set EHENTAI_COOKIE or cookie expired');
 			return [];
 		}
 
 		const entries = [...imgkeys.entries()].sort((a, b) => a[0] - b[0]);
 		const images: string[] = new Array(entries.length).fill('');
-		const CONCURRENCY = 10;
+		const CONCURRENCY = EhentaiSource.SHOWPAGE_CONCURRENCY;
 
 		const resolve = async (page: number, imgkey: string, idx: number) => {
 			try {
@@ -696,8 +764,6 @@ export class EhentaiSource extends BaseSource {
 			);
 		}
 
-		const result = images.filter(Boolean);
-		console.log(`[ehentai] getChapterPages → ${result.length}/${entries.length}`);
-		return result;
+		return images.filter(Boolean);
 	}
 }

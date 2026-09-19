@@ -9,7 +9,6 @@ const WARM_SOURCES = [
 	'westmanga',
 	'mangadex',
 	'nhentai',
-    'ehentai',
     'hentaiera',
     'hitomi',
     'imhentai',

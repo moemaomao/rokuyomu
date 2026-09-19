@@ -17,7 +17,6 @@ const PRIORITY_SOURCES = [
 	'flamecomics',
 	'weebcentral',
 	'asmhentai',
-	'ehentai',
 	'nhentai',
 	// diblokir Vercel → hybrid Worker
 	'klz9',
