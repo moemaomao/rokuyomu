@@ -29,6 +29,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	asurascans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	flamecomics: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	weloma: { flag: 'jp', lang: 'JP', isR18: false, color: 'bg-blue-500' },
+	mangamura: { flag: 'jp', lang: 'JP', isR18: false, color: 'bg-blue-500' },
 	hitomi: { flag: 'un', lang: 'Multi', isR18: true, color: 'bg-pink-600' },
 	asmhentai: { flag: 'un', lang: 'Multi', isR18: true, color: 'bg-pink-600' },
 	hitomila: { flag: 'un', lang: 'Multi', isR18: true, color: 'bg-pink-600' },

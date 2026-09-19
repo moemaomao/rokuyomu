@@ -91,11 +91,13 @@ import { JmcomicSource } from './impl/Jmcomic';
 import { GDScansSource } from './impl/GDScans';
 import { KSGroupScansSource } from './impl/KSGroupScans';
 import { VortexScansSource } from './impl/VortexScans';
+import { MangaMuraSource } from './impl/MangaMura';
 import type { IMangaSource } from './types';
 
 
 const sources: Record<string, IMangaSource> = {
     gdscans: new GDScansSource(),
+    mangamura: new MangaMuraSource(),
     vortexscans: new VortexScansSource(),
     ksgroupscans: new KSGroupScansSource(),
     madarascans: new MadaraScansSource(),
