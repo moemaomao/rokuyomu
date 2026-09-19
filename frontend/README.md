@@ -1,176 +1,113 @@
-# Rokuyomu (Mikoroku v2)
+# Rokuyomu — Frontend
 
-Multi-source manga & comics reader — **SvelteKit** on **Cloudflare Workers**, scraping via **Node microservice** (+ hybrid untuk source yang diblokir Vercel).
+SvelteKit app deployed as **Cloudflare Worker**. UI + KV cache + hybrid scrape client.
 
-Aggregates latest updates and search from many sources (manga, manhwa, manhua, doujin, hentai, dll.) in one place.
-
-**Live:** [rokuyomu](https://rokuyomu.mikoroku.workers.dev) · Repo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu)
+Repo root: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · package ini: `frontend/`
 
 ---
 
-## Features
+## Role
 
-- Multi-source browsing & search
-- Manga detail (cover, description, genres, chapter list)
-- Chapter reader
-- Bookmark & reading history (local / Firebase sync)
-- Language / type filters
-- Cloudflare Workers KV cache (`MIKOROKU_CACHE`)
-- Cron warm/sync cache
-- Dark / light theme
-- Report broken source / chapter
-- **Hybrid scrape:** source yang diblokir IP Vercel dijalankan di Cloudflare Worker
+| Tugas | Detail |
+|-------|--------|
+| UI | Browse, search, detail, reader, bookmark, history, settings |
+| Cache | Workers KV `MIKOROKU_CACHE` |
+| Proxy data | `scraperClient.ts` → scraper Node **atau** parse lokal (hybrid) |
+| Cron | Warm / sync cache tiap 20 menit |
+
+**Tidak** menyimpan file manga. Hanya agregasi metadata + URL halaman dari source eksternal.
 
 ---
 
-## Architecture
+## Architecture (hybrid)
 
 ```
-UI
- └─ Cloudflare Worker (SvelteKit)
-      ├─ KV cache (browse / manga / pages)
-      └─ scraperClient (hybrid)
-           ├─ source ∈ WORKER_SOURCE_IDS  → parse lokal di Worker (Cheerio)
-           └─ source lainnya              → HTTP JSON ke scraper Node (Vercel)
+Browser
+  → CF Worker (SvelteKit)
+       → KV hit?  → return cache
+       → KV miss  → scraperClient
+            ├─ source ∈ WORKER_SOURCE_IDS  → workerSources (Cheerio di Worker)
+            └─ else                        → GET {SCRAPER_BASE_URL}/...
 ```
 
-| Layer | Role | Deploy |
-|-------|------|--------|
-| **frontend/** | UI + thin proxy + KV + hybrid Worker sources | Cloudflare Workers |
-| **scraper/** | Express + Cheerio, ~80 source adapters | Vercel (atau Render/Koyeb/Fly) |
-
-Worker free tier tetap aman: mayoritas request hanya `fetch()` JSON. Cheerio di Worker **hanya** untuk source yang gagal dari IP Vercel.
+Source yang diblokir outbound IP **Vercel** didaftarkan di `src/lib/server/workerSources/`.  
+Source lain selalu ke microservice `scraper/` (biasanya Vercel).
 
 ---
 
-## Tech Stack
+## Tech
 
-- **SvelteKit** + Svelte 5 + TypeScript
-- **Tailwind CSS** v4
-- **Cloudflare Workers** + Workers KV + Cron Triggers
-- **Express** + **Cheerio** (scraper microservice)
-- **Firebase** (auth / sync opsional)
-- **pnpm** (frontend) · **npm** (scraper)
+- SvelteKit 2 + Svelte 5 + TypeScript
+- Tailwind CSS v4
+- `@sveltejs/adapter-cloudflare`
+- Cheerio (hanya untuk `workerSources`)
+- Firebase (auth / sync opsional)
+- pnpm
 
 ---
 
-## Project Structure
+## Structure
 
 ```
-rokuyomu/
-├── frontend/                         # SvelteKit → Cloudflare Worker
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── components/
-│   │   │   ├── server/
-│   │   │   │   ├── sources/          # Metadata source saja (light registry)
-│   │   │   │   ├── workerSources/    # Adapter hybrid (source diblokir Vercel)
-│   │   │   │   │   ├── index.ts      # WORKER_SOURCE_IDS + registry
-│   │   │   │   │   ├── BaseSource.ts
-│   │   │   │   │   ├── types.ts
-│   │   │   │   │   └── impl/         # Copy adapter dari scraper
-│   │   │   │   ├── scraperClient.ts  # Hybrid routing
-│   │   │   │   ├── cache.ts
-│   │   │   │   ├── warmCache.ts
-│   │   │   │   └── syncSources.ts
-│   │   │   ├── stores/
-│   │   │   └── utils/
-│   │   └── routes/
-│   │       ├── +page.*               # Homepage
-│   │       ├── manga/[source]/[...id]/
-│   │       ├── reader/[source]/[...id]/
-│   │       ├── bookmark/ history/ settings/ report/
-│   │       └── api/
-│   ├── wrangler.jsonc                # SCRAPER_BASE_URL, KV, cron
-│   └── package.json
-│
-└── scraper/                          # Node microservice
-    ├── src/
-    │   ├── index.ts                  # Express API
-    │   └── sources/
-    │       ├── index.ts              # Full registry
-    │       ├── BaseSource.ts
-    │       └── impl/                 # Semua adapter (~80)
-    ├── api/index.js                  # Bundle esbuild (Vercel)
-    └── package.json
+frontend/
+├── src/
+│   ├── lib/
+│   │   ├── components/
+│   │   ├── server/
+│   │   │   ├── sources/           # Light registry (id + name only)
+│   │   │   ├── workerSources/     # Hybrid adapters (blocked-on-Vercel)
+│   │   │   │   ├── index.ts       # WORKER_SOURCE_IDS
+│   │   │   │   ├── BaseSource.ts
+│   │   │   │   ├── types.ts
+│   │   │   │   └── impl/
+│   │   │   ├── scraperClient.ts   # Hybrid routing
+│   │   │   ├── cache.ts
+│   │   │   ├── warmCache.ts
+│   │   │   ├── syncSources.ts
+│   │   │   └── ...
+│   │   ├── stores/
+│   │   └── utils/
+│   ├── routes/
+│   │   ├── +page.*                # Home / browse
+│   │   ├── manga/[source]/[...id]/
+│   │   ├── reader/[source]/[...id]/
+│   │   ├── bookmark/ history/ settings/ report/
+│   │   ├── about/ privacy/
+│   │   └── api/pages | proxy | warm | cron
+│   └── hooks.server.ts
+├── wrangler.jsonc
+├── package.json
+└── svelte.config.js
 ```
 
 ---
 
-## Prerequisites
+## Setup
+
+### Prerequisites
 
 - Node.js 20+
-- pnpm 9+ (frontend)
-- npm (scraper)
+- pnpm 9+
 - Cloudflare account (Workers + KV)
-- Akun Vercel / Render (scraper)
+- Scraper running (lokal atau production URL)
 
----
-
-## Development
-
-### 1. Scraper (terminal 1)
-
-```bash
-cd scraper
-npm install
-npx tsx src/index.ts
-# → http://localhost:3000
-```
-
-Opsional — tambah script di `scraper/package.json`:
-
-```json
-"scripts": {
-  "dev": "tsx src/index.ts",
-  "start": "tsx src/index.ts"
-}
-```
-
-Health check: `curl http://localhost:3000/health`
-
-### 2. Frontend (terminal 2)
+### Install
 
 ```bash
 cd frontend
 pnpm install
 ```
 
-Buat `frontend/.env`:
+### Env
+
+**Lokal** — `frontend/.env`:
 
 ```env
 SCRAPER_BASE_URL=http://localhost:3000
+# SCRAPER_API_KEY=optional
 ```
 
-```bash
-pnpm dev
-# → http://localhost:5173 (atau port Vite)
-```
-
-### Scripts frontend
-
-| Command | Keterangan |
-|---------|------------|
-| `pnpm dev` | Dev server |
-| `pnpm build` | Build + append cron |
-| `pnpm preview` | Build + `wrangler dev` |
-| `pnpm check` | svelte-check |
-| `pnpm lint` / `pnpm format` | ESLint / Prettier |
-| `pnpm deploy` | Deploy ke Cloudflare Workers |
-
----
-
-## Production deploy
-
-### Scraper → Vercel
-
-- Root directory: `scraper`
-- Build: `npm run vercel-build` (esbuild → `api/index.js`)
-- Catat URL, contoh: `https://rokuyomu.vercel.app`
-
-### Frontend → Cloudflare
-
-`frontend/wrangler.jsonc` (vars):
+**Production** — `wrangler.jsonc` → `vars`:
 
 ```jsonc
 "vars": {
@@ -178,73 +115,74 @@ pnpm dev
 }
 ```
 
+Opsional: `SCRAPER_API_KEY` (harus sama dengan scraper).
+
+### Dev
+
 ```bash
-cd frontend
+# terminal lain: scraper harus hidup di :3000
+pnpm dev
+```
+
+### Scripts
+
+| Command | Keterangan |
+|---------|------------|
+| `pnpm dev` | Vite dev server |
+| `pnpm build` | Build + append cron handler |
+| `pnpm preview` | Build + `wrangler dev` |
+| `pnpm check` | Type / svelte-check |
+| `pnpm lint` / `pnpm format` | Lint / format |
+| `pnpm deploy` | Build + deploy Cloudflare Worker |
+| `pnpm cf-typegen` | Generate Worker types |
+
+---
+
+## Hybrid: tambah source diblokir Vercel
+
+1. Copy adapter dari scraper:
+   ```bash
+   cp ../scraper/src/sources/impl/Xxx.ts \
+      src/lib/server/workerSources/impl/Xxx.ts
+   ```
+2. Register di `src/lib/server/workerSources/index.ts`:
+   ```ts
+   import { XxxSource } from './impl/Xxx';
+   const workerSources = {
+     xxx: new XxxSource(),
+     // ...
+   };
+   ```
+3. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
+4. `pnpm deploy`.
+
+Jaga jumlah Worker source tetap terbatas (CPU free tier ~10 ms). Mayoritas source tetap di scraper Node.
+
+---
+
+## KV & Cron
+
+- Binding: `MIKOROKU_CACHE`
+- Cron: `*/20 * * * *` (`wrangler.jsonc` → `triggers.crons`)
+- Key contoh: `browse:{sourceId}:p1:q:lall:tall:lim24`
+
+Setelah ubah hybrid, cache lama bisa masih kosong/error sampai TTL habis atau key dihapus di dashboard Cloudflare KV.
+
+---
+
+## Deploy
+
+```bash
 pnpm deploy
 ```
 
-Opsional: `SCRAPER_API_KEY` (sama di scraper & frontend).
-
----
-
-## Hybrid sources (diblokir Vercel)
-
-Beberapa situs memblokir outbound IP Vercel. Source tersebut di-register di:
-
-`frontend/src/lib/server/workerSources/`
-
-### Alur
-
-```
-source ∈ WORKER_SOURCE_IDS  → Cheerio di CF Worker
-source lainnya              → scraper Vercel
-```
-
-### Menambah source blocked
-
-1. Copy adapter:
-   ```bash
-   cp scraper/src/sources/impl/Xxx.ts \
-      frontend/src/lib/server/workerSources/impl/Xxx.ts
-   ```
-2. Register di `workerSources/index.ts` (`import` + entry di `workerSources`).
-3. Pastikan `cheerio` ada di `frontend/package.json`.
-4. `pnpm deploy`.
-
-Jangan masukkan semua source ke Worker — jaga CPU free tier. Target: hanya yang benar-benar gagal di Vercel.
-
-### Warm / sync cache
-
-`warmCache.ts` & `syncSources.ts` memanggil `remoteLatest` (hybrid-aware).  
-Masukkan id source blocked ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
-
-Cron: `*/20 * * * *` (lihat `wrangler.jsonc`).
-
----
-
-## Scraper API
-
-| Endpoint | Keterangan |
-|----------|------------|
-| `GET /health` | Health check |
-| `GET /sources` | Daftar source |
-| `GET /:sourceId/latest?page&lang&type&q` | Latest / search |
-| `GET /:sourceId/manga/*` | Detail manga |
-| `GET /:sourceId/chapter/*` | Halaman chapter |
-
-Header opsional: `x-api-key` jika `SCRAPER_API_KEY` di-set.
+Pastikan KV namespace id di `wrangler.jsonc` cocok dengan akun Cloudflare kamu.
 
 ---
 
 ## Catatan
 
-- **KV** menyimpan hasil browse/detail/pages — setelah ganti hybrid, tunggu TTL atau hapus key lama di dashboard Cloudflare.
-- Bundle `scraper/api/index.js` untuk Vercel; jangan diedit manual; exclude dari `tsconfig` (`"exclude": ["api"]`).
-- Free tier Render/Koyeb bisa sleep — ping `/health` berkala jika scraper dipindah ke sana.
-- Frontend source registry = metadata only; scraping penuh di scraper atau `workerSources`.
-
----
-
-## License
-
-Lihat `frontend/LICENSE.txt`.
+- `sources/index.ts` = metadata saja (tanpa Cheerio).
+- `scraperClient.ts` = satu pintu data untuk page server & API.
+- Bundle Worker membesar jika terlalu banyak file di `workerSources/impl` — hanya copy yang perlu.
+- Parent README: `../README.md`
