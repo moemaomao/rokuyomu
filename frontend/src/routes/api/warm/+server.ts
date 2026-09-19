@@ -1,13 +1,17 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { warmPopularSources } from '$lib/server/warmCache';
+import { refreshPopularSources } from '$lib/server/refreshSources';
 
 const WARM_SECRET = 'fuckyoufuckyoufuckyoufuckyoufuckyou';
 
-export const POST: RequestHandler = async ({ url, locals, request }) => {
-	const secret = url.searchParams.get('secret') || request.headers.get('x-warm-secret');
+function authorize(url: URL, request: Request): boolean {
+	const secret =
+		url.searchParams.get('secret') || request.headers.get('x-warm-secret');
+	return secret === WARM_SECRET;
+}
 
-	if (secret !== WARM_SECRET) {
+export const POST: RequestHandler = async ({ url, locals, request }) => {
+	if (!authorize(url, request)) {
 		throw error(401, 'Unauthorized');
 	}
 
@@ -16,26 +20,34 @@ export const POST: RequestHandler = async ({ url, locals, request }) => {
 		throw error(500, 'KV not available');
 	}
 
-	const results = await warmPopularSources(kv);
+	const forceParam = url.searchParams.get('force');
+	const force = forceParam === '0' || forceParam === 'false' ? false : true;
+
+	const report = await refreshPopularSources(kv, { force });
 
 	return json({
 		ok: true,
-		warmed: results.filter((r) => r.ok).length,
-		total: results.length,
-		details: results,
-		at: new Date().toISOString()
+		force: report.force,
+		warmed: report.success,
+		skipped: report.skipped,
+		failed: report.failed,
+		total: report.total,
+		details: report.results,
+		at: report.syncedAt
 	});
 };
 
-export const GET: RequestHandler = async ({ url, locals }) => {
-	const secret = url.searchParams.get('secret');
-	if (secret !== WARM_SECRET) {
+export const GET: RequestHandler = async ({ url, locals, request }) => {
+	if (!authorize(url, request)) {
 		throw error(401, 'Unauthorized');
 	}
 
 	const kv = locals.kv;
 	if (!kv) throw error(500, 'KV not available');
 
-	const results = await warmPopularSources(kv);
-	return json({ ok: true, results });
+	const forceParam = url.searchParams.get('force');
+	const force = forceParam === '0' || forceParam === 'false' ? false : true;
+
+	const report = await refreshPopularSources(kv, { force });
+	return json({ ok: true, ...report });
 };
