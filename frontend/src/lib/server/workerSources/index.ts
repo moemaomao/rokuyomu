@@ -49,13 +49,9 @@ import { NgomikSource } from './impl/Ngomik';
 import { PixHentaiSource } from './impl/PixHentai';
 import { SasangeyouSource } from './impl/Sasangeyou';
 import { SiikomikSource } from './impl/Siikomik';
-import { LectorTmoSource } from './impl/LectorTmo';
-import { ZonaTmoSource } from './impl/ZonaTmo';
 
 const workerSources: Record<string, IMangaSource> = {
 	klz9: new Klz9Source(),
-	zonatmo: new ZonaTmoSource(),
-	lectortmo: new LectorTmoSource(),
 	rawkuma: new RawkumaSource(),
 	athreascans: new AthreaScansSource(),
 	flamecomics: new FlameComicsSource(),

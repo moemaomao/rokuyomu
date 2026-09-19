@@ -111,7 +111,6 @@ export function getSourceName(sourceId: string): string {
 	return SOURCES.find((s) => s.id === sourceId)?.name ?? sourceId;
 }
 
-/** Untuk syncSources / warmCache */
 export function getAllSourceIds(): string[] {
 	return SOURCES.map((s) => s.id);
 }
