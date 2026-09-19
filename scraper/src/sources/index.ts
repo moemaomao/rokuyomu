@@ -88,10 +88,16 @@ import { KumopoiSource } from './impl/Kumopoi';
 import { MadaraScansSource } from './impl/MadaraScans';
 import { ManhuaguiSource } from './impl/Manhuagui';
 import { JmcomicSource } from './impl/Jmcomic';
+import { GDScansSource } from './impl/GDScans';
+import { KSGroupScansSource } from './impl/KSGroupScans';
+import { VortexScansSource } from './impl/VortexScans';
 import type { IMangaSource } from './types';
 
 
 const sources: Record<string, IMangaSource> = {
+    gdscans: new GDScansSource(),
+    vortexscans: new VortexScansSource(),
+    ksgroupscans: new KSGroupScansSource(),
     madarascans: new MadaraScansSource(),
     manhuagui: new ManhuaguiSource(),
     jmcomic: new JmcomicSource(),
