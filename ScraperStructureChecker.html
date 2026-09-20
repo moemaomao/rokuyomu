@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scraper Structure Checker</title>
+<style>
+  :root {
+    --bg: #0c0910;
+    --panel: #16121c;
+    --border: #2a2435;
+    --text: #e8e4ef;
+    --muted: #9a91a8;
+    --accent: #a78bfa;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --info: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: linear-gradient(180deg, #1a1028 0%, var(--bg) 40%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    margin: 0.2rem 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.25rem 1.5rem 3rem;
+    display: grid;
+    gap: 1rem;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+  }
+  .card h2 {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+  input[type="url"], input[type="text"], textarea, select {
+    width: 100%;
+    background: #0e0b14;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    padding: 0.65rem 0.75rem;
+    font-size: 0.9rem;
+    outline: none;
+  }
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--accent);
+  }
+  textarea {
+    min-height: 160px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    resize: vertical;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    align-items: end;
+  }
+  @media (max-width: 720px) {
+    .row { grid-template-columns: 1fr; }
+  }
+  .btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  button {
+    border: none;
+    border-radius: 10px;
+    padding: 0.65rem 1rem;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: var(--accent);
+    color: #1a1028;
+  }
+  button.secondary {
+    background: #2a2435;
+    color: var(--text);
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  @media (max-width: 900px) {
+    .grid2 { grid-template-columns: 1fr; }
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 1px solid transparent;
+  }
+  .badge.ok { background: rgba(52,211,153,.12); color: var(--ok); border-color: rgba(52,211,153,.3); }
+  .badge.warn { background: rgba(251,191,36,.12); color: var(--warn); border-color: rgba(251,191,36,.3); }
+  .badge.bad { background: rgba(248,113,113,.12); color: var(--bad); border-color: rgba(248,113,113,.3); }
+  .badge.info { background: rgba(96,165,250,.12); color: var(--info); border-color: rgba(96,165,250,.3); }
+  .badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.45rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; width: 32%; }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+  }
+  .list {
+    max-height: 280px;
+    overflow: auto;
+    font-size: 0.78rem;
+  }
+  .list div {
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--border);
+    word-break: break-all;
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    margin: 0.5rem 0 0;
+  }
+  pre.dump {
+    margin: 0;
+    max-height: 320px;
+    overflow: auto;
+    background: #0e0b14;
+    border-radius: 10px;
+    padding: 0.75rem;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .tabs button {
+    background: #2a2435;
+    color: var(--muted);
+    padding: 0.4rem 0.75rem;
+    font-size: 0.78rem;
+  }
+  .tabs button.active {
+    background: rgba(167,139,250,.2);
+    color: var(--accent);
+  }
+  .hidden { display: none !important; }
+  .score {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Scraper Structure Checker</h1>
+    <p>Analisis struktur HTML + deteksi anti-bot (Cloudflare, captcha, dll.) untuk bikin adapter source.</p>
+  </div>
+  <div class="badges" id="headerBadges"></div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Input</h2>
+    <div class="row" style="margin-bottom:0.75rem">
+      <div>
+        <label for="url">URL halaman (opsional — fetch sering diblokir CORS)</label>
+        <input id="url" type="url" placeholder="https://contoh.com/manga/" />
+      </div>
+      <div class="btns">
+        <button type="button" id="btnFetch" class="secondary">Fetch URL</button>
+      </div>
+    </div>
+    <div style="margin-bottom:0.75rem">
+      <label for="proxy">CORS proxy prefix (opsional)</label>
+      <input id="proxy" type="text" placeholder="https://api.allorigins.win/raw?url=" value="https://api.allorigins.win/raw?url=" />
+    </div>
+    <label for="html">Atau paste HTML source (disarankan: View Source / Inspect → copy)</label>
+    <textarea id="html" placeholder="Paste full HTML di sini..."></textarea>
+    <div class="btns" style="margin-top:0.75rem">
+      <button type="button" id="btnAnalyze">Analisis struktur</button>
+      <button type="button" id="btnClear" class="secondary">Clear</button>
+    </div>
+    <p class="hint">
+      <strong>Disarankan:</strong> buka situs di tab biasa → <kbd>Ctrl+U</kbd> (View Source) → Select All → Copy → paste di sini → Analisis struktur.
+      Itu cara paling akurat. Tombol Fetch URL sering gagal karena CORS / proxy (error 403 dari proxy ≠ situs sulit di-scrape).
+      Proxy default: allorigins. Kalau gagal, kosongkan proxy atau paste HTML manual.
+    </p>
+  </section>
+
+  <section class="card hidden" id="results">
+    <h2>Hasil</h2>
+    <div class="badges" id="resultBadges"></div>
+    <div class="grid2">
+      <div>
+        <table>
+          <tr><th>Judul dokumen</th><td id="rTitle" class="mono">—</td></tr>
+          <tr><th>Base / canonical</th><td id="rCanonical" class="mono">—</td></tr>
+          <tr><th>Meta generator</th><td id="rGenerator" class="mono">—</td></tr>
+          <tr><th>Jumlah link</th><td id="rLinks">—</td></tr>
+          <tr><th>Jumlah gambar</th><td id="rImgs">—</td></tr>
+          <tr><th>Script eksternal</th><td id="rScripts">—</td></tr>
+          <tr><th>Skor scrape-ability</th><td><span class="score" id="rScore">—</span></td></tr>
+        </table>
+      </div>
+      <div>
+        <h2 style="margin-top:0">Anti-bot / proteksi</h2>
+        <div id="antibotList" class="list"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card hidden" id="structure">
+    <h2>Struktur terdeteksi</h2>
+    <div class="tabs" id="tabs">
+      <button type="button" class="active" data-tab="candidates">Selector kandidat</button>
+      <button type="button" data-tab="links">Link sample</button>
+      <button type="button" data-tab="images">Gambar sample</button>
+      <button type="button" data-tab="json">JSON-LD / embedded</button>
+      <button type="button" data-tab="deep">Reader / API dalam</button>
+      <button type="button" data-tab="raw">Ringkasan mentah</button>
+    </div>
+    <div id="tab-candidates"></div>
+    <div id="tab-links" class="hidden"></div>
+    <div id="tab-images" class="hidden"></div>
+    <div id="tab-json" class="hidden"></div>
+    <div id="tab-deep" class="hidden"></div>
+    <div id="tab-raw" class="hidden"></div>
+  </section>
+
+  <section class="card">
+    <h2>Catatan</h2>
+    <p class="hint">
+      Tool ini berjalan 100% di browser kamu. Tidak menyimpan data.
+      Deteksi anti-bot bersifat heuristik (signature string/header), bukan bypass.
+      Untuk situs dengan Cloudflare challenge interaktif, paste HTML <em>setelah</em> challenge lolos di browser biasa.
+    </p>
+  </section>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  const ANTIBOT_RULES = [
+    // Cloudflare: jangan match kata "cloudflare" sembarangan (CDN/script innocuous).
+    // Hanya challenge / bot-management yang nyata.
+    { id: 'cloudflare_challenge', label: 'Cloudflare Challenge', severity: 'bad', patterns: [
+      /cdn-cgi\/challenge-platform/i,
+      /cf-browser-verification/i,
+      /cf-challenge-running/i,
+      /__cf_chl_tk/i,
+      /__cf_chl_f_tk/i,
+      /cf-turnstile/i,
+      /challenges\.cloudflare\.com/i,
+      /Attention Required!\s*\|\s*Cloudflare/i,
+      /<title[^>]*>\s*Just a moment\.\.\.\s*<\/title>/i,
+      /Enable JavaScript and cookies to continue/i,
+      /id="challenge-form"/i,
+      /id="challenge-body-text"/i,
+      /name="cf-turnstile-response"/i,
+      /window\._cf_chl_opt/i,
+      /cRay:\s*['"][a-z0-9]+/i
+    ]},
+    { id: 'cloudflare_turnstile', label: 'Cloudflare Turnstile', severity: 'bad', patterns: [
+      /cf-turnstile/i,
+      /challenges\.cloudflare\.com\/turnstile/i,
+      /data-sitekey[^>]*turnstile/i
+    ]},
+    { id: 'recaptcha', label: 'Google reCAPTCHA', severity: 'bad', patterns: [
+      /www\.google\.com\/recaptcha\/api/i,
+      /grecaptcha\.render/i,
+      /g-recaptcha/i,
+      /recaptcha\/enterprise/i
+    ]},
+    { id: 'hcaptcha', label: 'hCaptcha', severity: 'bad', patterns: [
+      /js\.hcaptcha\.com/i,
+      /class="h-captcha"/i,
+      /hcaptcha\.com\/1\/api/i
+    ]},
+    { id: 'datadome', label: 'DataDome', severity: 'bad', patterns: [
+      /datadome\.co/i,
+      /dd\.js/i,
+      /window\.ddjskey/i
+    ]},
+    { id: 'perimeterx', label: 'PerimeterX / HUMAN', severity: 'bad', patterns: [
+      /client\.perimeterx\.net/i,
+      /humansecurity\.com/i,
+      /window\._pxAppId/i
+    ]},
+    { id: 'akamai', label: 'Akamai Bot Manager', severity: 'warn', patterns: [
+      /_abck=/i,
+      /akamaihd\.net\/.*(?:bot|sensor)/i,
+      /<script[^>]*akam\//i
+    ]},
+    { id: 'sucuri', label: 'Sucuri WAF', severity: 'warn', patterns: [
+      /sucuri_cloudproxy/i,
+      /cdn\.sucuri\.net\/js/i,
+      /Access Denied.*Sucuri/i
+    ]},
+    { id: 'incapsula', label: 'Imperva / Incapsula', severity: 'bad', patterns: [
+      /_incap_ses/i,
+      /incapsula/i,
+      /imperva\.com/i
+    ]},
+    { id: 'ddosguard', label: 'DDoS-Guard', severity: 'warn', patterns: [
+      /ddos-guard\.net/i,
+      /DDOS-GUARD/i
+    ]},
+    // Waiting room: harus lebih spesifik, bukan sekadar "please wait"
+    { id: 'js_challenge', label: 'JS browser check / waiting room', severity: 'warn', patterns: [
+      /checking your browser before accessing/i,
+      /browser check in progress/i,
+      /this process is automatic/i,
+      /you will be redirected once the verification is complete/i,
+      /ddos protection by/i
+    ]},
+    { id: 'wordpress', label: 'WordPress / Madara-like theme', severity: 'info', patterns: [
+      /wp-content\/themes/i,
+      /wp-includes\/js/i,
+      /wp-manga/i,
+      /madara/i,
+      /wp-json\/wp\/v2/i
+    ]},
+    { id: 'blogger', label: 'Blogger / Blogspot', severity: 'info', patterns: [
+      /www\.blogger\.com/i,
+      /blogger\.googleusercontent\.com/i,
+      /name="generator"[^>]*content="Blogger"/i,
+      /meta[^>]*content="blogger"/i
+    ]},
+    { id: 'manga_cms', label: 'Manga CMS signatures', severity: 'info', patterns: [
+      /wp-manga/i,
+      /chapter-list/i,
+      /listing-chapters/i,
+      /ts_reader/i,
+      /chapter_preloaded_images/i
+    ]},
+  ];
+
+  const SELECTOR_HEURISTICS = [
+    { name: 'Possible manga/item cards', selectors: [
+      'div.page-item-detail', '.manga', '.listupd .bs', '.bsx', '.utao', '.uta',
+      'div.item', 'article', '.post', '.entry', '.grid .card', '.comic-item',
+      '.manga-item', '.list-item', '.bigor', '.animposx'
+    ]},
+    { name: 'Possible titles', selectors: [
+      'h1', 'h2', '.title', '.entry-title', '.post-title', '.manga-title',
+      '.tt', '.name', 'a[title]'
+    ]},
+    { name: 'Possible chapter lists', selectors: [
+      'ul.main', '.listing-chapters_wrap', '.chapter-list', '#chapterlist',
+      '.eplister', '.eplister ul', '.clstyle', '.chapters', 'ul.row-content-chapter',
+      '.version-chap', '#chapter-list'
+    ]},
+    { name: 'Possible reader images', selectors: [
+      '#readerarea img', '.reading-content img', '.page-break img',
+      '#readerarea', '.reader-area img', '.chapter-content img',
+      'img.aligncenter', '.entry-content img', '#images img'
+    ]},
+    { name: 'Lazy-load image attrs', selectors: [
+      'img[data-src]', 'img[data-lazy-src]', 'img[data-original]',
+      'img[data-srcset]', 'img[loading="lazy"]'
+    ]},
+  ];
+
+  function badge(text, sev) {
+    return `<span class="badge ${sev}">${text}</span>`;
+  }
+
+  function detectAntibot(html, headersText) {
+    const blob = (html || '') + '\n' + (headersText || '');
+    const found = [];
+    for (const rule of ANTIBOT_RULES) {
+      for (const re of rule.patterns) {
+        if (re.test(blob)) {
+          found.push({ id: rule.id, label: rule.label, severity: rule.severity, matched: String(re) });
+          break;
+        }
+      }
+    }
+    return found;
+  }
+
+
+  // Pola dalam: SPA data, reader obfuscation, session/image API (contoh Softkomik)
+  const DEEP_PATTERNS = [
+    { id: 'next_data', label: 'Next.js __NEXT_DATA__ (data di JSON, bukan DOM)', severity: 'info',
+      test: (html) => /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>/i.test(html) },
+    { id: 'nuxt_data', label: 'Nuxt __NUXT__ / payload', severity: 'info',
+      test: (html) => /window\.__NUXT__|__NUXT_DATA__/i.test(html) },
+    { id: 'ts_reader', label: 'ts_reader / preloaded chapter images', severity: 'info',
+      test: (html) => /ts_reader\.run|chapter_preloaded_images|window\.ts_reader/i.test(html) },
+    { id: 'image_api', label: 'Image list API (imageSrc / /imgs/ /chapter/.../imgs)', severity: 'warn',
+      test: (html) => /imageSrc|"imgs"|\/imgs\/|\/chapter\/[^"']+\/imgs/i.test(html) },
+    { id: 'session_api', label: 'Session / token API untuk reader', severity: 'warn',
+      test: (html) => /\/api\/session|X-Token|X-Sign|"token"\s*:\s*"[^"]+".*"sign"|createSession/i.test(html) },
+    { id: 'cdn_switch', label: 'Multi-CDN / storage switch (storageInter, backBS3, dll.)', severity: 'info',
+      test: (html) => /storageInter|backBS3|alternateCdn|image\.komik|cdnBase/i.test(html) },
+    { id: 'next_image', label: 'Next.js /_next/image proxy (URL asli di query)', severity: 'info',
+      test: (html) => /\/_next\/image\?url=/i.test(html) },
+    { id: 'signed_url', label: 'Signed / expiring image URL', severity: 'warn',
+      test: (html) => /X-Amz-Signature|X-Amz-Algorithm|Signature=|expires=\d{9,}/i.test(html) },
+    { id: 'blob_canvas', label: 'Canvas / blob reader (gambar di-render JS)', severity: 'warn',
+      test: (html) => /toDataURL|createObjectURL|getContext\(['"]2d['"]\)|OffscreenCanvas/i.test(html) },
+    { id: 'decrypt_img', label: 'Decrypt / unscramble image tiles', severity: 'warn',
+      test: (html) => /unscramble|descrambl|decrypt.*image|tile.*image|shuffle.*page/i.test(html) },
+    { id: 'wp_manga_ajax', label: 'wp-manga AJAX chapter (admin-ajax)', severity: 'info',
+      test: (html) => /wp-manga|manga_get_chapters|admin-ajax\.php/i.test(html) },
+    { id: 'softkomik_like', label: 'Softkomik-like (API host + session chapter)', severity: 'warn',
+      test: (html) => /softkomik|api\.softkomik|\/api\/session\/chapter|softdevices\.my\.id/i.test(html) },
+  ];
+
+  function extractNextDataSummary(html) {
+    const m = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (!m) return null;
+    try {
+      const data = JSON.parse(m[1]);
+      const keys = [];
+      const walk = (obj, path, depth) => {
+        if (depth > 4 || obj == null) return;
+        if (Array.isArray(obj)) {
+          keys.push(path + '[] (' + obj.length + ')');
+          if (obj[0] && typeof obj[0] === 'object') walk(obj[0], path + '[0]', depth + 1);
+          return;
+        }
+        if (typeof obj === 'object') {
+          for (const k of Object.keys(obj).slice(0, 40)) {
+            const p = path ? path + '.' + k : k;
+            const v = obj[k];
+            if (v && typeof v === 'object') walk(v, p, depth + 1);
+            else keys.push(p + (typeof v === 'string' && v.length > 60 ? ' (str)' : ''));
+          }
+        }
+      };
+      walk(data, '', 0);
+      // interesting fields
+      const interesting = keys.filter(k =>
+        /image|chapter|slug|token|sign|storage|pageProps|gambar|komik|cdn|src/i.test(k)
+      ).slice(0, 50);
+      return { keyCount: keys.length, interesting, sample: m[1].slice(0, 800) };
+    } catch (e) {
+      return { error: String(e), sample: m[1].slice(0, 400) };
+    }
+  }
+
+  function findApiHints(html) {
+    const hints = new Set();
+    const re = /https?:\/\/[a-z0-9.-]+(?:\/[a-z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?/gi;
+    let m;
+    while ((m = re.exec(html)) && hints.size < 80) {
+      const u = m[0];
+      if (/api\.|\/api\/|\/imgs\/|session|cdn\.|image\.|cover\.|komik\.im|softkomik/i.test(u)) {
+        hints.add(u.slice(0, 200));
+      }
+    }
+    // relative API paths
+    const re2 = /["'`](\/api\/[^"'`\s]{3,120})["'`]/g;
+    while ((m = re2.exec(html)) && hints.size < 100) hints.add(m[1]);
+    return [...hints];
+  }
+
+
+    function absUrl(base, href) {
+    try { return new URL(href, base || undefined).href; }
+    catch { return href; }
+  }
+
+  function analyze(html, pageUrl) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    const title = (doc.querySelector('title')?.textContent || '').trim();
+    const canonical = doc.querySelector('link[rel="canonical"]')?.getAttribute('href')
+      || doc.querySelector('meta[property="og:url"]')?.getAttribute('content')
+      || pageUrl || '';
+    const generator = doc.querySelector('meta[name="generator"]')?.getAttribute('content') || '';
+
+    const links = [...doc.querySelectorAll('a[href]')].map(a => ({
+      href: a.getAttribute('href') || '',
+      text: (a.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80)
+    }));
+    const imgs = [...doc.querySelectorAll('img')].map(img => ({
+      src: img.getAttribute('src') || '',
+      dataSrc: img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || '',
+      alt: (img.getAttribute('alt') || '').slice(0, 60)
+    }));
+    const scripts = [...doc.querySelectorAll('script[src]')].map(s => s.getAttribute('src') || '');
+
+    const antibot = detectAntibot(html, '');
+
+    // Selector candidates
+    const candidates = SELECTOR_HEURISTICS.map(group => {
+      const hits = [];
+      for (const sel of group.selectors) {
+        let nodes = [];
+        try { nodes = [...doc.querySelectorAll(sel)]; } catch { /* invalid */ }
+        if (nodes.length) {
+          hits.push({
+            selector: sel,
+            count: nodes.length,
+            sample: nodes.slice(0, 3).map(n => (n.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60))
+          });
+        }
+      }
+      return { name: group.name, hits };
+    }).filter(g => g.hits.length);
+
+    // Link patterns (path frequency)
+    const pathBuckets = {};
+    for (const l of links) {
+      try {
+        const u = new URL(l.href, pageUrl || canonical || 'https://example.com');
+        const parts = u.pathname.split('/').filter(Boolean);
+        const key = parts.slice(0, 2).join('/') || '/';
+        pathBuckets[key] = (pathBuckets[key] || 0) + 1;
+      } catch { /* skip */ }
+    }
+    const topPaths = Object.entries(pathBuckets).sort((a,b) => b[1]-a[1]).slice(0, 12);
+
+    // JSON-LD
+    const jsonld = [...doc.querySelectorAll('script[type="application/ld+json"]')]
+      .map(s => s.textContent || '').filter(Boolean);
+
+    // Inline script snippets that look like chapter/image data
+    const embeddedHints = [];
+    for (const s of doc.querySelectorAll('script:not([src])')) {
+      const t = s.textContent || '';
+      if (/chapter|images?\s*=|ts_reader|window\.__|page_data/i.test(t) && t.length > 40) {
+        embeddedHints.push(t.slice(0, 500) + (t.length > 500 ? '…' : ''));
+      }
+    }
+
+    // Deep patterns (SPA / protected reader)
+    const deepHits = [];
+    for (const p of DEEP_PATTERNS) {
+      try {
+        if (p.test(html)) deepHits.push({ id: p.id, label: p.label, severity: p.severity });
+      } catch (_) {}
+    }
+    const nextSummary = extractNextDataSummary(html);
+    const apiHints = findApiHints(html);
+
+    // Merge deep into antibot display list (as extra findings)
+    for (const d of deepHits) {
+      antibot.push({ id: d.id, label: d.label, severity: d.severity, matched: d.id });
+    }
+
+    // Score — info badges (WordPress/Blogger) tidak menurunkan skor
+    let score = 70;
+    const realBlocks = antibot.filter(a => a.severity === 'bad');
+    const warns = antibot.filter(a => a.severity === 'warn');
+    if (realBlocks.length) score -= 35;
+    else if (warns.length) score -= 12;
+    if (candidates.some(c => c.name.toLowerCase().includes('manga') || c.name.toLowerCase().includes('item'))) score += 8;
+    if (candidates.some(c => c.name.toLowerCase().includes('chapter'))) score += 10;
+    if (candidates.some(c => c.name.toLowerCase().includes('reader'))) score += 10;
+    if (imgs.filter(i => i.dataSrc).length > 5) score += 5;
+    if (imgs.length >= 8 && links.length >= 15) score += 8;
+    if (links.length < 5 && imgs.length < 2) score -= 20;
+    // Next/API reader: DOM images may be few but data is in JSON/API — still scrape-able with adapter
+    if (nextSummary && !nextSummary.error) score += 12;
+    if (deepHits.some(d => d.id === 'image_api' || d.id === 'session_api')) score += 5;
+    if (deepHits.some(d => d.id === 'decrypt_img' || d.id === 'blob_canvas')) score -= 8;
+    // Hard challenge page only
+    if (/cdn-cgi\/challenge-platform|<title[^>]*>\s*Just a moment/i.test(html)) score = Math.min(score, 25);
+    score = Math.max(0, Math.min(100, score));
+
+    return {
+      title, canonical, generator,
+      links, imgs, scripts,
+      antibot, candidates, topPaths,
+      jsonld, embeddedHints, score,
+      deepHits, nextSummary, apiHints,
+      counts: { links: links.length, imgs: imgs.length, scripts: scripts.length }
+    };
+  }
+
+  function render(result) {
+    $('results').classList.remove('hidden');
+    $('structure').classList.remove('hidden');
+
+    $('rTitle').textContent = result.title || '—';
+    $('rCanonical').textContent = result.canonical || '—';
+    $('rGenerator').textContent = result.generator || '—';
+    $('rLinks').textContent = String(result.counts.links);
+    $('rImgs').textContent = String(result.counts.imgs);
+    $('rScripts').textContent = String(result.counts.scripts);
+    $('rScore').textContent = result.score + '/100';
+
+    const badges = [];
+    if (result.score >= 70) badges.push(badge('Scrape-able (kemungkinan HTML statis)', 'ok'));
+    else if (result.score >= 40) badges.push(badge('Campuran / partial JS', 'warn'));
+    else badges.push(badge('Sulit di-scrape / proteksi kuat', 'bad'));
+
+    for (const a of result.antibot) {
+      badges.push(badge(a.label, a.severity === 'info' ? 'info' : a.severity));
+    }
+    $('resultBadges').innerHTML = badges.join(' ');
+    $('headerBadges').innerHTML = badges.slice(0, 4).join(' ');
+
+    const ab = $('antibotList');
+    if (!result.antibot.length) {
+      ab.innerHTML = '<div>Tidak ada signature anti-bot umum terdeteksi di HTML.</div>';
+    } else {
+      ab.innerHTML = result.antibot.map(a =>
+        `<div><span class="badge ${a.severity === 'info' ? 'info' : a.severity}">${a.severity}</span> <strong>${a.label}</strong> <span class="mono" style="color:var(--muted)">(${a.matched})</span></div>`
+      ).join('');
+    }
+
+    // candidates tab
+    let candHtml = '';
+    if (!result.candidates.length) {
+      candHtml = '<p class="hint">Tidak ada selector heuristik yang match. Situs mungkin full client-render atau HTML challenge.</p>';
+    } else {
+      candHtml = result.candidates.map(g => {
+        const rows = g.hits.map(h =>
+          `<tr><td class="mono">${escapeHtml(h.selector)}</td><td>${h.count}</td><td class="mono">${escapeHtml((h.sample||[]).join(' | '))}</td></tr>`
+        ).join('');
+        return `<h2 style="margin-top:0.75rem">${escapeHtml(g.name)}</h2>
+          <table><tr><th>Selector</th><th>Count</th><th>Sample text</th></tr>${rows}</table>`;
+      }).join('');
+    }
+    if (result.topPaths.length) {
+      candHtml += '<h2>Path URL paling sering (petunjuk routing)</h2><table><tr><th>Path prefix</th><th>Count</th></tr>' +
+        result.topPaths.map(([p,c]) => `<tr><td class="mono">/${escapeHtml(p)}</td><td>${c}</td></tr>`).join('') +
+        '</table>';
+    }
+    $('tab-candidates').innerHTML = candHtml;
+
+    $('tab-links').innerHTML = '<div class="list">' +
+      result.links.slice(0, 80).map(l =>
+        `<div><span class="mono">${escapeHtml(l.href)}</span><br/><span style="color:var(--muted)">${escapeHtml(l.text)}</span></div>`
+      ).join('') + (result.links.length > 80 ? `<div>… +${result.links.length-80} lagi</div>` : '') +
+      '</div>';
+
+    $('tab-images').innerHTML = '<div class="list">' +
+      result.imgs.slice(0, 60).map(i =>
+        `<div><span class="mono">src: ${escapeHtml(i.src)}</span>${i.dataSrc ? `<br/><span class="mono">data: ${escapeHtml(i.dataSrc)}</span>` : ''}${i.alt ? `<br/><span style="color:var(--muted)">${escapeHtml(i.alt)}</span>` : ''}</div>`
+      ).join('') + '</div>';
+
+    let jsonHtml = '';
+    if (result.jsonld.length) {
+      jsonHtml += '<h2 style="margin-top:0">JSON-LD</h2>' +
+        result.jsonld.map(j => `<pre class="dump">${escapeHtml(j)}</pre>`).join('');
+    }
+    if (result.embeddedHints.length) {
+      jsonHtml += '<h2>Inline script (kemungkinan data chapter/images)</h2>' +
+        result.embeddedHints.map(j => `<pre class="dump">${escapeHtml(j)}</pre>`).join('');
+    }
+    if (!jsonHtml) jsonHtml = '<p class="hint">Tidak ada JSON-LD / script data terdeteksi.</p>';
+    $('tab-json').innerHTML = jsonHtml;
+
+    // Deep reader / API tab
+    let deepHtml = '';
+    if (result.deepHits && result.deepHits.length) {
+      deepHtml += '<h2 style="margin-top:0">Pola reader / proteksi gambar</h2><div class="list">';
+      deepHtml += result.deepHits.map(d =>
+        `<div><span class="badge ${d.severity === 'info' ? 'info' : d.severity}">${d.severity}</span> <strong>${escapeHtml(d.label)}</strong></div>`
+      ).join('');
+      deepHtml += '</div>';
+      deepHtml += `<p class="hint">Kalau ada <strong>Session / token API</strong> atau <strong>Image list API</strong>, gambar di DOM sering palsu/placeholder.
+        Adapter harus: ambil data dari <code>__NEXT_DATA__</code> / API → session token → list imageSrc → CDN (pola Softkomik).</p>`;
+    } else {
+      deepHtml += '<p class="hint">Tidak ada pola reader API / obfuscation khusus terdeteksi di HTML homepage. Coba paste juga <strong>halaman chapter (reader)</strong>.</p>';
+    }
+    if (result.nextSummary) {
+      deepHtml += '<h2>__NEXT_DATA__</h2>';
+      if (result.nextSummary.error) {
+        deepHtml += `<p class="hint">Parse error: ${escapeHtml(result.nextSummary.error)}</p>`;
+      } else {
+        deepHtml += `<p class="hint">Field menarik (${result.nextSummary.keyCount} path di-scan):</p><div class="list">`;
+        deepHtml += (result.nextSummary.interesting || []).map(k => `<div class="mono">${escapeHtml(k)}</div>`).join('') || '<div>—</div>';
+        deepHtml += '</div><pre class="dump">' + escapeHtml(result.nextSummary.sample || '') + '</pre>';
+      }
+    }
+    if (result.apiHints && result.apiHints.length) {
+      deepHtml += '<h2>URL / path API & CDN terdeteksi di HTML</h2><div class="list">';
+      deepHtml += result.apiHints.map(u => `<div class="mono">${escapeHtml(u)}</div>`).join('');
+      deepHtml += '</div>';
+    }
+    $('tab-deep').innerHTML = deepHtml;
+
+    $('tab-raw').innerHTML = `<pre class="dump">${escapeHtml(JSON.stringify({
+      title: result.title,
+      canonical: result.canonical,
+      generator: result.generator,
+      score: result.score,
+      antibot: result.antibot.map(a => a.label),
+      counts: result.counts,
+      topPaths: result.topPaths,
+      candidateGroups: result.candidates.map(c => ({ name: c.name, selectors: c.hits.map(h => ({ sel: h.selector, n: h.count })) })),
+      deepHits: (result.deepHits || []).map(d => d.label),
+      apiHints: result.apiHints || [],
+      nextInteresting: result.nextSummary && result.nextSummary.interesting
+    }, null, 2))}</pre>`;
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  $('btnAnalyze').addEventListener('click', () => {
+    const html = $('html').value.trim();
+    if (!html) {
+      alert('Paste HTML dulu, atau Fetch URL.');
+      return;
+    }
+    const result = analyze(html, $('url').value.trim());
+    render(result);
+  });
+
+  $('btnClear').addEventListener('click', () => {
+    $('html').value = '';
+    $('url').value = '';
+    $('results').classList.add('hidden');
+    $('structure').classList.add('hidden');
+    $('headerBadges').innerHTML = '';
+  });
+
+  $('btnFetch').addEventListener('click', async () => {
+    const url = $('url').value.trim();
+    if (!url) { alert('Isi URL dulu'); return; }
+    const proxy = $('proxy').value.trim();
+    const target = proxy ? (proxy.endsWith('=') || proxy.endsWith('?') ? proxy + encodeURIComponent(url) : proxy + url) : url;
+    const btn = $('btnFetch');
+    btn.disabled = true;
+    btn.textContent = 'Fetching…';
+    try {
+      const res = await fetch(target, { credentials: 'omit' });
+      const text = await res.text();
+
+      // Proxy error pages (corsproxy keyless, etc.) — bukan HTML situs target
+      let proxyError = null;
+      try {
+        const j = JSON.parse(text);
+        if (j && (j.error || j.success === false)) {
+          proxyError = j.message || j.error || JSON.stringify(j);
+        }
+      } catch (_) { /* not JSON — ok, real HTML */ }
+
+      if (proxyError) {
+        alert('Proxy menolak request:\n' + proxyError + '\n\nIni error PROXY, bukan situs target.\nPakai cara paste: buka URL di tab baru → Ctrl+U → copy HTML → paste di sini.');
+        $('html').value = text;
+        return;
+      }
+
+      if (/^\s*<!DOCTYPE|^\s*<html/i.test(text) === false && text.length < 500) {
+        alert('Response tidak mirip HTML halaman. Coba paste manual dari View Source.');
+        $('html').value = text;
+        return;
+      }
+
+      $('html').value = text;
+      const result = analyze(text, url);
+      if (res.status === 403 || res.status === 503) {
+        // Hanya flag kalau body juga mirip challenge CF, bukan error proxy
+        if (/cloudflare|just a moment|cf-ray|attention required/i.test(text)) {
+          result.antibot.unshift({ id: 'http', label: `HTTP ${res.status} + challenge page`, severity: 'bad', matched: 'status' });
+          result.score = Math.min(result.score, 30);
+        } else {
+          result.antibot.unshift({ id: 'http', label: `HTTP ${res.status} (cek apakah HTML valid)`, severity: 'warn', matched: 'status' });
+        }
+      }
+      render(result);
+    } catch (e) {
+      alert('Fetch gagal (CORS/network): ' + (e && e.message ? e.message : e) + '\n\nPaste HTML manual dari View Source (Ctrl+U).');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Fetch URL';
+    }
+  });
+
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-tab]');
+    if (!btn) return;
+    const tab = btn.getAttribute('data-tab');
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b === btn));
+    ['candidates','links','images','json','deep','raw'].forEach(id => {
+      $('tab-' + id).classList.toggle('hidden', id !== tab);
+    });
+  });
+})();
+</script>
+</body>
+</html>
