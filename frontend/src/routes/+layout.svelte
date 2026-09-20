@@ -147,11 +147,11 @@
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	function toggleSidebar() {
-		isSidebarOpen = !isSidebarOpen;
-		if (browser && isDesktop) {
-			document.cookie = `sidebar_open=${isSidebarOpen}; path=/; max-age=31536000`;
-		}
-	}
+	isSidebarOpen = !isSidebarOpen;
+	if (browser && isDesktop) {
+		document.cookie = `sidebar_open=${isSidebarOpen ? 'true' : 'false'}; path=/; max-age=31536000; SameSite=Lax`;
+	    }
+    }
 
 	function closeOverlays() {
 		if (!isDesktop) isSidebarOpen = false;
