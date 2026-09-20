@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { Search, Loader2, ChevronDown, Check, Layers } from 'lucide-svelte';
 	import { getImpl, setImpl, setMultiMode } from '$lib/stores/impl';
 	import {
@@ -68,6 +68,9 @@
 	// ── State ────────────────────────────────────────────────────────────────
 	let searchInput = $state('');
 	let activeDropdown = $state<'source' | 'lang' | 'type' | null>(null);
+	/** Remember source list scroll so reopening doesn't jump to top */
+	let sourceListEl = $state<HTMLDivElement | null>(null);
+	let sourceScrollTop = $state(0);
 
 	// Age gate (R18 / NSFW)
 	let showAgeGate = $state(false);
@@ -102,11 +105,24 @@
 	});
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
+	function saveSourceScroll() {
+		if (sourceListEl) sourceScrollTop = sourceListEl.scrollTop;
+	}
+
+	async function restoreSourceScroll() {
+		await tick();
+		if (sourceListEl) sourceListEl.scrollTop = sourceScrollTop;
+	}
+
 	function toggleDropdown(type: 'source' | 'lang' | 'type') {
-		activeDropdown = activeDropdown === type ? null : type;
+		if (activeDropdown === 'source') saveSourceScroll();
+		const next = activeDropdown === type ? null : type;
+		activeDropdown = next;
+		if (next === 'source') restoreSourceScroll();
 	}
 
 	function closeDropdown() {
+		if (activeDropdown === 'source') saveSourceScroll();
 		activeDropdown = null;
 	}
 
@@ -294,7 +310,13 @@
 			<div
 				class="dropdown-menu absolute left-0 top-full z-[200] mt-2 w-[280px] overflow-hidden rounded-2xl border shadow-2xl"
 			>
-				<div class="max-h-[60vh] overflow-y-auto p-1.5">
+				<div
+					bind:this={sourceListEl}
+					onscroll={() => {
+						if (sourceListEl) sourceScrollTop = sourceListEl.scrollTop;
+					}}
+					class="max-h-[60vh] overflow-y-auto p-1.5"
+				>
 					<!-- Multi option -->
 					<button
 						type="button"
