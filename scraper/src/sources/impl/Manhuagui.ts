@@ -79,16 +79,33 @@ export class ManhuaguiSource extends BaseSource {
 		return m ? m[1] : String(mangaId).replace(/\D/g, '');
 	}
 
-	private parseChapterNumber(text: string): number {
-		const t = String(text || '');
-		const m =
-			t.match(/(?:第|话|回|卷|章)\s*(\d+)(?:[.,](\d+))?/i) ||
-			t.match(/(\d+)(?:[.,](\d+))?\s*(?:话|回|卷|章)/i) ||
-			t.match(/\b(\d+(?:\.\d+)?)\b/);
+		private parseChapterNumber(text: string): number {
+		const t = String(text || '').trim();
+
+		// 第8.1话 / 第17话 / 第09话
+		let m = t.match(/第\s*(\d+)(?:[.,、](\d+))?\s*话/);
 		if (m) {
-			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
-			return parseFloat(m[1]);
+			return m[2] != null ? parseFloat(`${m[1]}.${m[2]}`) : parseFloat(m[1]);
 		}
+
+		// 04卷 / 03卷附錄
+		m = t.match(/(\d+)\s*卷/);
+		if (m) {
+			const base = parseFloat(m[1]) * 1000; // volume di belakang 单话
+			if (/附錄|附录|番外/.test(t)) return base + 0.5;
+			return base;
+		}
+
+		// 全一话 / 全1话
+		m = t.match(/全\s*([一二三四五六七八九十\d]+)\s*话/);
+		if (m) return 1;
+
+		// fallback angka biasa
+		m = t.match(/(\d+)(?:[.,](\d+))?/);
+		if (m) {
+			return m[2] != null ? parseFloat(`${m[1]}.${m[2]}`) : parseFloat(m[1]);
+		}
+
 		return 0;
 	}
 
@@ -328,7 +345,6 @@ export class ManhuaguiSource extends BaseSource {
 			if (t && !authors.includes(t)) authors.push(t);
 		});
 
-		// Genre hanya dari baris "漫画剧情" di .detail-list
 		const genres: string[] = [];
 		const pushGenre = (raw: string) => {
 			const t = (raw || '').trim();
@@ -368,33 +384,128 @@ export class ManhuaguiSource extends BaseSource {
 			});
 		}
 
-		const chapters: Chapter[] = [];
+						const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
-		$('a[href*="/comic/"][href$=".html"]').each((_, a) => {
-			const $a = $(a);
+		const chapterHtml = $('#chapters').html() || $('.chapter').html() || '';
+		const $ch = chapterHtml ? cheerio.load(chapterHtml) : $;
+
+		type ChapRow = {
+			id: string;
+			title: string;
+			number: number;
+			lang: string;
+			sec: number;
+			idx: number;
+		};
+		const rows: ChapRow[] = [];
+
+		const sectionWeight = (name: string): number => {
+			if (/单话|連載|连载/.test(name)) return 0;
+			if (/单行本|卷/.test(name) && !/番外|附錄|附录/.test(name)) return 1;
+			if (/番外|附錄|附录|短篇/.test(name)) return 2;
+			return 3;
+		};
+
+		const sections: { name: string; sec: number }[] = [];
+		$ch('h4').each((_, h4) => {
+			const name = $ch(h4).find('span').first().text().replace(/\s+/g, ' ').trim() || '章节';
+			sections.push({ name, sec: sectionWeight(name) });
+		});
+
+		let globalIdx = 0;
+		$ch('a[href*="/comic/"]').each((_, a) => {
+			const $a = $ch(a);
 			const href = $a.attr('href') || '';
 			const m = href.match(/\/comic\/(\d+)\/(\d+)\.html/i);
 			if (!m) return;
+			if (m[1] !== comicId) return;
 
 			const id = `/comic/${m[1]}/${m[2]}.html`;
 			if (seen.has(id)) return;
 			seen.add(id);
 
-			const titleText = ($a.attr('title') || $a.text() || '')
-				.replace(/\s+/g, ' ')
-				.trim();
+			let titleText = ($a.attr('title') || '').replace(/\s+/g, ' ').trim();
+			if (!titleText) {
+				const $span = $a.find('span').first().clone();
+				$span.find('i, em').remove();
+				titleText = $span.text().replace(/\s+/g, ' ').trim();
+			}
+			if (!titleText) {
+				titleText = $a.text().replace(/\s+/g, ' ').trim();
+			}
+
+			// Cari section terdekat (h4 sebelum link ini di DOM)
+			let sec = 0;
+			let sectionName = '';
+			const prevH4 = $a.closest('div.chapter-list').prevAll('h4').first();
+			if (prevH4.length) {
+				sectionName = prevH4.find('span').first().text().replace(/\s+/g, ' ').trim();
+				sec = sectionWeight(sectionName);
+			}
+
+			let displayTitle = titleText;
+			if (sectionName && /番外|附錄|附录|单行本/.test(sectionName)) {
+				if (!titleText.includes(sectionName)) {
+					displayTitle = `[${sectionName}] ${titleText}`;
+				}
+			}
+
 			const number = this.parseChapterNumber(titleText);
 
-			chapters.push({
+			rows.push({
 				id,
-				title: titleText || `Chapter ${number}`,
-				number: number || chapters.length + 1,
-				lang: this.DEFAULT_LANG
+				title: displayTitle || `Chapter ${number || globalIdx + 1}`,
+				number: number || 0,
+				lang: this.DEFAULT_LANG,
+				sec,
+				idx: globalIdx++
 			});
 		});
 
-		chapters.sort((a, b) => a.number - b.number);
+		// Fallback: scan seluruh page tapi tetap filter comicId
+		if (rows.length === 0) {
+			$('a[href*="/comic/"][href$=".html"]').each((_, a) => {
+				const $a = $(a);
+				const href = $a.attr('href') || '';
+				const m = href.match(/\/comic\/(\d+)\/(\d+)\.html/i);
+				if (!m || m[1] !== comicId) return;
+
+				const id = `/comic/${m[1]}/${m[2]}.html`;
+				if (seen.has(id)) return;
+				seen.add(id);
+
+				const titleText = ($a.attr('title') || $a.text() || '')
+					.replace(/\s+/g, ' ')
+					.trim();
+				const number = this.parseChapterNumber(titleText);
+
+				rows.push({
+					id,
+					title: titleText || `Chapter ${number || globalIdx + 1}`,
+					number: number || 0,
+					lang: this.DEFAULT_LANG,
+					sec: 0,
+					idx: globalIdx++
+				});
+			});
+		}
+
+		rows.sort((a, b) => {
+			if (a.sec !== b.sec) return a.sec - b.sec;
+			if (a.number !== b.number) return a.number - b.number;
+			return a.idx - b.idx;
+		});
+
+		let autoNum = 0.01;
+		for (const r of rows) {
+			chapters.push({
+				id: r.id,
+				title: r.title,
+				number: r.number || (autoNum += 0.01),
+				lang: r.lang
+			});
+		}
 
 		return {
 			id: `/comic/${comicId}`,
@@ -413,7 +524,6 @@ export class ManhuaguiSource extends BaseSource {
 				: undefined
 		};
 	}
-
 	// ── Decoder (packed JS + LZString) ───────────────────────────────────────
 
 	private decompressFromBase64(input: string): string | null {
