@@ -12,7 +12,7 @@
 	import { untrack } from 'svelte';
 	import { collection, query, onSnapshot } from 'firebase/firestore';
     import { db } from '$lib/firebase';
-    import { setBrokenIds } from '$lib/stores/brokenSources.svelte.js';
+    import { syncBrokenFromReports } from '$lib/stores/brokenSources.svelte';
 
 	// Components
 	import Footer from '$lib/components/Footer.svelte';
@@ -345,31 +345,23 @@ onMount(() => {
 	};
 
 	window.addEventListener('scroll', handleScroll, { passive: true });
-
-	// ── Broken sources (ERROR badge) ───────────────────────────────────────
-	let unsubBroken: (() => void) | undefined;
+// ── Broken sources (ERROR badge) ───────────────────────────────────────
+let unsubBroken: (() => void) | undefined;
 if (db) {
 	try {
 		const qBroken = query(collection(db, 'reports'));
 		unsubBroken = onSnapshot(
 			qBroken,
 			(snap) => {
-				const ids: string[] = [];
-				for (const d of snap.docs) {
-					const r = d.data() as {
-						type?: string;
-						status?: string;
-						sourceId?: string;
-					};
-					if (
-						(r.type === 'fix_source' || r.type === 'bug') &&
-						(r.status === 'open' || r.status === 'in_progress') &&
-						r.sourceId
-					) {
-						ids.push(r.sourceId);
-					}
-				}
-				setBrokenIds(ids);
+				const list = snap.docs.map(
+					(d) =>
+						d.data() as {
+							type?: string;
+							status?: string;
+							sourceId?: string;
+						}
+				);
+				syncBrokenFromReports(list);
 			},
 			(err) => console.warn('[brokenSources]', err)
 		);

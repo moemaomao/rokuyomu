@@ -120,7 +120,7 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	const user = getUser();
 	if (user && db) {
 		try {
-			await setDoc(doc(db, 'users', user.uid, 'history', entry.mangaId), full);
+			await setDoc(doc(db, 'users', user.uid, 'history', encodeURIComponent(entry.mangaId).replace(/%/g, '_')), full);
 		} catch (e) {
 			console.error('Failed to sync history to cloud', e);
 		}

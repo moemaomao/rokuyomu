@@ -32,6 +32,7 @@
 	import { groupSourcesByLang, LANG_LABELS, getSourceMeta } from '$lib/utils/sourceMeta';
 	import { setBrokenIds } from '$lib/stores/brokenSources.svelte';
 	import { getImpl } from '$lib/stores/impl';
+	import { syncBrokenFromReports } from '$lib/stores/brokenSources.svelte';
 
 	type ReportType = 'add_source' | 'fix_source' | 'bug' | 'feature' | 'other';
 	type ReportStatus = 'open' | 'in_progress' | 'done' | 'rejected';
@@ -270,19 +271,31 @@
 	}
 
 	async function saveEdit(id: string) {
-		if (!db || !admin) return;
-		try {
-			await updateDoc(doc(db, 'reports', id), {
-				status: editStatus,
-				adminReply: editReply.trim() || null,
-				updatedAt: serverTimestamp()
-			});
-			editingId = null;
-		} catch (err: any) {
-			console.error(err);
-			errorMsg = err?.code ? `${err.code}: ${err.message}` : 'Failed to save changes.';
-		}
+	if (!db || !admin) return;
+	try {
+		await updateDoc(doc(db, 'reports', id), {
+			status: editStatus,
+			adminReply: editReply.trim() || null,
+			updatedAt: serverTimestamp()
+		});
+
+		reports = reports.map((r) =>
+			r.id === id
+				? {
+						...r,
+						status: editStatus,
+						adminReply: editReply.trim() || null
+					}
+				: r
+		);
+		syncBrokenFromReports(reports);
+
+		editingId = null;
+	} catch (err: any) {
+		console.error(err);
+		errorMsg = err?.code ? `${err.code}: ${err.message}` : 'Failed to save changes.';
 	}
+}
 
 	async function removeReport(id: string) {
 		if (!db || !admin) return;
