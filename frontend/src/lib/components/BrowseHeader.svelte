@@ -68,11 +68,9 @@
 	// ── State ────────────────────────────────────────────────────────────────
 	let searchInput = $state('');
 	let activeDropdown = $state<'source' | 'lang' | 'type' | null>(null);
-	/** Remember source list scroll so reopening doesn't jump to top */
 	let sourceListEl = $state<HTMLDivElement | null>(null);
 	let sourceScrollTop = $state(0);
 
-	// Age gate (R18 / NSFW)
 	let showAgeGate = $state(false);
 	let pendingSourceId = $state<string | null>(null);
 
@@ -394,7 +392,6 @@
 		{/if}
 	</div>
 
-	<!-- LANGUAGE (hanya untuk source yang support) -->
 	{#if showLangFilter}
 		<div class="relative">
 			<button
