@@ -12,14 +12,14 @@ Aggregates latest updates and search from many sources (manga, manhwa, manhua, d
 
 - Multi-source browsing & search
 - Manga detail (cover, description, genres, chapter list)
-- Chapter reader
+- Chapter reader (next/prev, badge, dll.)
 - Bookmark & reading history (local / Firebase sync)
 - Language / type filters
 - Cloudflare Workers KV cache (`MIKOROKU_CACHE`)
-- Cron warm/sync cache
+- Cron warm/sync cache (setiap 20 menit)
 - Dark / light theme
 - Report broken source / chapter
-- **Hybrid scrape:** source yang diblokir IP Vercel dijalankan di Cloudflare Worker
+- **Hybrid scrape:** source yang diblokir outbound IP Vercel dijalankan langsung di Cloudflare Worker (Cheerio)
 
 ---
 
@@ -37,15 +37,17 @@ UI
 | Layer | Role | Deploy |
 |-------|------|--------|
 | **frontend/** | UI + thin proxy + KV + hybrid Worker sources | Cloudflare Workers |
-| **scraper/** | Express + Cheerio, ~80 source adapters | Vercel (atau Render/Koyeb/Fly) |
+| **scraper/** | Express + Cheerio, ~80+ source adapters | Vercel (atau Render/Koyeb/Fly) |
 
-Worker free tier tetap aman: mayoritas request hanya `fetch()` JSON. Cheerio di Worker **hanya** untuk source yang gagal dari IP Vercel.
+Worker free tier tetap aman selama mayoritas request hanya `fetch()` JSON. Cheerio di Worker **hanya** untuk source yang gagal dari IP Vercel.
+
+> **Catatan:** Saat ini ada ~30 source di `WORKER_SOURCE_IDS` (banyak Indo + beberapa internasional yang diblokir). Bundle Worker membesar — pantau CPU time di dashboard Cloudflare.
 
 ---
 
 ## Tech Stack
 
-- **SvelteKit** + Svelte 5 + TypeScript
+- **SvelteKit** 2 + Svelte 5 + TypeScript
 - **Tailwind CSS** v4
 - **Cloudflare Workers** + Workers KV + Cron Triggers
 - **Express** + **Cheerio** (scraper microservice)
@@ -68,11 +70,12 @@ rokuyomu/
 │   │   │   │   │   ├── index.ts      # WORKER_SOURCE_IDS + registry
 │   │   │   │   │   ├── BaseSource.ts
 │   │   │   │   │   ├── types.ts
-│   │   │   │   │   └── impl/         # Copy adapter dari scraper
+│   │   │   │   │   └── impl/         # Copy adapter dari scraper (~30 file)
 │   │   │   │   ├── scraperClient.ts  # Hybrid routing
 │   │   │   │   ├── cache.ts
 │   │   │   │   ├── warmCache.ts
-│   │   │   │   └── syncSources.ts
+│   │   │   │   ├── syncSources.ts
+│   │   │   │   └── ...
 │   │   │   ├── stores/
 │   │   │   └── utils/
 │   │   └── routes/
@@ -80,6 +83,7 @@ rokuyomu/
 │   │       ├── manga/[source]/[...id]/
 │   │       ├── reader/[source]/[...id]/
 │   │       ├── bookmark/ history/ settings/ report/
+│   │       ├── about/ privacy/
 │   │       └── api/
 │   ├── wrangler.jsonc                # SCRAPER_BASE_URL, KV, cron
 │   └── package.json
@@ -90,8 +94,8 @@ rokuyomu/
     │   └── sources/
     │       ├── index.ts              # Full registry
     │       ├── BaseSource.ts
-    │       └── impl/                 # Semua adapter (~80)
-    ├── api/index.js                  # Bundle esbuild (Vercel)
+    │       └── impl/                 # Semua adapter (~80+)
+    ├── api/index.js                  # Bundle esbuild (Vercel) — jangan edit manual
     └── package.json
 ```
 
@@ -118,12 +122,14 @@ npx tsx src/index.ts
 # → http://localhost:3000
 ```
 
-Opsional — tambah script di `scraper/package.json`:
+Disarankan tambah script di `scraper/package.json`:
 
 ```json
 "scripts": {
   "dev": "tsx src/index.ts",
-  "start": "tsx src/index.ts"
+  "start": "tsx src/index.ts",
+  "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.js",
+  "vercel-build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.js"
 }
 ```
 
@@ -140,6 +146,7 @@ Buat `frontend/.env`:
 
 ```env
 SCRAPER_BASE_URL=http://localhost:3000
+# SCRAPER_API_KEY=optional
 ```
 
 ```bash
@@ -157,6 +164,7 @@ pnpm dev
 | `pnpm check` | svelte-check |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier |
 | `pnpm deploy` | Deploy ke Cloudflare Workers |
+| `pnpm cf-typegen` | Generate Worker types |
 
 ---
 
@@ -200,6 +208,11 @@ source ∈ WORKER_SOURCE_IDS  → Cheerio di CF Worker
 source lainnya              → scraper Vercel
 ```
 
+Saat ini (~30 source), termasuk:
+
+- Indo: `bacakomik`, `bacami`, `crotpedia`, `doujinku`, `holodek`, `ikiru`, `kiryuu`, `komikindo`, `komikstation`, `lumos`, `luvyaa`, `manhwadesu`, `manhwaindo`, `ngomik`, `sasangeyou`, `siikomik`, …
+- Internasional / lainnya: `klz9`, `rawkuma`, `athreascans`, `flamecomics`, `hentairead`, `kingcomix`, `manhuarmtl`, `onemanga`, `simplyhentai`, `weebcentral`, `ainzscans`, `pixhentai`, `lectortmo`, `zonatmo`, …
+
 ### Menambah source blocked
 
 1. Copy adapter:
@@ -207,11 +220,12 @@ source lainnya              → scraper Vercel
    cp scraper/src/sources/impl/Xxx.ts \
       frontend/src/lib/server/workerSources/impl/Xxx.ts
    ```
-2. Register di `workerSources/index.ts` (`import` + entry di `workerSources`).
+2. Register di `workerSources/index.ts` (import + entry di `workerSources`).
 3. Pastikan `cheerio` ada di `frontend/package.json`.
-4. `pnpm deploy`.
+4. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
+5. `pnpm deploy`.
 
-Jangan masukkan semua source ke Worker — jaga CPU free tier. Target: hanya yang benar-benar gagal di Vercel.
+Jaga jumlah Worker source tetap wajar. Bundle membesar + cold start CPU naik jika terlalu banyak.
 
 ### Warm / sync cache
 
@@ -231,6 +245,7 @@ Cron: `*/20 * * * *` (lihat `wrangler.jsonc`).
 | `GET /:sourceId/latest?page&lang&type&q` | Latest / search |
 | `GET /:sourceId/manga/*` | Detail manga |
 | `GET /:sourceId/chapter/*` | Halaman chapter |
+| `GET /:sourceId/manga-from-chapter?chapter=...` | Resolve mangaId dari chapter (opsional) |
 
 Header opsional: `x-api-key` jika `SCRAPER_API_KEY` di-set.
 
@@ -242,6 +257,7 @@ Header opsional: `x-api-key` jika `SCRAPER_API_KEY` di-set.
 - Bundle `scraper/api/index.js` untuk Vercel; jangan diedit manual; exclude dari `tsconfig` (`"exclude": ["api"]`).
 - Free tier Render/Koyeb bisa sleep — ping `/health` berkala jika scraper dipindah ke sana.
 - Frontend source registry = metadata only; scraping penuh di scraper atau `workerSources`.
+- Source baru (contoh: GD Scans, KS Group Scans, Vortex Scans) ditambahkan di scraper; register juga di frontend light registry.
 
 ---
 

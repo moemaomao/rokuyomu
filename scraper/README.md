@@ -22,7 +22,10 @@ Frontend **tidak** import adapter scraper secara default. Request datang sebagai
 GET /:sourceId/latest
 GET /:sourceId/manga/*
 GET /:sourceId/chapter/*
+GET /:sourceId/manga-from-chapter?chapter=...
 ```
+
+Source yang ada di `WORKER_SOURCE_IDS` (frontend) **tidak** memanggil API ini — di-parse langsung di Cloudflare Worker.
 
 ---
 
@@ -35,6 +38,7 @@ GET /:sourceId/chapter/*
 | `GET` | `/:sourceId/latest` | Query: `page`, `lang`, `type`, `q` (search jika `q` diisi) |
 | `GET` | `/:sourceId/manga/*` | Detail manga + chapters. Query: `lang` |
 | `GET` | `/:sourceId/chapter/*` | Array URL halaman gambar |
+| `GET` | `/:sourceId/manga-from-chapter` | Query: `chapter` → `{ mangaId }` (opsional, untuk resolve) |
 
 ### Auth (opsional)
 
@@ -67,7 +71,7 @@ scraper/
 │       ├── BaseSource.ts     # fetchHtml / fetchJson helpers
 │       ├── types.ts
 │       ├── index.ts          # Registry semua adapter
-│       └── impl/             # Satu file per source (~80)
+│       └── impl/             # Satu file per source (~80+)
 ├── api/
 │   └── index.js              # Output esbuild (Vercel) — jangan edit manual
 ├── package.json
@@ -93,7 +97,7 @@ npx tsx src/index.ts
 # → http://localhost:3000
 ```
 
-Disarankan tambah script di `package.json`:
+**Disarankan** tambah script di `package.json` (saat ini hanya ada `build` / `vercel-build`):
 
 ```json
 "scripts": {
@@ -120,7 +124,7 @@ curl http://localhost:3000/health
 
 ## Deploy
 
-### Vercel (default repo)
+### Vercel (default)
 
 - Root directory: `scraper`
 - Build command: `npm run vercel-build`
@@ -153,6 +157,7 @@ Contoh Render Web Service:
    - `searchManga`
    - `getMangaDetails`
    - `getChapterPages`
+   - (opsional) `resolveMangaIdFromChapter`
 3. Register di `src/sources/index.ts`.
 4. Tambah metadata id/name di **frontend** `src/lib/server/sources/index.ts`.
 5. Deploy scraper (+ frontend jika registry berubah).
@@ -166,6 +171,8 @@ Jangan andalkan scraper Vercel untuk source itu. Di frontend:
 
 Lihat `frontend/README.md` (hybrid).
 
+Contoh source yang sudah di hybrid: banyak Indo (`bacakomik`, `komikindo`, `kiryuu`, …) + `athreascans`, `rawkuma`, `flamecomics`, dll.
+
 ---
 
 ## TypeScript / IDE
@@ -178,7 +185,7 @@ Di `tsconfig.json`:
 "exclude": ["node_modules", "dist", "api"]
 ```
 
-Jangan commit perubahan manual di `api/index.js` kecuali dari `npm run build`.
+Jangan commit perubahan manual di `api/index.js` kecuali dari `npm run build` / `vercel-build`.
 
 ---
 
@@ -197,4 +204,5 @@ Jangan commit perubahan manual di `api/index.js` kecuali dari `npm run build`.
 - CORS: `origin: true` (siap dipanggil Worker).
 - Error scraping → `500` + `{ error: "..." }` (detail di server log).
 - Frontend hybrid: source di `WORKER_SOURCE_IDS` **tidak** memanggil API ini.
+- Source baru contoh: GD Scans, KS Group Scans, Vortex Scans (sudah ada di `impl/`).
 - Parent README: `../README.md`

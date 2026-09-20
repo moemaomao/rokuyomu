@@ -33,6 +33,8 @@ Browser
 Source yang diblokir outbound IP **Vercel** didaftarkan di `src/lib/server/workerSources/`.  
 Source lain selalu ke microservice `scraper/` (biasanya Vercel).
 
+Saat ini ada **~30 source** di Worker (banyak Indo + beberapa internasional). Bundle membesar — pantau CPU time.
+
 ---
 
 ## Tech
@@ -56,10 +58,10 @@ frontend/
 │   │   ├── server/
 │   │   │   ├── sources/           # Light registry (id + name only)
 │   │   │   ├── workerSources/     # Hybrid adapters (blocked-on-Vercel)
-│   │   │   │   ├── index.ts       # WORKER_SOURCE_IDS
+│   │   │   │   ├── index.ts       # WORKER_SOURCE_IDS + registry
 │   │   │   │   ├── BaseSource.ts
 │   │   │   │   ├── types.ts
-│   │   │   │   └── impl/
+│   │   │   │   └── impl/          # ~30 adapter (copy dari scraper)
 │   │   │   ├── scraperClient.ts   # Hybrid routing
 │   │   │   ├── cache.ts
 │   │   │   ├── warmCache.ts
@@ -148,7 +150,8 @@ pnpm dev
 2. Register di `src/lib/server/workerSources/index.ts`:
    ```ts
    import { XxxSource } from './impl/Xxx';
-   const workerSources = {
+   // ...
+   const workerSources: Record<string, IMangaSource> = {
      xxx: new XxxSource(),
      // ...
    };
@@ -156,7 +159,11 @@ pnpm dev
 3. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
 4. `pnpm deploy`.
 
-Jaga jumlah Worker source tetap terbatas (CPU free tier ~10 ms). Mayoritas source tetap di scraper Node.
+**Penting:** Jaga jumlah Worker source tetap wajar. Saat ini sudah ~30 — bundle membesar dan cold-start CPU naik. Hanya copy yang benar-benar gagal di Vercel.
+
+### Daftar Worker sources (saat ini)
+
+`klz9`, `zonatmo`, `lectortmo`, `rawkuma`, `athreascans`, `flamecomics`, `hentairead`, `kingcomix`, `manhuarmtl`, `onemanga`, `simplyhentai`, `weebcentral`, `ainzscans`, `bacakomik`, `bacami`, `crotpedia`, `doujinku`, `holodek`, `ikiru`, `kiryuu`, `komikindo`, `komikstation`, `lumos`, `luvyaa`, `manhwadesu`, `manhwaindo`, `ngomik`, `pixhentai`, `sasangeyou`, `siikomik`, …
 
 ---
 
@@ -183,6 +190,7 @@ Pastikan KV namespace id di `wrangler.jsonc` cocok dengan akun Cloudflare kamu.
 ## Catatan
 
 - `sources/index.ts` = metadata saja (tanpa Cheerio).
-- `scraperClient.ts` = satu pintu data untuk page server & API.
+- `scraperClient.ts` = satu pintu data untuk page server & API (hybrid-aware).
+- `getWorkerSource()` mengembalikan instance langsung (sync). Kode pemanggil boleh `await` (harmless).
 - Bundle Worker membesar jika terlalu banyak file di `workerSources/impl` — hanya copy yang perlu.
 - Parent README: `../README.md`
