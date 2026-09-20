@@ -1,9 +1,7 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { Search, Loader2, X, Tag } from 'lucide-svelte';
 	import type { Manga } from '$lib/server/sources/types';
 
-	// ── Common genres / tags ─────────────────────────────────────────────────
 	const TAG_OPTIONS = [
 		'Action',
 		'Adventure',
@@ -42,7 +40,7 @@
 	let error = $state('');
 	let meta = $state<{ returned?: number; sourcesTried?: number } | null>(null);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-	let showTags = $state(true); // default terbuka di halaman
+	let showTags = $state(true);
 
 	function toggleTag(tag: string) {
 		if (selectedTags.includes(tag)) {
@@ -158,7 +156,7 @@
 			type="search"
 			bind:value={query}
 			oninput={onInput}
-			placeholder="Cari judul manga..."
+			placeholder="Search manga title..."
 			class="w-full rounded-xl border border-zinc-700 bg-zinc-900/80 py-3 pr-12 pl-4 text-sm outline-none transition focus:border-violet-500"
 		/>
 		{#if loading}
@@ -214,7 +212,7 @@
 	<!-- Meta -->
 	{#if meta && !loading}
 		<p class="mb-4 text-xs text-zinc-500">
-			{meta.returned ?? 0} hasil · {meta.sourcesTried ?? 0} source
+			{meta.returned ?? 0} results · {meta.sourcesTried ?? 0} sources
 			<span class="opacity-70">(worker = KV only)</span>
 		</p>
 	{/if}
@@ -227,7 +225,7 @@
 					href={mangaHref(m)}
 					class="group overflow-hidden rounded-xl bg-zinc-900/50 transition hover:bg-zinc-800/80"
 				>
-					<div class="aspect-[2/3] overflow-hidden bg-zinc-800">
+					<div class="relative aspect-[2/3] overflow-hidden bg-zinc-800">
 						{#if m.cover}
 							<img
 								src={proxyCover(m.cover, m.sourceId)}
@@ -237,28 +235,35 @@
 								onerror={onCoverError}
 							/>
 						{/if}
+
+						<!-- Badge Source (transparent purple) -->
+						<span
+							class="absolute top-2 left-2 rounded-md bg-violet-600/40 px-2 py-0.5 text-[10px] font-bold capitalize text-violet-100 backdrop-blur-md"
+						>
+							{m.sourceId}
+						</span>
 					</div>
+
 					<div class="p-2.5">
 						<p class="line-clamp-2 text-sm font-medium leading-snug">
 							{m.title}
 						</p>
-						<p class="mt-1 text-xs capitalize text-zinc-500">
-							{m.sourceId}
-							{#if m.latestChapter}
-								· Ch. {m.latestChapter}
-							{/if}
-						</p>
+						{#if m.latestChapter}
+							<p class="mt-1 text-xs text-zinc-500">
+								Ch. {m.latestChapter}
+							</p>
+						{/if}
 					</div>
 				</a>
 			{/each}
 		</div>
 	{:else if !loading && (query.length >= 2 || selectedTags.length)}
 		<p class="text-center text-sm text-zinc-500">
-			Tidak ada hasil (worker source hanya dari cache KV).
+			No results found (worker sources are KV cache only).
 		</p>
 	{:else if !loading}
 		<p class="text-center text-sm text-zinc-500">
-			Ketik minimal 2 huruf atau pilih genre untuk mulai mencari.
+			Type at least 2 characters or select a genre to start searching.
 		</p>
 	{/if}
 </div>
