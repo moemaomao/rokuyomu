@@ -150,25 +150,25 @@
 		{/if}
 	</div>
 
-	<!-- Search Input -->
-	<div class="relative mb-4">
-		<input
-			type="search"
-			bind:value={query}
-			oninput={onInput}
-			placeholder="Search manga title..."
-			class="w-full rounded-xl border border-zinc-700 bg-zinc-900/80 py-3 pr-12 pl-4 text-sm outline-none transition focus:border-violet-500"
-		/>
-		{#if loading}
-			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2">
-				<Loader2 class="h-5 w-5 animate-spin text-violet-400" />
-			</span>
-		{:else}
-			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-zinc-500">
-				<Search class="h-5 w-5" />
-			</span>
-		{/if}
-	</div>
+<!-- Search Input -->
+<div class="relative mb-4">
+	<input
+	type="search"
+	bind:value={query}
+	oninput={onInput}
+	placeholder="Search manga title..."
+	class="theme-input w-full rounded-xl border border-zinc-700 bg-zinc-900/80 py-3 pr-12 pl-4 text-sm outline-none transition focus:border-violet-500"
+/>
+	{#if loading}
+		<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2">
+			<Loader2 class="h-5 w-5 animate-spin text-violet-400" />
+		</span>
+	{:else}
+		<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-zinc-500">
+			<Search class="h-5 w-5" />
+		</span>
+	{/if}
+</div>
 
 	<!-- Tags -->
 	<div class="mb-6">
