@@ -31,6 +31,7 @@ async function scraperFetch<T>(path: string): Promise<T> {
 	return (await res.json()) as T;
 }
 
+// ── Public API ──────────────────────────────────────────────────────────────
 
 export async function remoteSourceList(): Promise<Array<{ id: string; name: string }>> {
 	return scraperFetch('/sources');
@@ -41,9 +42,8 @@ export async function remoteLatest(
 	page: number,
 	opts: { lang?: string; type?: string; q?: string } = {}
 ): Promise<Manga[]> {
-
 	if (isWorkerSource(sourceId)) {
-		const adapter = getWorkerSource(sourceId);
+		const adapter = await getWorkerSource(sourceId);
 		const q = opts.q?.trim();
 		const data = q
 			? await adapter.searchManga(q, {
@@ -76,7 +76,7 @@ export async function remoteMangaDetails(
 	lang = 'all'
 ): Promise<MangaDetails> {
 	if (isWorkerSource(sourceId)) {
-		const adapter = getWorkerSource(sourceId);
+		const adapter = await getWorkerSource(sourceId); // ← await
 		const id = mangaId.startsWith('/') ? mangaId : `/${mangaId.replace(/^\/+/, '')}`;
 		return adapter.getMangaDetails(id, { lang });
 	}
@@ -89,7 +89,7 @@ export async function remoteMangaDetails(
 
 export async function remoteChapterPages(sourceId: string, chapterId: string): Promise<string[]> {
 	if (isWorkerSource(sourceId)) {
-		const adapter = getWorkerSource(sourceId);
+		const adapter = await getWorkerSource(sourceId); // ← await
 		const id = chapterId.startsWith('/') ? chapterId : `/${chapterId.replace(/^\/+/, '')}`;
 		const pages = await adapter.getChapterPages(id);
 		return Array.isArray(pages) ? pages : [];
@@ -99,14 +99,13 @@ export async function remoteChapterPages(sourceId: string, chapterId: string): P
 	return scraperFetch(`/${encodeURIComponent(sourceId)}/chapter/${id}`);
 }
 
-
 export async function remoteMangaFromChapter(
 	sourceId: string,
 	chapterId: string
 ): Promise<string | null> {
 	const chapter = chapterId.startsWith('/') ? chapterId : `/${chapterId.replace(/^\/+/, '')}`;
 	if (isWorkerSource(sourceId)) {
-		const adapter = getWorkerSource(sourceId) as {
+		const adapter = (await getWorkerSource(sourceId)) as {
 			resolveMangaIdFromChapter?: (id: string) => Promise<string | null>;
 		};
 		if (typeof adapter.resolveMangaIdFromChapter === 'function') {
