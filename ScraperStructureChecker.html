@@ -303,8 +303,7 @@
   const $ = (id) => document.getElementById(id);
 
   const ANTIBOT_RULES = [
-    // Cloudflare: jangan match kata "cloudflare" sembarangan (CDN/script innocuous).
-    // Hanya challenge / bot-management yang nyata.
+   
     { id: 'cloudflare_challenge', label: 'Cloudflare Challenge', severity: 'bad', patterns: [
       /cdn-cgi\/challenge-platform/i,
       /cf-browser-verification/i,
@@ -367,7 +366,7 @@
       /ddos-guard\.net/i,
       /DDOS-GUARD/i
     ]},
-    // Waiting room: harus lebih spesifik, bukan sekadar "please wait"
+  
     { id: 'js_challenge', label: 'JS browser check / waiting room', severity: 'warn', patterns: [
       /checking your browser before accessing/i,
       /browser check in progress/i,
@@ -442,7 +441,6 @@
   }
 
 
-  // Pola dalam: SPA data, reader obfuscation, session/image API (contoh Softkomik)
   const DEEP_PATTERNS = [
     { id: 'next_data', label: 'Next.js __NEXT_DATA__ (data di JSON, bukan DOM)', severity: 'info',
       test: (html) => /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>/i.test(html) },
@@ -468,6 +466,33 @@
       test: (html) => /wp-manga|manga_get_chapters|admin-ajax\.php/i.test(html) },
     { id: 'softkomik_like', label: 'Softkomik-like (API host + session chapter)', severity: 'warn',
       test: (html) => /softkomik|api\.softkomik|\/api\/session\/chapter|softdevices\.my\.id/i.test(html) },
+    { id: 'next_rsc_flight', label: 'Next.js RSC flight (self.__next_f.push) — data di flight, bukan DOM polos', severity: 'info',
+      test: (html) => /self\.__next_f\.push\s*\(/i.test(html) || /__next_f\.push\s*\(\s*\[1\s*,/i.test(html) },
+    { id: 'image_session_api', label: 'Image session gate (POST /api/image-session → unlock CDN)', severity: 'warn',
+      test: (html) => /\/api\/image-session|image-session|image_session|imageSession/i.test(html) },
+    { id: 'image_access_cookie', label: 'Cookie image access (ryu_image_access / image_access / chapter unlock)', severity: 'warn',
+      test: (html) => /ryu_image_access|image_access|image-access|chapter_access|img_access|unlock.*chapter|chapter.*unlock/i.test(html) },
+    { id: 'cdn_decoy', label: 'CDN decoy / promo image risk (storage CDN + session gate)', severity: 'warn',
+      test: (html) => {
+        const hasStorageCdn = /storage\.[a-z0-9.-]+\/(chapters|chapter|pages|manga)\//i.test(html)
+          || /https?:\/\/storage\.[a-z0-9.-]+\/chapters\//i.test(html);
+        const hasGate = /image-session|image_access|ryu_image|promo|placeholder|recruitment/i.test(html);
+        return hasStorageCdn && hasGate;
+      } },
+    { id: 'storage_cdn_chapters', label: 'Chapter images on storage.* CDN (/chapters/...)', severity: 'info',
+      test: (html) => /https?:\/\/storage\.[a-z0-9.-]+\/chapters\//i.test(html)
+        || /storage\.[a-z0-9.-]+\/chapters\/[^"'\s]+\.(?:jpg|jpeg|png|webp)/i.test(html) },
+    { id: 'project_search_api', label: 'Catalog search API (/api/source/.../search)', severity: 'info',
+      test: (html) => /\/api\/source\/[^"'\s]*search|api\/source\/project\/search/i.test(html) },
+    { id: 'ryukomik_like', label: 'Ryukomik-like (storage CDN + image-session + project paths)', severity: 'warn',
+      test: (html) => {
+        const a = /ryukomik|storage\.ryukomik|\/komik\/project\/|\/chapter\/project\//i.test(html);
+        const b = /image-session|ryu_image_access/i.test(html);
+        const c = /storage\.[a-z0-9.-]+\/chapters\//i.test(html) && /\/api\/image-session/i.test(html);
+        return a || c || (b && /storage\./i.test(html));
+      } },
+    { id: 'proxy_image_reader', label: 'App image proxy pattern (/api/proxy?url=...&source=)', severity: 'info',
+      test: (html) => /\/api\/proxy\?[^"'\s]*url=|proxyImage|proxy.*source=/i.test(html) },
   ];
 
   function extractNextDataSummary(html) {
@@ -493,7 +518,7 @@
         }
       };
       walk(data, '', 0);
-      // interesting fields
+
       const interesting = keys.filter(k =>
         /image|chapter|slug|token|sign|storage|pageProps|gambar|komik|cdn|src/i.test(k)
       ).slice(0, 50);
@@ -501,6 +526,43 @@
     } catch (e) {
       return { error: String(e), sample: m[1].slice(0, 400) };
     }
+  }
+
+
+  function extractFlightSummary(html) {
+    if (!/self\.__next_f\.push\s*\(/i.test(html)) return null;
+    const chunks = html.match(/self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)/g) || [];
+    let full = '';
+    for (const chunk of chunks) {
+      const m = chunk.match(/self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)/);
+      if (!m) continue;
+      try {
+        full += m[1]
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, '\n')
+          .replace(/\\\\/g, '\\');
+      } catch {
+        full += m[1];
+      }
+    }
+    const hints = [];
+    if (/\/api\/image-session/i.test(full + html)) hints.push('flight/html mentions /api/image-session');
+    if (/ryu_image_access|image_access/i.test(full + html)) hints.push('image access cookie name found');
+    if (/storage\.[a-z0-9.-]+\/chapters\//i.test(full + html)) hints.push('storage CDN /chapters/ URLs in flight or HTML');
+    const storageUrls = (full + html).match(/https?:\/\/storage\.[a-z0-9.-]+\/chapters\/[^"'\\\s]+/gi) || [];
+    const chapterKeys = (full + html).match(/[a-z0-9-]+\/chapter-\d+(?:\.\d+)?/gi) || [];
+    const apiPaths = (full + html).match(/\/api\/[a-z0-9/_-]+/gi) || [];
+    const uniqueApi = [...new Set(apiPaths)].slice(0, 30);
+    const uniqueStorage = [...new Set(storageUrls)].slice(0, 15);
+    return {
+      chunkCount: chunks.length,
+      decodedLen: full.length,
+      hints,
+      sampleApis: uniqueApi,
+      sampleStorage: uniqueStorage,
+      sampleChapterKeys: [...new Set(chapterKeys)].slice(0, 10),
+      sample: full.slice(0, 600)
+    };
   }
 
   function findApiHints(html) {
@@ -548,7 +610,6 @@
 
     const antibot = detectAntibot(html, '');
 
-    // Selector candidates
     const candidates = SELECTOR_HEURISTICS.map(group => {
       const hits = [];
       for (const sel of group.selectors) {
@@ -565,7 +626,6 @@
       return { name: group.name, hits };
     }).filter(g => g.hits.length);
 
-    // Link patterns (path frequency)
     const pathBuckets = {};
     for (const l of links) {
       try {
@@ -577,11 +637,9 @@
     }
     const topPaths = Object.entries(pathBuckets).sort((a,b) => b[1]-a[1]).slice(0, 12);
 
-    // JSON-LD
     const jsonld = [...doc.querySelectorAll('script[type="application/ld+json"]')]
       .map(s => s.textContent || '').filter(Boolean);
 
-    // Inline script snippets that look like chapter/image data
     const embeddedHints = [];
     for (const s of doc.querySelectorAll('script:not([src])')) {
       const t = s.textContent || '';
@@ -590,7 +648,6 @@
       }
     }
 
-    // Deep patterns (SPA / protected reader)
     const deepHits = [];
     for (const p of DEEP_PATTERNS) {
       try {
@@ -598,14 +655,24 @@
       } catch (_) {}
     }
     const nextSummary = extractNextDataSummary(html);
+    const flightSummary = extractFlightSummary(html);
     const apiHints = findApiHints(html);
 
-    // Merge deep into antibot display list (as extra findings)
+    if (flightSummary && flightSummary.sampleApis) {
+      for (const p of flightSummary.sampleApis) {
+        if (!apiHints.includes(p)) apiHints.push(p);
+      }
+    }
+    if (flightSummary && flightSummary.sampleStorage) {
+      for (const u of flightSummary.sampleStorage) {
+        if (!apiHints.includes(u)) apiHints.push(u);
+      }
+    }
+
     for (const d of deepHits) {
       antibot.push({ id: d.id, label: d.label, severity: d.severity, matched: d.id });
     }
 
-    // Score — info badges (WordPress/Blogger) tidak menurunkan skor
     let score = 70;
     const realBlocks = antibot.filter(a => a.severity === 'bad');
     const warns = antibot.filter(a => a.severity === 'warn');
@@ -617,8 +684,9 @@
     if (imgs.filter(i => i.dataSrc).length > 5) score += 5;
     if (imgs.length >= 8 && links.length >= 15) score += 8;
     if (links.length < 5 && imgs.length < 2) score -= 20;
-    // Next/API reader: DOM images may be few but data is in JSON/API — still scrape-able with adapter
     if (nextSummary && !nextSummary.error) score += 12;
+    if (flightSummary && flightSummary.chunkCount > 0) score += 8;
+    if (deepHits.some(d => d.id === 'image_session_api' || d.id === 'image_access_cookie')) score += 4;
     if (deepHits.some(d => d.id === 'image_api' || d.id === 'session_api')) score += 5;
     if (deepHits.some(d => d.id === 'decrypt_img' || d.id === 'blob_canvas')) score -= 8;
     // Hard challenge page only
@@ -630,7 +698,7 @@
       links, imgs, scripts,
       antibot, candidates, topPaths,
       jsonld, embeddedHints, score,
-      deepHits, nextSummary, apiHints,
+      deepHits, nextSummary, flightSummary, apiHints,
       counts: { links: links.length, imgs: imgs.length, scripts: scripts.length }
     };
   }
@@ -718,10 +786,36 @@
         `<div><span class="badge ${d.severity === 'info' ? 'info' : d.severity}">${d.severity}</span> <strong>${escapeHtml(d.label)}</strong></div>`
       ).join('');
       deepHtml += '</div>';
-      deepHtml += `<p class="hint">Kalau ada <strong>Session / token API</strong> atau <strong>Image list API</strong>, gambar di DOM sering palsu/placeholder.
-        Adapter harus: ambil data dari <code>__NEXT_DATA__</code> / API → session token → list imageSrc → CDN (pola Softkomik).</p>`;
+      deepHtml += `<p class="hint">
+        <strong>Softkomik-style:</strong> session token/sign → API <code>imageSrc</code> → CDN.<br/>
+        <strong>Ryukomik-style:</strong> <code>POST /api/image-session</code> → cookie unlock → URL <code>storage.../chapters/...</code>
+        (tanpa cookie, CDN bisa kirim gambar promo). Sering digabung Next.js RSC flight.
+        </p>`;
     } else {
       deepHtml += '<p class="hint">Tidak ada pola reader API / obfuscation khusus terdeteksi di HTML homepage. Coba paste juga <strong>halaman chapter (reader)</strong>.</p>';
+    }
+    if (result.flightSummary) {
+      const f = result.flightSummary;
+      deepHtml += '<h2>Next.js RSC flight (<code>__next_f.push</code>)</h2>';
+      deepHtml += `<p class="hint">Chunks: ${f.chunkCount} · decoded ~${f.decodedLen} chars</p>`;
+      if (f.hints && f.hints.length) {
+        deepHtml += '<div class="list">' + f.hints.map(h => `<div>${escapeHtml(h)}</div>`).join('') + '</div>';
+      }
+      if (f.sampleApis && f.sampleApis.length) {
+        deepHtml += '<p class="hint">API paths di flight/HTML:</p><div class="list">';
+        deepHtml += f.sampleApis.map(u => `<div class="mono">${escapeHtml(u)}</div>`).join('') + '</div>';
+      }
+      if (f.sampleStorage && f.sampleStorage.length) {
+        deepHtml += '<p class="hint">Storage CDN chapter URLs:</p><div class="list">';
+        deepHtml += f.sampleStorage.map(u => `<div class="mono">${escapeHtml(u)}</div>`).join('') + '</div>';
+        deepHtml += `<p class="hint"><strong>Image gate:</strong> URL storage bisa valid di HTML, tapi CDN sering kirim <em>promo/placeholder</em> sampai
+          <code>POST /api/image-session</code> + cookie access (pola Ryukomik). Scraper harus unlock dulu, lalu fetch gambar dengan cookie / lewat proxy.</p>`;
+      }
+      if (f.sampleChapterKeys && f.sampleChapterKeys.length) {
+        deepHtml += '<p class="hint">Chapter keys (untuk body image-session):</p><div class="list">';
+        deepHtml += f.sampleChapterKeys.map(u => `<div class="mono">${escapeHtml(u)}</div>`).join('') + '</div>';
+      }
+      if (f.sample) deepHtml += '<pre class="dump">' + escapeHtml(f.sample) + '</pre>';
     }
     if (result.nextSummary) {
       deepHtml += '<h2>__NEXT_DATA__</h2>';
@@ -751,7 +845,8 @@
       candidateGroups: result.candidates.map(c => ({ name: c.name, selectors: c.hits.map(h => ({ sel: h.selector, n: h.count })) })),
       deepHits: (result.deepHits || []).map(d => d.label),
       apiHints: result.apiHints || [],
-      nextInteresting: result.nextSummary && result.nextSummary.interesting
+      nextInteresting: result.nextSummary && result.nextSummary.interesting,
+      flight: result.flightSummary && { chunks: result.flightSummary.chunkCount, hints: result.flightSummary.hints, apis: result.flightSummary.sampleApis }
     }, null, 2))}</pre>`;
   }
 
@@ -793,7 +888,6 @@
       const res = await fetch(target, { credentials: 'omit' });
       const text = await res.text();
 
-      // Proxy error pages (corsproxy keyless, etc.) — bukan HTML situs target
       let proxyError = null;
       try {
         const j = JSON.parse(text);
@@ -817,7 +911,6 @@
       $('html').value = text;
       const result = analyze(text, url);
       if (res.status === 403 || res.status === 503) {
-        // Hanya flag kalau body juga mirip challenge CF, bukan error proxy
         if (/cloudflare|just a moment|cf-ray|attention required/i.test(text)) {
           result.antibot.unshift({ id: 'http', label: `HTTP ${res.status} + challenge page`, severity: 'bad', matched: 'status' });
           result.score = Math.min(result.score, 30);
