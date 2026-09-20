@@ -11,12 +11,6 @@ function sortChapters(list: Chapter[], newestFirst: boolean): Chapter[] {
 	return [...list].sort((a, b) => (newestFirst ? b.number - a.number : a.number - b.number));
 }
 
-/**
- * GET /api/chapters?source=&id=&lang=&offset=&limit=&sort=newest|oldest
- *
- * Membaca full detail dari KV (atau scrape sekali lalu cache),
- * lalu mengembalikan slice chapter saja — hemat payload ke browser.
- */
 export const GET: RequestHandler = async ({ url, locals }) => {
 	const source = url.searchParams.get('source')?.trim();
 	const rawId = url.searchParams.get('id')?.trim();

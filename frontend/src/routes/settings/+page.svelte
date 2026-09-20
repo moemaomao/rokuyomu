@@ -3,7 +3,7 @@
 	import { Check, Settings, AlertTriangle } from 'lucide-svelte';
 	import { getPreferredSources, setPreferredSources } from '$lib/stores/preferredSources';
 	import { getSourceMeta, groupSourcesByLang, LANG_LABELS } from '$lib/utils/sourceMeta';
-	import { isBrokenSource } from '$lib/stores/brokenSources';
+	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 	import type { PageData } from './$types';
 

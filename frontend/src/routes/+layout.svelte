@@ -10,9 +10,9 @@
 	import 'nprogress/nprogress.css';
 	import { isMultiMode } from '$lib/stores/impl';
 	import { untrack } from 'svelte';
-	import { collection, query, where, onSnapshot } from 'firebase/firestore';
+	import { collection, query, onSnapshot } from 'firebase/firestore';
     import { db } from '$lib/firebase';
-    import { setBrokenIds } from '$lib/stores/brokenSources';
+    import { setBrokenIds } from '$lib/stores/brokenSources.svelte.js';
 
 	// Components
 	import Footer from '$lib/components/Footer.svelte';
@@ -83,7 +83,7 @@
 
 	// ── UI state ─────────────────────────────────────────────────────────────
 	let isDesktop = $state(true);
-	let isSidebarOpen = $state(untrack(() => data.sidebarOpen));
+	let isSidebarOpen = $state(false);
 	let hasHydrated = $state(false);
 	let isDarkMode = $state(true);
 	let isBookmarkOpen = $state(false);
@@ -348,30 +348,35 @@ onMount(() => {
 
 	// ── Broken sources (ERROR badge) ───────────────────────────────────────
 	let unsubBroken: (() => void) | undefined;
-	if (db) {
-		try {
-			const qBroken = query(collection(db, 'reports'), where('type', '==', 'fix_source'));
-			unsubBroken = onSnapshot(
-				qBroken,
-				(snap) => {
-					const ids: string[] = [];
-					for (const d of snap.docs) {
-						const r = d.data() as { status?: string; sourceId?: string };
-						if (
-							(r.status === 'open' || r.status === 'in_progress') &&
-							r.sourceId
-						) {
-							ids.push(r.sourceId);
-						}
+if (db) {
+	try {
+		const qBroken = query(collection(db, 'reports'));
+		unsubBroken = onSnapshot(
+			qBroken,
+			(snap) => {
+				const ids: string[] = [];
+				for (const d of snap.docs) {
+					const r = d.data() as {
+						type?: string;
+						status?: string;
+						sourceId?: string;
+					};
+					if (
+						(r.type === 'fix_source' || r.type === 'bug') &&
+						(r.status === 'open' || r.status === 'in_progress') &&
+						r.sourceId
+					) {
+						ids.push(r.sourceId);
 					}
-					setBrokenIds(ids);
-				},
-				(err) => console.warn('[brokenSources]', err)
-			);
-		} catch (e) {
-			console.warn('[brokenSources] init failed', e);
-		}
+				}
+				setBrokenIds(ids);
+			},
+			(err) => console.warn('[brokenSources]', err)
+		);
+	} catch (e) {
+		console.warn('[brokenSources] init failed', e);
 	}
+}
 
 	return () => {
 		mq.removeEventListener('change', applyMq);

@@ -9,7 +9,7 @@
 		LANG_LABELS,
 		LANG_FILTER_SOURCES
 	} from '$lib/utils/sourceMeta';
-	import { isBrokenSource } from '$lib/stores/brokenSources';
+	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 
 	type SourceItem = { id: string; name: string };

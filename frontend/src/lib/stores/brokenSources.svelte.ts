@@ -1,4 +1,4 @@
-let brokenIds = new Set<string>();
+let brokenIds = $state(new Set<string>());
 
 function normalize(id: string): string {
 	return String(id || '')

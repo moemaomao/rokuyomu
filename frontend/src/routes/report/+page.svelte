@@ -30,7 +30,7 @@
 	} from 'lucide-svelte';
 	import type { PageData } from './$types';
 	import { groupSourcesByLang, LANG_LABELS, getSourceMeta } from '$lib/utils/sourceMeta';
-	import { setBrokenIds } from '$lib/stores/brokenSources';
+	import { setBrokenIds } from '$lib/stores/brokenSources.svelte';
 	import { getImpl } from '$lib/stores/impl';
 
 	type ReportType = 'add_source' | 'fix_source' | 'bug' | 'feature' | 'other';
