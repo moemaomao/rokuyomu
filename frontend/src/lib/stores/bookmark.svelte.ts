@@ -21,13 +21,17 @@ export type { BookmarkEntry };
 
 const MAX = 60;
 
+function bookmarkDocId(mangaId: string): string {
+	return encodeURIComponent(String(mangaId || '')).replace(/%/g, '_');
+}
+
 let bookmarks = $state<BookmarkEntry[]>([]);
 let ready = $state(false);
 
 if (browser) {
 	(async () => {
 		try {
-			// Migrasi dari localStorage lama
+	
 			const old = localStorage.getItem('mikoroku_bookmarks');
 			if (old) {
 				try {
@@ -125,7 +129,7 @@ export async function addBookmark(entry: Omit<BookmarkEntry, 'timestamp'>) {
 	const user = getUser();
 	if (user && db) {
 		try {
-			await setDoc(doc(db, 'users', user.uid, 'bookmarks', entry.mangaId), full);
+			await setDoc(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(entry.mangaId)), full);
 		} catch (e) {
 			console.error('Failed to sync bookmark to cloud', e);
 		}
@@ -143,7 +147,7 @@ export async function removeBookmark(mangaId: string) {
 	const user = getUser();
 	if (user && db) {
 		try {
-			await deleteDoc(doc(db, 'users', user.uid, 'bookmarks', mangaId));
+			await deleteDoc(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(mangaId)));
 		} catch (e) {
 			console.error('Failed to remove bookmark from cloud', e);
 		}
@@ -200,7 +204,7 @@ export async function syncBookmarksOnLogin() {
 
 		const batch = writeBatch(firestore);
 		merged.forEach((b) => {
-			batch.set(doc(firestore, 'users', user.uid, 'bookmarks', b.mangaId), b);
+			batch.set(doc(firestore, 'users', user.uid, 'bookmarks', bookmarkDocId(b.mangaId)), b);
 		});
 		await batch.commit();
 	} catch (e) {

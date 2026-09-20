@@ -24,6 +24,10 @@ const MAX_HISTORY = 30;
 let historyCache: ReadingEntry[] = [];
 let ready = false;
 
+function historyDocId(mangaId: string): string {
+	return encodeURIComponent(String(mangaId || '')).replace(/%/g, '_');
+}
+
 if (browser) {
 	(async () => {
 		try {
@@ -120,7 +124,10 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	const user = getUser();
 	if (user && db) {
 		try {
-			await setDoc(doc(db, 'users', user.uid, 'history', encodeURIComponent(entry.mangaId).replace(/%/g, '_')), full);
+			await setDoc(
+				doc(db, 'users', user.uid, 'history', historyDocId(entry.mangaId)),
+				full
+			);
 		} catch (e) {
 			console.error('Failed to sync history to cloud', e);
 		}
@@ -142,7 +149,9 @@ export async function removeFromHistory(mangaId: string) {
 	const user = getUser();
 	if (user && db) {
 		try {
-			await deleteDoc(doc(db, 'users', user.uid, 'history', mangaId));
+			await deleteDoc(
+				doc(db, 'users', user.uid, 'history', historyDocId(mangaId))
+			);
 		} catch (e) {
 			console.error('Failed to remove history from cloud', e);
 		}
@@ -190,7 +199,10 @@ export async function syncHistoryOnLogin() {
 
 		const batch = writeBatch(firestore);
 		merged.forEach((h) => {
-			batch.set(doc(firestore, 'users', user.uid, 'history', h.mangaId), h);
+			batch.set(
+				doc(firestore, 'users', user.uid, 'history', historyDocId(h.mangaId)),
+				h
+			);
 		});
 		await batch.commit();
 	} catch (e) {
