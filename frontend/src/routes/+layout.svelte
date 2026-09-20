@@ -49,7 +49,8 @@
 		Shield,
 		LogOut,
 		Github,
-		Settings
+		Settings,
+		Search
 	} from 'lucide-svelte';
 
 	// Stores
@@ -416,7 +417,7 @@ $effect(() => {
 		? 'bg-gradient-to-b from-violet-950/70 via-[#0c0910] to-[#0c0910] text-zinc-100'
 		: 'bg-[#f5f5f7] text-zinc-900'}"
 >
-	<!-- ========== LEFT SIDEBAR ========== -->
+		<!-- ========== LEFT SIDEBAR ========== -->
 	{#if isSidebarOpen && !isDesktop}
 		<button
 			onclick={closeOverlays}
@@ -454,6 +455,16 @@ $effect(() => {
 			class="relative z-10 flex-1 space-y-0.5 overflow-y-auto p-3 text-sm
 				{isDarkMode ? 'text-zinc-400' : 'text-zinc-600'}"
 		>
+			<!-- Deep Search -->
+			<a
+				href="/deep-search"
+				onclick={(e) => handleNavigate(e, '/deep-search')}
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<Search class="h-5 w-5 shrink-0" />
+				Deep Search
+			</a>
+
 			<a href="/" onclick={goHome} class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}">
 				<BookOpen class="h-5 w-5 shrink-0" /> Dummy
 			</a>
@@ -478,12 +489,12 @@ $effect(() => {
 				<History class="h-5 w-5 shrink-0" /> History
 			</a>
 			<a
-	           href="/report"
-	           onclick={(e) => handleNavigate(e, '/report')}
-	           class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
-            >
-	           <MessageSquare class="h-5 w-5 shrink-0" /> Report & Request
-            </a>
+				href="/report"
+				onclick={(e) => handleNavigate(e, '/report')}
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<MessageSquare class="h-5 w-5 shrink-0" /> Report & Request
+			</a>
 			<a
 				href="/settings"
 				onclick={(e) => handleNavigate(e, '/settings')}
