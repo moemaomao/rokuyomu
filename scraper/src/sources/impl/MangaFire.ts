@@ -15,6 +15,12 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  * Pages       : GET /api/chapters/{id} → data.pages[].url
  *
  * ID: manga "/title/{hid}" | chapter "/title/{hid}/chapter/{id}"
+ *
+ * Fix 2026-09-21:
+ * - User-Agent + sec-ch-ua modern (Chrome 128)
+ * - Retry + random delay saat kena CF 403
+ * - Header lebih mirip browser asli
+ * - rawGet support attempt untuk ganti UA
  */
 export class MangaFireSource extends BaseSource {
 	id = 'mangafire';
@@ -153,30 +159,55 @@ export class MangaFireSource extends BaseSource {
 		return url.toString();
 	}
 
-	private reqHeaders(json = true): Record<string, string> {
+	/** Header mirip browser modern + support extra override per attempt */
+	private reqHeaders(json = true, extra: Record<string, string> = {}): Record<string, string> {
+		const ua =
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
 		return {
-			'User-Agent':
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+			'User-Agent': ua,
 			Accept: json
 				? 'application/json, text/plain, */*'
-				: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+				: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
 			'Accept-Language': 'en-US,en;q=0.9',
+			'Accept-Encoding': 'gzip, deflate, br',
 			Origin: this.baseUrl,
 			Referer: `${this.baseUrl}/`,
-			'Sec-Fetch-Dest': 'empty',
-			'Sec-Fetch-Mode': 'cors',
-			'Sec-Fetch-Site': 'same-origin'
+			'Sec-Fetch-Dest': json ? 'empty' : 'document',
+			'Sec-Fetch-Mode': json ? 'cors' : 'navigate',
+			'Sec-Fetch-Site': 'same-origin',
+			'Sec-Fetch-User': '?1',
+			'sec-ch-ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+			'sec-ch-ua-mobile': '?0',
+			'sec-ch-ua-platform': '"Windows"',
+			'Cache-Control': 'no-cache',
+			Pragma: 'no-cache',
+			...extra
 		};
 	}
 
 	private async rawGet(
 		url: string,
-		json = true
+		json = true,
+		attempt = 1
 	): Promise<{ ok: boolean; status: number; text: string }> {
+		// Ganti header sedikit di attempt ke-2 supaya tidak terlihat pola yang sama
+		const extra =
+			attempt > 1
+				? {
+						'User-Agent':
+							'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+						'sec-ch-ua':
+							'"Not)A;Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"'
+					}
+				: {};
+
 		const res = await fetch(url, {
-			headers: this.reqHeaders(json),
-			redirect: 'follow'
+			headers: this.reqHeaders(json, extra),
+			redirect: 'follow',
+			cache: 'no-store'
 		});
+
 		const text = await res.text();
 		return { ok: res.ok, status: res.status, text };
 	}
@@ -186,29 +217,38 @@ export class MangaFireSource extends BaseSource {
 		params: Array<[string, string | number]> = []
 	): Promise<T> {
 		const url = this.buildSignedUrl(apiPath, params);
-		const maxAttempts = 2; // keep short — page.server has 10s timeout
+		const maxAttempts = 3;
 		let lastErr: unknown;
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 			try {
-				const { ok, status, text } = await this.rawGet(url, true);
+				// delay kecil + random biar tidak terlalu bot-like
+				if (attempt > 1) {
+					await new Promise((r) => setTimeout(r, 300 + Math.random() * 400));
+				}
+
+				const { ok, status, text } = await this.rawGet(url, true, attempt);
 				const trimmed = text.trim();
 
+				// deteksi Cloudflare challenge
 				if (
 					trimmed.startsWith('<') ||
-					/just a moment|cf-browser-verification|challenge-platform/i.test(trimmed)
+					/just a moment|cf-browser-verification|challenge-platform|cf-chl/i.test(
+						trimmed
+					)
 				) {
 					lastErr = new Error(`MangaFire blocked (CF) HTTP ${status}`);
 					console.error('[mangafire] CF/HTML block', apiPath, status);
-					if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 200));
 					continue;
 				}
 
 				if (!ok) {
-					console.error(`[mangafire] HTTP ${status} ${apiPath}`, trimmed.slice(0, 200));
-					if ((status === 429 || status === 503 || status === 403) && attempt < maxAttempts) {
+					console.error(
+						`[mangafire] HTTP ${status} ${apiPath}`,
+						trimmed.slice(0, 180)
+					);
+					if ([403, 429, 503].includes(status) && attempt < maxAttempts) {
 						lastErr = new Error(`MangaFire HTTP ${status}`);
-						await new Promise((r) => setTimeout(r, 250));
 						continue;
 					}
 					throw new Error(`MangaFire HTTP ${status}: ${trimmed.slice(0, 120)}`);
@@ -217,10 +257,7 @@ export class MangaFireSource extends BaseSource {
 				return JSON.parse(trimmed) as T;
 			} catch (e) {
 				lastErr = e;
-				if (attempt < maxAttempts) {
-					await new Promise((r) => setTimeout(r, 200));
-					continue;
-				}
+				if (attempt < maxAttempts) continue;
 			}
 		}
 
@@ -242,18 +279,39 @@ export class MangaFireSource extends BaseSource {
 		url.searchParams.append('genres_ex[]', '268930');
 		url.searchParams.append('genres_ex[]', '268932');
 
-		const { ok, status, text } = await this.rawGet(url.toString(), true);
-		if (!ok) {
-			console.error('[mangafire] top-titles HTTP', status, text.slice(0, 120));
-			return [];
+		const maxAttempts = 2;
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				if (attempt > 1) {
+					await new Promise((r) => setTimeout(r, 250 + Math.random() * 300));
+				}
+
+				const { ok, status, text } = await this.rawGet(
+					url.toString(),
+					true,
+					attempt
+				);
+
+				if (!ok || text.trim().startsWith('<')) {
+					console.error(
+						'[mangafire] top-titles HTTP',
+						status,
+						text.slice(0, 100)
+					);
+					if (attempt < maxAttempts) continue;
+					return [];
+				}
+
+				const data = JSON.parse(text) as { items?: any[] };
+				return Array.isArray(data?.items) ? data.items : [];
+			} catch (e) {
+				console.error('[mangafire] top-titles error', e);
+				if (attempt === maxAttempts) return [];
+			}
 		}
-		if (text.trim().startsWith('<')) return [];
-		try {
-			const data = JSON.parse(text) as { items?: any[] };
-			return Array.isArray(data?.items) ? data.items : [];
-		} catch {
-			return [];
-		}
+
+		return [];
 	}
 
 	private normalizeLang(lang?: string): string | null {
@@ -504,9 +562,7 @@ export class MangaFireSource extends BaseSource {
 			const list = (data?.items || [])
 				.map((it) => this.mapListItem(it, apiLang))
 				.filter(Boolean) as Manga[];
-			console.log(
-				`[mangafire] search "${q}" page=${page} → ${list.length}`
-			);
+			console.log(`[mangafire] search "${q}" page=${page} → ${list.length}`);
 			return list;
 		} catch (e) {
 			console.error('[mangafire] searchManga', e);
@@ -631,7 +687,9 @@ export class MangaFireSource extends BaseSource {
 
 		const description = [...metaLines, synopsis].filter(Boolean).join('\n');
 
-		console.log(`[mangafire] details ${hid} lang=${apiLang} → ch=${chapters.length}`);
+		console.log(
+			`[mangafire] details ${hid} lang=${apiLang} → ch=${chapters.length}`
+		);
 
 		return {
 			id: this.toMangaId(hid),
