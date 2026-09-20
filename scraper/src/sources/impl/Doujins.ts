@@ -359,7 +359,7 @@ export class DoujinsSource extends BaseSource {
 		}
 	}
 
-	async getMangaDetails(
+		async getMangaDetails(
 		mangaId: string,
 		_opts?: { lang?: string }
 	): Promise<MangaDetails> {
@@ -373,7 +373,6 @@ export class DoujinsSource extends BaseSource {
 			.replace(/\s*\|\s*Doujins\.com.*$/i, '')
 			.replace(/\s+/g, ' ')
 			.trim();
-
 		if (title.includes(' - ')) {
 			const parts = title.split(' - ');
 			if (parts.length >= 2) title = parts.slice(1).join(' - ').trim();
@@ -385,21 +384,23 @@ export class DoujinsSource extends BaseSource {
 			const firstN =
 				$('img[src*="static.doujins.com/n-"]').first().attr('src') ||
 				$('img[data-src*="static.doujins.com/n-"]').first().attr('data-src') ||
+				$('[data-file*="static.doujins.com/n-"]').first().attr('data-file') ||
 				'';
 			if (firstN) {
-				cover = firstN.replace(
-					/static\.doujins\.com\/n-/,
-					'static.doujins.com/f2-'
-				);
+				cover = firstN
+					.replace(/static\.doujins\.com\/n-/, 'static.doujins.com/f2-')
+					.split('?')[0];
 			}
 		}
 		cover = this.absUrl(cover);
 
 		const folderMsg = $('.folder-message, .folder-display')
-			.first()
-			.text()
+			.map((_, el) => $(el).text())
+			.get()
+			.join(' ')
 			.replace(/\s+/g, ' ')
 			.trim();
+
 		let updatedAt: number | undefined;
 		let pageCountFromMsg: number | undefined;
 		if (folderMsg) {
@@ -414,10 +415,29 @@ export class DoujinsSource extends BaseSource {
 			if (pm) pageCountFromMsg = parseInt(pm[1], 10);
 		}
 
+		const pageImgs = new Set<string>();
+		$('[data-file*="static.doujins.com/n-"]').each((_, el) => {
+			const f = ($(el).attr('data-file') || '').split('?')[0];
+			if (f) pageImgs.add(f);
+		});
+		$('[data-hash]').each((_, el) => {
+			const h = $(el).attr('data-hash');
+			if (h) pageImgs.add(h);
+		});
+	
+		if (pageImgs.size === 0) {
+			const re = /data-file="(https?:\/\/static\.doujins\.com\/n-[^"]+)"/gi;
+			let m: RegExpExecArray | null;
+			while ((m = re.exec(html)) !== null) {
+				pageImgs.add(m[1].replace(/&amp;/g, '&').split('?')[0]);
+			}
+		}
+
+		const pageCount = pageCountFromMsg || pageImgs.size || undefined;
+
 		const metaDesc = ($('meta[name="description"]').attr('content') || '')
 			.replace(/\s+/g, ' ')
 			.trim();
-
 		const genres: string[] = [];
 		const tagsMatch = metaDesc.match(/^Tags?:\s*(.+)$/i);
 		if (tagsMatch) {
@@ -447,18 +467,10 @@ export class DoujinsSource extends BaseSource {
 			const t = $(el).text().replace(/\s+/g, ' ').trim();
 			if (t && !authors.includes(t)) authors.push(t);
 		});
-
 		const byMatch = pageTitle.match(/\sby\s+([^|<]+)/i);
 		if (byMatch && !authors.length) {
 			authors.push(byMatch[1].trim());
 		}
-
-		const pageImgs = new Set<string>();
-		$('img[src*="static.doujins.com/n-"]').each((_, img) => {
-			const src = $(img).attr('src');
-			if (src) pageImgs.add(src.split('?')[0]);
-		});
-		const pageCount = pageCountFromMsg || pageImgs.size || undefined;
 
 		const dateStr = updatedAt
 			? new Date(updatedAt).toISOString().slice(0, 10)
@@ -499,29 +511,57 @@ export class DoujinsSource extends BaseSource {
 			const pages: string[] = [];
 			const seen = new Set<string>();
 
-			$(
-				'img[src*="static.doujins.com/n-"], img[data-src*="static.doujins.com/n-"]'
-			).each((_, img) => {
-				const src = $(img).attr('src') || $(img).attr('data-src') || '';
+			$('[data-file*="static.doujins.com/n-"], .doujin[data-file]').each((_, el) => {
+				let src = ($(el).attr('data-file') || '').replace(/&amp;/g, '&').trim();
+				if (!src) return;
 				const url = this.absUrl(src);
-				if (!url) return;
+				if (!url || !url.includes('static.doujins.com/n-')) return;
 				const key = url.split('?')[0];
 				if (seen.has(key)) return;
 				seen.add(key);
 				pages.push(url);
 			});
 
-			if (pages.length === 0) {
+			if (pages.length <= 1) {
+				$(
+					'img[src*="static.doujins.com/n-"], img[data-src*="static.doujins.com/n-"]'
+				).each((_, img) => {
+					const src =
+						($(img).attr('src') || $(img).attr('data-src') || '').replace(
+							/&amp;/g,
+							'&'
+						);
+					const url = this.absUrl(src);
+					if (!url || !url.includes('/n-')) return;
+					const key = url.split('?')[0];
+					if (seen.has(key)) return;
+					seen.add(key);
+					pages.push(url);
+				});
+			}
+
+			if (pages.length <= 1) {
 				const re =
 					/(https?:\/\/static\.doujins\.com\/n-[a-z0-9]+\.jpg[^"'\\\s]*)/gi;
 				let m: RegExpExecArray | null;
 				while ((m = re.exec(html)) !== null) {
-					const url = this.absUrl(m[1]);
+					const url = this.absUrl(m[1].replace(/&amp;/g, '&'));
 					const key = url.split('?')[0];
 					if (seen.has(key)) continue;
 					seen.add(key);
 					pages.push(url);
 				}
+			}
+
+			if (pages.length <= 1) {
+				$('[data-hash]').each((_, el) => {
+					const hash = ($(el).attr('data-hash') || '').trim();
+					if (!hash || !/^[a-z0-9]+$/i.test(hash)) return;
+					const url = `https://static.doujins.com/n-${hash}.jpg`;
+					if (seen.has(url)) return;
+					seen.add(url);
+					pages.push(url);
+				});
 			}
 
 			console.log(`[doujins] getChapterPages ${path} → ${pages.length} pages`);
