@@ -19,7 +19,6 @@
 	let loadMoreEl: HTMLElement | null = $state(null);
 	let loadingMore = $state(false);
 
-	// Chapter list from server (already sliced). Append via /api/chapters.
 	let loadedChapters = $state<any[]>([]);
 	let chapterTotal = $state(0);
 	let chapterOffset = $state(0);
@@ -31,7 +30,6 @@
 	let displayedChapters = $derived(loadedChapters);
 	let remainingChapters = $derived(Math.max(0, chapterTotal - loadedChapters.length));
 
-	// Sync from server load data when manga changes
 	$effect(() => {
 		const m = manga;
 		const total = (data as any).chapterTotal as number | undefined;
@@ -92,7 +90,6 @@
 
 	async function showAllChapters() {
 		if (loadingMore || !hasMoreChapters) return;
-		// load remaining in chunks
 		loadingMore = true;
 		try {
 			while (hasMoreChapters) {
@@ -273,7 +270,7 @@
 		} catch {
 			/* ignore */
 		}
-		// re-fetch first page with new sort (server-side)
+
 		chapterOffset = 0;
 		hasMoreChapters = true;
 		fetchChapterPage(0, 20, sortNewest, true);
@@ -340,7 +337,6 @@
 		return () => window.removeEventListener('bookmarks-changed', onChange);
 	});
 
-	// Soft infinite scroll: only after user has scrolled a bit, load one batch at a time
 	$effect(() => {
 		const el = loadMoreEl;
 		if (!el || !hasMoreChapters) return;
@@ -349,12 +345,10 @@
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (!entries[0]?.isIntersecting || locked) return;
-				// Jangan auto-load di atas fold — user harus scroll dulu
 				if (window.scrollY < 80) return;
 				locked = true;
 				observer.unobserve(el);
 				loadMoreChapters();
-				// re-arm setelah DOM update (effect jalan lagi karena hasMore/offset berubah)
 			},
 			{ rootMargin: '120px', threshold: 0.15 }
 		);
@@ -388,11 +382,11 @@
 </svelte:head>
 
 {#if !manga}
-	<div class="py-20 text-center text-zinc-500">Manga tidak ditemukan</div>
+	<div class="py-20 text-center text-zinc-500">Manga not found</div>
 {:else}
 	<div
-		class="detail-page mx-auto w-full max-w-[480px] md:max-w-[720px] md:px-4 md:py-5 lg:max-w-[1150px] lg:py-7"
-	>
+          class="detail-page mx-auto w-full max-w-[480px] md:max-w-[720px] md:px-4 md:py-5 lg:max-w-none lg:px-3 lg:py-5 xl:px-4"
+         >
 		<div
 			class="detail-container relative min-h-screen overflow-hidden rounded-none md:min-h-0 md:rounded-2xl md:border md:shadow-2xl lg:rounded-3xl"
 		>
@@ -404,7 +398,7 @@
 				<div class="detail-overlay absolute inset-0"></div>
 			{/if}
 
-			<div class="relative z-10 p-[18px_14px_14px] md:p-[35px_30px_25px] lg:p-[40px_40px_30px]">
+			<div class="relative z-10 p-[18px_14px_14px] md:p-[28px_24px_20px] lg:p-[28px_24px_22px] xl:p-[32px_28px_24px]">
 				<!-- Cover + Info -->
 				<div class="flex items-start gap-3.5 md:gap-7 lg:gap-10">
 					<div class="flex w-[100px] shrink-0 flex-col items-center gap-3 md:w-[200px] lg:w-[240px]">
@@ -923,7 +917,6 @@
 		border-color: rgba(59, 130, 246, 0.45);
 	}
 
-	/* garis lurus nyambung ke border tombol, ujung luar meruncing */
 	.load-more-row {
 		gap: 0;
 	}
