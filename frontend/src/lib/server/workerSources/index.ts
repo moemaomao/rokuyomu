@@ -48,7 +48,8 @@ export const WORKER_SOURCE_IDS = new Set([
 	'ngomik',
 	'pixhentai',
 	'sasangeyou',
-	'siikomik'
+	'siikomik',
+	'demonicscans'
 ]);
 
 const instanceCache = new Map<string, IMangaSource>();
@@ -56,6 +57,7 @@ const instanceCache = new Map<string, IMangaSource>();
 const loaders: Record<string, () => Promise<IMangaSource>> = {
 	klz9: async () => new (await import('./impl/Klz9')).Klz9Source(),
 	rawkuma: async () => new (await import('./impl/Rawkuma')).RawkumaSource(),
+	demonicscans: async () => new (await import('./impl/DemonicScans')).DemonicScansSource(),
 	athreascans: async () => new (await import('./impl/AthreaScans')).AthreaScansSource(),
 	flamecomics: async () => new (await import('./impl/FlameComics')).FlameComicsSource(),
 	hentairead: async () => new (await import('./impl/Hentairead')).HentaireadSource(),
