@@ -93,11 +93,13 @@ import { KSGroupScansSource } from './impl/KSGroupScans';
 import { VortexScansSource } from './impl/VortexScans';
 import { MangaMuraSource } from './impl/MangaMura';
 import { RawUwUSource } from './impl/RawUwU';
+import { RavenScansSource } from './impl/RavenScans';
 import type { IMangaSource } from './types';
 
 
 const sources: Record<string, IMangaSource> = {
     gdscans: new GDScansSource(),
+    ravenscans: new RavenScansSource(),
     rawuwu: new RawUwUSource(),
     mangamura: new MangaMuraSource(),
     vortexscans: new VortexScansSource(),

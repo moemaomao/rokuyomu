@@ -7,7 +7,6 @@ import {
 	type RefreshResult
 } from '$lib/server/refreshSources';
 
-/** Cron warm: skip scrape jika KV masih valid. */
 export async function warmPopularSources(kv: KVNamespace) {
 	const report = await refreshPopularSources(kv, { force: false });
 
