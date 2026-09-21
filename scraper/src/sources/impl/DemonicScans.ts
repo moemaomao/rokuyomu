@@ -16,6 +16,9 @@ import * as cheerio from 'cheerio';
  * ID format:
  *   manga   : "/manga/{slug}"
  *   chapter : "/chaptered.php?manga={mangaId}&chapter={chapterNum}"
+ *
+ * SSL: kalau CERT_HAS_EXPIRED di Node scraper, jalankan dengan:
+ *   NODE_TLS_REJECT_UNAUTHORIZED=0 npx tsx src/index.ts
  */
 export class DemonicScansSource extends BaseSource {
 	id = 'demonicscans';
@@ -134,16 +137,13 @@ export class DemonicScansSource extends BaseSource {
 				$el.find('h2 a, h2').first().text() ||
 				$el.find('img').attr('alt') ||
 				'';
-			// alt sering "Title;;AltTitle" — ambil bagian pertama
 			title = this.normalizeTitle(title.split(';;')[0] || title);
 			if (!title) return;
 
 			const $img = $el.find('.thumb img, img').first();
-			let cover =
-				$img.attr('data-src') ||
-				$img.attr('src') ||
-				'';
-			cover = this.absUrl(cover);
+			const cover = this.absUrl(
+				$img.attr('data-src') || $img.attr('src') || ''
+			);
 
 			let latestChapter: string | undefined;
 			const chText = $el
@@ -220,7 +220,6 @@ export class DemonicScansSource extends BaseSource {
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			// list=1 default, list=2 dst untuk page berikutnya
 			const path =
 				p <= 1 ? '/lastupdates.php' : `/lastupdates.php?list=${p}`;
 			const html = await this.fetchHtml(path);
@@ -242,7 +241,6 @@ export class DemonicScansSource extends BaseSource {
 		if (!q) return this.getLatestManga(page, opts);
 
 		try {
-			// search endpoint tidak pakai page di query string yang stabil
 			const html = await this.fetchHtml(
 				`/search.php?manga=${encodeURIComponent(q)}`
 			);
@@ -283,14 +281,17 @@ export class DemonicScansSource extends BaseSource {
 			'';
 		cover = this.absUrl(cover);
 
-		// deskripsi: ambil blok teks panjang di area info
 		let description = '';
 		$('#manga-info-container, #manga-page')
 			.parent()
 			.find('p, div')
 			.each((_, el) => {
 				const t = $(el).text().replace(/\s+/g, ' ').trim();
-				if (t.length > description.length && t.length > 40 && t.length < 2000) {
+				if (
+					t.length > description.length &&
+					t.length > 40 &&
+					t.length < 2000
+				) {
 					description = t;
 				}
 			});
@@ -304,11 +305,15 @@ export class DemonicScansSource extends BaseSource {
 
 		let status = 'Ongoing';
 		const bodyText = $.text();
-		const statusMatch = bodyText.match(/Status\s*[:\-]?\s*(Ongoing|Completed|Hiatus|Dropped)/i);
+		const statusMatch = bodyText.match(
+			/Status\s*[:\-]?\s*(Ongoing|Completed|Hiatus|Dropped)/i
+		);
 		if (statusMatch) status = this.mapStatus(statusMatch[1]);
 
 		const authors: string[] = [];
-		const authorMatch = bodyText.match(/Author\s*[:\-]?\s*([^\n|]{2,60})/i);
+		const authorMatch = bodyText.match(
+			/Author\s*[:\-]?\s*([^\n|]{2,60})/i
+		);
 		if (authorMatch) {
 			const name = authorMatch[1].replace(/\s+/g, ' ').trim();
 			if (name && name.length < 80) authors.push(name);
@@ -338,7 +343,6 @@ export class DemonicScansSource extends BaseSource {
 			});
 		});
 
-		// newest first
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 		const latestChapter =
 			chapters.length > 0 ? String(chapters[0].number) : undefined;
@@ -387,17 +391,13 @@ export class DemonicScansSource extends BaseSource {
 				pages.push(url);
 			};
 
-			$('img.imgholder, img[class*="imgholder"], #gotopreader ~ img, img[onload*="delay"]').each(
-				(_, img) => {
-					const $img = $(img);
-					push(
-						$img.attr('data-src') ||
-							$img.attr('src')
-					);
-				}
-			);
+			$(
+				'img.imgholder, img[class*="imgholder"], #gotopreader ~ img, img[onload*="delay"]'
+			).each((_, img) => {
+				const $img = $(img);
+				push($img.attr('data-src') || $img.attr('src'));
+			});
 
-			// fallback regex CDN
 			if (pages.length === 0) {
 				const re =
 					/(https?:\/\/(?:cdn\.)?(?:demoniclibs|librarydm)\.com\/[^"'\\\s]+\.(?:jpg|jpeg|png|webp|avif))/gi;
