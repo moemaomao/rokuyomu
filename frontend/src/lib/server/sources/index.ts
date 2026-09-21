@@ -98,6 +98,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'sektedoujin', name: 'Sekte Doujin' },
 	{ id: 'siikomik', name: 'Siikomik' },
 	{ id: 'ravenscans', name: 'Raven Scans' },
+	{ id: 'demonicscans', name: 'Demonic Scans' }
 ];
 
 export function getSourceList(): SourceMeta[] {

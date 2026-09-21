@@ -327,7 +327,6 @@ export class RavenScansSource extends BaseSource {
 			});
 		});
 
-		// newest first
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 
 		const latestChapter =
@@ -370,7 +369,6 @@ export class RavenScansSource extends BaseSource {
 				pages.push(url);
 			};
 
-			// Themesia: images often inside #readerarea > noscript
 			$('#readerarea img, .readerarea img, #reader img, #readerarea noscript img').each(
 				(_, img) => {
 					const $img = $(img);
@@ -382,7 +380,6 @@ export class RavenScansSource extends BaseSource {
 				}
 			);
 
-			// Fallback: parse noscript raw HTML if cheerio skipped it
 			if (pages.length === 0) {
 				const noscript = $('#readerarea noscript').html() || '';
 				if (noscript) {
@@ -393,7 +390,6 @@ export class RavenScansSource extends BaseSource {
 				}
 			}
 
-			// Fallback: CDN pattern
 			if (pages.length === 0) {
 				const re =
 					/(https?:\/\/cdn\d*\.ravenscans\.(?:org|net)\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
@@ -403,7 +399,6 @@ export class RavenScansSource extends BaseSource {
 				}
 			}
 
-			// Last resort: generic uploads
 			if (pages.length === 0) {
 				const re =
 					/(https?:\/\/[^"'\\\s]+\/(?:wp-content\/uploads\/manga|cdn)\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;

@@ -98,6 +98,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	westmanga: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	soulscans: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	ravenscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-red-500' },
+	demonicscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-purple-600' }
 };
 
 export const DEFAULT_META: SourceMeta = {
