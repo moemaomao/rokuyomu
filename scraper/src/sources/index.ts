@@ -96,11 +96,13 @@ import { RawUwUSource } from './impl/RawUwU';
 import { RavenScansSource } from './impl/RavenScans';
 import { DemonicScansSource } from './impl/DemonicScans';
 import { RenaScansSource } from './impl/RenaScans';
+import { HentailoopSource } from './impl/Hentailoop';
 import type { IMangaSource } from './types';
 
 
 const sources: Record<string, IMangaSource> = {
     gdscans: new GDScansSource(),
+    hentailoop: new HentailoopSource(),
     renascans: new RenaScansSource(),
     demonicscans: new DemonicScansSource(),
     ravenscans: new RavenScansSource(),

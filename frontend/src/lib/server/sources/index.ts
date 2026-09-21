@@ -100,6 +100,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'ravenscans', name: 'Raven Scans' },
 	{ id: 'demonicscans', name: 'Demonic Scans' },
 	{ id: 'renascans', name: 'Rena Scans' },
+	{ id: 'hentailoop', name: 'HentaiLoop' },
 ];
 
 export function getSourceList(): SourceMeta[] {

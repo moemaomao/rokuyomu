@@ -38,6 +38,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	nhentai: { flag: 'un', lang: 'Multi', isR18: true, color: 'bg-rose-600' },
 	nhentainet: { flag: 'un', lang: 'Multi', isR18: true, color: 'bg-rose-600' },
 	hentaifox: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-red-600' },
+	hentailoop: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-red-600' },
 	pornhwa: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-fuchsia-600' },
 	kingcomix: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-orange-600' },
 	ehentai: { flag: 'un', lang: 'Multi', isR18: true, color: 'bg-purple-600' },
