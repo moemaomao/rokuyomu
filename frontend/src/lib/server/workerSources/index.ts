@@ -22,8 +22,6 @@ import type { IMangaSource } from './types';
 
 export const WORKER_SOURCE_IDS = new Set([
 	'klz9',
-	'zonatmo',
-	'lectortmo',
 	'rawkuma',
 	'athreascans',
 	'flamecomics',
