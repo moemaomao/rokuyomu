@@ -188,24 +188,37 @@ export class SilentQuillSource extends BaseSource {
 
 	// ── Catalog ──────────────────────────────────────────────────────────────
 
-	async getLatestManga(
-		page: number,
-		_opts?: { lang?: string; type?: string }
-	): Promise<Manga[]> {
-		try {
-			const p = Math.max(1, Number(page) || 1);
-			const html = await this.fetchHtml(
-				`/manga/?page=${p}&order=update`
-			);
-			const $ = cheerio.load(html);
-			const list = this.parseCards($);
-			console.log(`[silentquill] latest page=${p} → ${list.length} items`);
-			return list;
-		} catch (e) {
-			console.error('[silentquill] getLatestManga', e);
-			return [];
-		}
-	}
+	async getLatestManga(page: number, _opts?: { lang?: string; type?: string }): Promise<Manga[]> {
+  try {
+    const p = Math.max(1, Number(page) || 1);
+    const html = await this.fetchHtml(`/manga/?page=${p}&order=update`);
+
+    console.log('[silentquill] has __NEXT_DATA__?', html.includes('__NEXT_DATA__'));
+    console.log('[silentquill] has buildId?', /"buildId"\s*:\s*"/.test(html));
+    
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (nextDataMatch) {
+      console.log('[silentquill] __NEXT_DATA__ sample:', nextDataMatch[1].slice(0, 1500));
+    }
+
+    const apiMatches = html.match(/\/api\/[a-z0-9/_-]+/gi) || [];
+    console.log('[silentquill] API paths found:', [...new Set(apiMatches)].slice(0, 20));
+
+    const seriesMatches = html.match(/"(?:series|comics|manga|posts)"\s*:/gi) || [];
+    console.log('[silentquill] series-like keys:', seriesMatches.slice(0, 10));
+
+    console.log('[silentquill] HTML length:', html.length);
+    console.log('[silentquill] body sample (mid):', html.slice(50000, 52000)); // tengah HTML
+
+    const $ = cheerio.load(html);
+    const list = this.parseCards($);
+    console.log(`[silentquill] latest page=${p} → ${list.length} items`);
+    return list;
+  } catch (e) {
+    console.error('[silentquill] getLatestManga', e);
+    return [];
+  }
+}
 
 	async searchManga(
 		query: string,
