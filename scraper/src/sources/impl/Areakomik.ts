@@ -81,7 +81,6 @@ export class AreakomikSource extends BaseSource {
 		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
 	}
 
-	/** Parse chapter badge text → string number for latestChapter */
 	private chapterBadge(text: string): string | undefined {
 		const t = String(text || '')
 			.replace(/\s+/g, ' ')
@@ -89,7 +88,7 @@ export class AreakomikSource extends BaseSource {
 		if (!t) return undefined;
 		const n = this.parseChapterNumber(t);
 		if (n > 0) return String(n);
-		// fallback: "Ch. 01", "Chapter End", etc.
+
 		const m = t.match(/(?:ch\.?|chapter)\s*([0-9]+(?:\.[0-9]+)?)/i);
 		if (m) return m[1];
 		return undefined;
@@ -129,7 +128,6 @@ export class AreakomikSource extends BaseSource {
 			});
 		};
 
-		// Kartu utama: article.komik-card
 		$('article.komik-card, .komik-card').each((_, el) => {
 			const $el = $(el);
 			const a =
@@ -164,7 +162,6 @@ export class AreakomikSource extends BaseSource {
 				$el.find('.status-badge').first().attr('class') ||
 				'';
 
-			// Badge chapter: beberapa layout beda class
 			const chText =
 				$el.find('a.chapter-link').first().text() ||
 				$el.find('.chapter-row a[href*="/chapter/"]').first().text() ||
@@ -175,7 +172,7 @@ export class AreakomikSource extends BaseSource {
 			push(href, title, cover, typeText, statusText, chText);
 		});
 
-		// Section UPDATE TERBARU (kadang struktur beda)
+	
 		$('.linut-item, .lin-update-today .linut-item, .update-item').each((_, el) => {
 			const $el = $(el);
 			const seriesA = $el.find('a[href*="/series/"]').first();
@@ -199,7 +196,6 @@ export class AreakomikSource extends BaseSource {
 			push(href, title, cover, typeText, statusText, chText);
 		});
 
-		// Fallback global
 		if (!out.length) {
 			$('a[href*="/series/"]').each((_, el) => {
 				const $a = $(el);
@@ -224,24 +220,126 @@ export class AreakomikSource extends BaseSource {
 		return out;
 	}
 
+	private parseUpdateTerbaru($: cheerio.CheerioAPI): Manga[] {
+		const out: Manga[] = [];
+		const seen = new Set<string>();
+
+		let $grid: cheerio.Cheerio<any> | null = null;
+
+		$('h2.section-title, h2').each((_, el) => {
+			const text = $(el).text().replace(/\s+/g, ' ').trim();
+			if (!/UPDATE\s*TERBARU/i.test(text)) return;
+
+			let sib = $(el).next();
+			for (let i = 0; i < 8 && sib.length; i++) {
+				if (sib.is('.komik-grid')) {
+					$grid = sib;
+					break;
+				}
+				const nested = sib.find('.komik-grid').first();
+				if (nested.length) {
+					$grid = nested;
+					break;
+				}
+				sib = sib.next();
+			}
+			return false;
+		});
+
+		if (!$grid || !$grid.length) {
+			const grids = $('.komik-grid');
+			if (grids.length) $grid = grids.last();
+		}
+
+		if (!$grid || !$grid.length) {
+			console.warn('[areakomik] UPDATE TERBARU grid not found');
+			return [];
+		}
+
+		$grid.find('article.komik-card, .komik-card').each((_, el) => {
+			const $el = $(el);
+			const a =
+				$el.find('h3.card-title a[href*="/series/"]').first().length > 0
+					? $el.find('h3.card-title a[href*="/series/"]').first()
+					: $el.find('a.thumb-wrap[href*="/series/"]').first().length > 0
+						? $el.find('a.thumb-wrap[href*="/series/"]').first()
+						: $el.find('a[href*="/series/"]').first();
+
+			const href = a.attr('href') || '';
+			if (!href) return;
+
+			const id = this.cleanId(href);
+			if (!/^\/series\/[^/]+$/i.test(id)) return;
+			if (seen.has(id)) return;
+			seen.add(id);
+
+			const title = (
+				$el.find('h3.card-title a').first().text() ||
+				a.attr('title') ||
+				a.text() ||
+				$el.find('img').attr('alt') ||
+				''
+			)
+				.replace(/\s+/g, ' ')
+				.trim();
+			if (!title || title.length < 2) return;
+
+			const cover = this.preferFullCover(
+				this.absUrl(
+					(
+						$el.find('img').first().attr('src') ||
+						$el.find('img').first().attr('data-src') ||
+						''
+					).split('?')[0]
+				)
+			);
+
+			const typeText =
+				$el.find('.type-badge').first().text() ||
+				$el.find('[class*="type-"]').first().attr('class') ||
+				'';
+			const statusText =
+				$el.find('.status-badge').first().text() ||
+				$el.find('.status-badge').first().attr('class') ||
+				'';
+
+			const chText =
+				$el.find('a.chapter-link').first().text() ||
+				$el.find('.chapter-row a[href*="/chapter/"]').first().text() ||
+				$el.find('a[href*="/chapter/"]').first().text() ||
+				'';
+
+			const latestChapter = this.chapterBadge(chText);
+
+			out.push({
+				id,
+				sourceId: this.id,
+				title,
+				cover,
+				type: this.detectType(typeText),
+				status: this.mapStatus(statusText),
+				latestChapter,
+				lang: this.DEFAULT_LANG
+			});
+		});
+
+		return out;
+	}
+
 	async getLatestManga(
 		page: number,
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			// Pagination site: /page/2/  (bukan query ?page=)
 			const path = p <= 1 ? `/` : `/page/${p}/`;
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
-			const list = this.parseCards($);
-
-			// Homepage punya popular + update — dedupe sudah di parseCards.
-			// Ambil semua card unik; jangan slice terlalu agresif agar page 2 beda.
+			const list = this.parseUpdateTerbaru($);
 			const pageList = list.slice(0, this.PER_PAGE);
 
 			console.log(
-				`[areakomik] latest page=${p} path=${path} → ${pageList.length} (raw=${list.length})`
+				`[areakomik] latest page=${p} path=${path} → ${pageList.length} (update-only, raw=${list.length})`
 			);
 			return pageList;
 		} catch (e) {
@@ -345,7 +443,6 @@ export class AreakomikSource extends BaseSource {
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
 
-		// Sinopsis bersih — jangan campur meta
 		const synopsis = (
 			$('.series-sinopsis, .sinopsis').first().text() ||
 			$('.entry-content').first().text() ||
