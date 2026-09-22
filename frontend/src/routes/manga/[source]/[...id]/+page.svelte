@@ -2,6 +2,7 @@
 	import type { PageData } from './$types';
 	import { onMount } from 'svelte';
 	import { toggleBookmark, isBookmarked } from '$lib/stores/bookmark.svelte';
+	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
 
 	const { data }: { data: PageData } = $props();
 
@@ -17,7 +18,53 @@
 	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
 	let bookmarked = $state(false);
 	let loadMoreEl: HTMLElement | null = $state(null);
+
 	let loadingMore = $state(false);
+
+	let dlState = $state<Record<string, DownloadProgress | { phase: 'idle' }>>({});
+
+	function isDownloading(chapterId: string): boolean {
+		const s = dlState[chapterId];
+		return !!s && s.phase !== 'idle' && s.phase !== 'done' && s.phase !== 'error';
+	}
+
+	function dlLabel(chapterId: string): string {
+		const s = dlState[chapterId];
+		if (!s || s.phase === 'idle') return '';
+		if (s.phase === 'error') return '!';
+		if (s.phase === 'done') return '✓';
+		if (s.phase === 'images' && 'total' in s && s.total) return `${s.current}/${s.total}`;
+		if (s.phase === 'zip') return '…';
+		return '…';
+	}
+
+	async function handleDownloadChapter(e: MouseEvent, chapter: any) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!chapter?.id || isDownloading(chapter.id)) return;
+		const id = String(chapter.id);
+		try {
+			await downloadChapter({
+				source,
+				chapterId: id,
+				chapterTitle: chapter.title || `Chapter ${chapter.number}`,
+				mangaTitle: manga?.title,
+				onProgress: (p) => {
+					dlState = { ...dlState, [id]: p };
+				}
+			});
+			setTimeout(() => {
+				dlState = { ...dlState, [id]: { phase: 'idle' } };
+			}, 1500);
+		} catch (err: any) {
+			console.error('[download chapter]', err);
+			dlState = {
+				...dlState,
+				[id]: { phase: 'error', current: 0, total: 0, message: err?.message || 'Failed' }
+			};
+		}
+	}
+
 
 	let loadedChapters = $state<any[]>([]);
 	let chapterTotal = $state(0);
@@ -754,6 +801,24 @@
 											onerror={onCoverError}
 										/>
 									{/if}
+									<button
+										type="button"
+										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-fuchsia-600 disabled:opacity-50"
+										title="Download chapter"
+										aria-label="Download {chapter.title}"
+										disabled={isDownloading(chapter.id)}
+										onclick={(e) => handleDownloadChapter(e, chapter)}
+									>
+										{#if isDownloading(chapter.id) || dlLabel(chapter.id)}
+											<span class="text-[8px] font-bold">{dlLabel(chapter.id) || '…'}</span>
+										{:else}
+											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+												<polyline points="7 10 12 15 17 10" />
+												<line x1="12" x2="12" y1="15" y2="3" />
+											</svg>
+										{/if}
+									</button>
 									<div class="absolute inset-x-0 bottom-0 bg-black/85 px-1 py-1.5 text-center">
 										<p
 											class="line-clamp-2 flex items-center justify-center gap-1 text-[11px] leading-snug font-bold text-white sm:text-xs"
@@ -775,24 +840,44 @@
 					{:else if viewMode === 'grid-text'}
 						<div class="grid grid-cols-3 gap-2.5 pb-8 md:grid-cols-4 lg:grid-cols-6">
 							{#each displayedChapters as chapter}
-								<a
-									href="/reader/{source}{chapter.id}"
-									class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 hover:border-blue-500/40"
-								>
-									<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
-										{#if chapterFlag(chapter.lang)}
-											<span
-												class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[14px]"
-											></span>
-										{/if}
-										<span class="min-w-0">{chapter.title}</span>
-									</p>
-									{#if chapter.date}
-										<p class="detail-muted mt-1 text-[10px] opacity-70">
-											{formatDateOnly(chapter.date)}
+								<div class="relative">
+									<a
+										href="/reader/{source}{chapter.id}"
+										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40"
+									>
+										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
+											{#if chapterFlag(chapter.lang)}
+												<span
+													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[14px]"
+												></span>
+											{/if}
+											<span class="min-w-0">{chapter.title}</span>
 										</p>
-									{/if}
-								</a>
+										{#if chapter.date}
+											<p class="detail-muted mt-1 text-[10px] opacity-70">
+												{formatDateOnly(chapter.date)}
+											</p>
+										{/if}
+									</a>
+									<button
+										type="button"
+										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-white/15 bg-black/50 text-white/90 backdrop-blur-sm transition hover:bg-fuchsia-600 hover:text-white disabled:opacity-50"
+										title="Download chapter"
+										aria-label="Download {chapter.title}"
+										disabled={isDownloading(chapter.id)}
+										onclick={(e) => handleDownloadChapter(e, chapter)}
+									>
+										{#if isDownloading(chapter.id) || dlLabel(chapter.id)}
+											<span class="text-[9px] font-bold tabular-nums">{dlLabel(chapter.id) || '…'}</span>
+										{:else}
+											<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+												<polyline points="7 10 12 15 17 10" />
+												<line x1="12" x2="12" y1="15" y2="3" />
+											</svg>
+										{/if}
+									</button>
+								</div>
 							{/each}
 						</div>
 					{:else}
@@ -827,6 +912,24 @@
 											{formatDateOnly(chapter.date) || '—'}
 										</p>
 									</div>
+									<button
+										type="button"
+										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-zinc-200 hover:bg-fuchsia-600 hover:text-white disabled:opacity-50"
+										title="Download chapter"
+										aria-label="Download {chapter.title}"
+										disabled={isDownloading(chapter.id)}
+										onclick={(e) => handleDownloadChapter(e, chapter)}
+									>
+										{#if isDownloading(chapter.id) || dlLabel(chapter.id)}
+											<span class="text-[10px] font-bold">{dlLabel(chapter.id) || '…'}</span>
+										{:else}
+											<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+												<polyline points="7 10 12 15 17 10" />
+												<line x1="12" x2="12" y1="15" y2="3" />
+											</svg>
+										{/if}
+									</button>
 								</a>
 							{/each}
 						</div>
