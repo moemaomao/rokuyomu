@@ -88,7 +88,6 @@ export class AreakomikSource extends BaseSource {
 		if (!t) return undefined;
 		const n = this.parseChapterNumber(t);
 		if (n > 0) return String(n);
-
 		const m = t.match(/(?:ch\.?|chapter)\s*([0-9]+(?:\.[0-9]+)?)/i);
 		if (m) return m[1];
 		return undefined;
@@ -127,6 +126,7 @@ export class AreakomikSource extends BaseSource {
 				lang: this.DEFAULT_LANG
 			});
 		};
+
 
 		$('article.komik-card, .komik-card').each((_, el) => {
 			const $el = $(el);
@@ -219,44 +219,15 @@ export class AreakomikSource extends BaseSource {
 
 		return out;
 	}
-
-	private parseUpdateTerbaru($: cheerio.CheerioAPI): Manga[] {
+	
+	private parseCardsIn(
+		$: cheerio.CheerioAPI,
+		$root: cheerio.Cheerio<any>
+	): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();
 
-		let $grid: cheerio.Cheerio<any> | null = null;
-
-		$('h2.section-title, h2').each((_, el) => {
-			const text = $(el).text().replace(/\s+/g, ' ').trim();
-			if (!/UPDATE\s*TERBARU/i.test(text)) return;
-
-			let sib = $(el).next();
-			for (let i = 0; i < 8 && sib.length; i++) {
-				if (sib.is('.komik-grid')) {
-					$grid = sib;
-					break;
-				}
-				const nested = sib.find('.komik-grid').first();
-				if (nested.length) {
-					$grid = nested;
-					break;
-				}
-				sib = sib.next();
-			}
-			return false;
-		});
-
-		if (!$grid || !$grid.length) {
-			const grids = $('.komik-grid');
-			if (grids.length) $grid = grids.last();
-		}
-
-		if (!$grid || !$grid.length) {
-			console.warn('[areakomik] UPDATE TERBARU grid not found');
-			return [];
-		}
-
-		$grid.find('article.komik-card, .komik-card').each((_, el) => {
+		$root.find('article.komik-card, .komik-card').each((_, el) => {
 			const $el = $(el);
 			const a =
 				$el.find('h3.card-title a[href*="/series/"]').first().length > 0
@@ -309,8 +280,6 @@ export class AreakomikSource extends BaseSource {
 				$el.find('a[href*="/chapter/"]').first().text() ||
 				'';
 
-			const latestChapter = this.chapterBadge(chText);
-
 			out.push({
 				id,
 				sourceId: this.id,
@@ -318,12 +287,54 @@ export class AreakomikSource extends BaseSource {
 				cover,
 				type: this.detectType(typeText),
 				status: this.mapStatus(statusText),
-				latestChapter,
+				latestChapter: this.chapterBadge(chText),
 				lang: this.DEFAULT_LANG
 			});
 		});
 
 		return out;
+	}
+
+
+	private parseUpdateTerbaru($: cheerio.CheerioAPI): Manga[] {
+		const $h2 = $('h2')
+			.filter((_, el) => /UPDATE\s*TERBARU/i.test($(el).text()))
+			.first();
+
+		if ($h2.length) {
+			const $grid = $h2.nextAll('.komik-grid').first();
+			if ($grid.length) {
+				const list = this.parseCardsIn($, $grid);
+				if (list.length) {
+					console.log(
+						`[areakomik] UPDATE TERBARU via h2+nextAll → ${list.length}`
+					);
+					return list;
+				}
+			}
+		}
+
+		const grids = $('.komik-grid').toArray();
+		let best: cheerio.Cheerio<any> | null = null;
+		let bestCount = 0;
+		for (const g of grids) {
+			const $g = $(g);
+			const n = $g.find('article.komik-card, .komik-card').length;
+			if (n > bestCount) {
+				bestCount = n;
+				best = $g;
+			}
+		}
+		if (best && bestCount > 0) {
+			const list = this.parseCardsIn($, best);
+			console.log(
+				`[areakomik] UPDATE TERBARU via largest grid → ${list.length} (cards=${bestCount})`
+			);
+			return list;
+		}
+
+		console.warn('[areakomik] UPDATE TERBARU grid not found');
+		return [];
 	}
 
 	async getLatestManga(
