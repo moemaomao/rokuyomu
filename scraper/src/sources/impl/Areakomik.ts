@@ -4,13 +4,13 @@ import * as cheerio from 'cheerio';
 
 /**
  * Areakomik adapter (https://areakomik.com)
- * Komik dewasa Indo — custom theme (bukan Madara/Themesia murni)
+ * Komik dewasa Indo — custom theme
  *
  * Latest  : /  |  /page/{n}/
- * Search  : /?s={q}
+ * Search  : /?s={q}  |  /page/{n}/?s={q}
  * Detail  : /series/{slug}/
  * Chapter : /chapter/{slug}-chapter-{n}/
- * Pages   : img.chapter-img
+ * Pages   : img.chapter-img (CDN pic.gudangkomik.top)
  *
  * ID format:
  *   manga   : /series/{slug}
@@ -81,6 +81,20 @@ export class AreakomikSource extends BaseSource {
 		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
 	}
 
+	/** Parse chapter badge text → string number for latestChapter */
+	private chapterBadge(text: string): string | undefined {
+		const t = String(text || '')
+			.replace(/\s+/g, ' ')
+			.trim();
+		if (!t) return undefined;
+		const n = this.parseChapterNumber(t);
+		if (n > 0) return String(n);
+		// fallback: "Ch. 01", "Chapter End", etc.
+		const m = t.match(/(?:ch\.?|chapter)\s*([0-9]+(?:\.[0-9]+)?)/i);
+		if (m) return m[1];
+		return undefined;
+	}
+
 	private parseCards($: cheerio.CheerioAPI): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();
@@ -101,7 +115,8 @@ export class AreakomikSource extends BaseSource {
 			title = (title || '').replace(/\s+/g, ' ').trim();
 			if (!title || title.length < 2) return;
 
-			const n = this.parseChapterNumber(chText);
+			const latestChapter = this.chapterBadge(chText);
+
 			out.push({
 				id,
 				sourceId: this.id,
@@ -109,44 +124,82 @@ export class AreakomikSource extends BaseSource {
 				cover: this.preferFullCover(this.absUrl((cover || '').split('?')[0])),
 				type: this.detectType(typeText),
 				status: this.mapStatus(statusText),
-				latestChapter: n > 0 ? String(n) : undefined,
+				latestChapter,
 				lang: this.DEFAULT_LANG
 			});
 		};
 
-		// Kartu utama homepage / list
+		// Kartu utama: article.komik-card
 		$('article.komik-card, .komik-card').each((_, el) => {
 			const $el = $(el);
 			const a =
-				$el.find('h3.card-title a[href*="/series/"]').first().length
+				$el.find('h3.card-title a[href*="/series/"]').first().length > 0
 					? $el.find('h3.card-title a[href*="/series/"]').first()
-					: $el.find('a[href*="/series/"]').first();
+					: $el.find('a.thumb-wrap[href*="/series/"]').first().length > 0
+						? $el.find('a.thumb-wrap[href*="/series/"]').first()
+						: $el.find('a[href*="/series/"]').first();
+
 			const href = a.attr('href') || '';
+			if (!href) return;
+
 			const title =
-				a.text() ||
+				$el.find('h3.card-title a').first().text() ||
 				a.attr('title') ||
+				a.text() ||
 				$el.find('img').attr('alt') ||
 				'';
+
 			const cover =
-				$el.find('img').attr('src') ||
-				$el.find('img').attr('data-src') ||
+				$el.find('img').first().attr('src') ||
+				$el.find('img').first().attr('data-src') ||
 				'';
+
 			const typeText =
-				$el.find('.type-badge').text() ||
+				$el.find('.type-badge').first().text() ||
 				$el.find('[class*="type-"]').first().attr('class') ||
 				'';
+
 			const statusText =
-				$el.find('.status-badge').text() ||
-				$el.find('[class*="status"]').first().text() ||
+				$el.find('.status-badge').first().text() ||
+				$el.find('.status-badge').first().attr('class') ||
 				'';
+
+			// Badge chapter: beberapa layout beda class
 			const chText =
-				$el.find('a.chapter-link, .chapter-row a, a[href*="/chapter/"]')
-					.first()
-					.text() || '';
+				$el.find('a.chapter-link').first().text() ||
+				$el.find('.chapter-row a[href*="/chapter/"]').first().text() ||
+				$el.find('a[href*="/chapter/"]').first().text() ||
+				$el.find('.chapter-link, .chapter-row, .update-time').first().text() ||
+				'';
+
 			push(href, title, cover, typeText, statusText, chText);
 		});
 
-		// Fallback: semua link /series/
+		// Section UPDATE TERBARU (kadang struktur beda)
+		$('.linut-item, .lin-update-today .linut-item, .update-item').each((_, el) => {
+			const $el = $(el);
+			const seriesA = $el.find('a[href*="/series/"]').first();
+			const href = seriesA.attr('href') || '';
+			if (!href) return;
+			const title =
+				seriesA.attr('title') ||
+				$el.find('h3, .card-title, a[href*="/series/"]').last().text() ||
+				'';
+			const cover =
+				$el.find('img').first().attr('src') ||
+				$el.find('img').first().attr('data-src') ||
+				'';
+			const typeText = $el.find('.type-badge, [class*="type-"]').first().text() || '';
+			const statusText =
+				$el.find('.status-badge').first().text() || $el.text().slice(0, 80);
+			const chText =
+				$el.find('a[href*="/chapter/"]').first().text() ||
+				$el.find('.chapter-link, .chapter-row').first().text() ||
+				'';
+			push(href, title, cover, typeText, statusText, chText);
+		});
+
+		// Fallback global
 		if (!out.length) {
 			$('a[href*="/series/"]').each((_, el) => {
 				const $a = $(el);
@@ -156,15 +209,15 @@ export class AreakomikSource extends BaseSource {
 					.replace(/\s+/g, ' ')
 					.trim();
 				if (!title || title.length < 3) return;
-				const $parent = $a.closest(
-					'article, .komik-card, .card, li, div'
-				);
+				const $parent = $a.closest('article, .komik-card, .card, li, div');
 				const cover =
 					$parent.find('img').attr('src') ||
 					$parent.find('img').attr('data-src') ||
 					$a.find('img').attr('src') ||
 					'';
-				push(href, title, cover);
+				const chText =
+					$parent.find('a[href*="/chapter/"]').first().text() || '';
+				push(href, title, cover, $parent.text(), $parent.text(), chText);
 			});
 		}
 
@@ -177,14 +230,20 @@ export class AreakomikSource extends BaseSource {
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
+			// Pagination site: /page/2/  (bukan query ?page=)
 			const path = p <= 1 ? `/` : `/page/${p}/`;
 			const html = await this.fetchHtml(path);
-			const list = this.parseCards(cheerio.load(html)).slice(
-				0,
-				this.PER_PAGE
+			const $ = cheerio.load(html);
+			const list = this.parseCards($);
+
+			// Homepage punya popular + update — dedupe sudah di parseCards.
+			// Ambil semua card unik; jangan slice terlalu agresif agar page 2 beda.
+			const pageList = list.slice(0, this.PER_PAGE);
+
+			console.log(
+				`[areakomik] latest page=${p} path=${path} → ${pageList.length} (raw=${list.length})`
 			);
-			console.log(`[areakomik] latest page=${p} → ${list.length}`);
-			return list;
+			return pageList;
 		} catch (e) {
 			console.error('[areakomik] getLatestManga', e);
 			return [];
@@ -205,10 +264,7 @@ export class AreakomikSource extends BaseSource {
 					? `/?s=${encodeURIComponent(q)}`
 					: `/page/${page}/?s=${encodeURIComponent(q)}`;
 			const html = await this.fetchHtml(path);
-			const list = this.parseCards(cheerio.load(html)).slice(
-				0,
-				this.PER_PAGE
-			);
+			const list = this.parseCards(cheerio.load(html)).slice(0, this.PER_PAGE);
 			console.log(`[areakomik] search "${q}" page=${page} → ${list.length}`);
 			return list;
 		} catch (e) {
@@ -223,11 +279,8 @@ export class AreakomikSource extends BaseSource {
 	): Promise<MangaDetails> {
 		let path = this.cleanId(mangaId);
 
-		// Resolve dari chapter path → series
 		if (/^\/chapter\//i.test(path)) {
-			const m = path.match(
-				/^\/chapter\/(.+?)-chapter-[\d.]+(?:-end)?$/i
-			);
+			const m = path.match(/^\/chapter\/(.+?)-chapter-[\d.]+(?:-end)?$/i);
 			if (m?.[1]) path = `/series/${m[1]}`;
 		}
 
@@ -271,15 +324,19 @@ export class AreakomikSource extends BaseSource {
 			const n = $(a).text().replace(/\s+/g, ' ').trim();
 			if (n && !authors.includes(n)) authors.push(n);
 		});
-		const authorMatch = metaText.match(/Author\s*:\s*([^]+?)(?:Genre|Total|$)/i);
-		if (authorMatch && !authors.length) {
-			authorMatch[1]
-				.split(/,|\//)
-				.map((s) => s.trim())
-				.filter(Boolean)
-				.forEach((n) => {
-					if (!authors.includes(n)) authors.push(n);
-				});
+		if (!authors.length) {
+			const authorMatch = metaText.match(
+				/Author\s*:\s*([^]+?)(?:Genre|Total|Type|Status|$)/i
+			);
+			if (authorMatch) {
+				authorMatch[1]
+					.split(/,|\//)
+					.map((s) => s.trim())
+					.filter((n) => n && n.length < 60)
+					.forEach((n) => {
+						if (!authors.includes(n)) authors.push(n);
+					});
+			}
 		}
 
 		const genres: string[] = [];
@@ -288,12 +345,15 @@ export class AreakomikSource extends BaseSource {
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
 
-		const synopsis =
-			$('.series-sinopsis, .sinopsis, .entry-content')
-				.first()
-				.text()
-				.replace(/\s+/g, ' ')
-				.trim() || '';
+		// Sinopsis bersih — jangan campur meta
+		const synopsis = (
+			$('.series-sinopsis, .sinopsis').first().text() ||
+			$('.entry-content').first().text() ||
+			''
+		)
+			.replace(/^\s*Sinopsis\s*/i, '')
+			.replace(/\s+/g, ' ')
+			.trim();
 
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
@@ -304,34 +364,38 @@ export class AreakomikSource extends BaseSource {
 				const href = $a.attr('href') || '';
 				if (!/\/chapter\//i.test(href)) return;
 				if (/\/series\//i.test(href)) return;
+				if (/areakomik_confirm|pdf-download|token=/i.test(href)) return;
 
 				const cid = this.cleanId(href);
+				if (!/^\/chapter\/[^/]+$/i.test(cid)) return;
 				if (seen.has(cid)) return;
 				seen.add(cid);
 
 				const text = $a.text().replace(/\s+/g, ' ').trim();
-				const number =
-					this.parseChapterNumber(cid) || this.parseChapterNumber(text);
-				if (!number && !/chapter|ch\./i.test(text)) return;
-
-				let date = '';
-				const $row = $a.closest('.chapter-row, li, tr, div');
-				const dateEl = $row
-					.find('.update-time, .chapter-date, time')
-					.text()
+				const titleClean = text
+					.replace(/\bNEW\b/gi, '')
+					.replace(/\d{1,2}\/\d{1,2}\/\d{4}/g, '')
+					.replace(/\s+/g, ' ')
 					.trim();
-				if (dateEl) date = dateEl;
-				else {
-					const parentText = $row.text().replace(/\s+/g, ' ').trim();
-					const dm = parentText.match(/\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2}/);
-					if (dm) date = dm[0];
+
+				const number =
+					this.parseChapterNumber(cid) || this.parseChapterNumber(titleClean);
+
+				let date: string | undefined;
+				const parentText = $a
+					.closest('.chapter-row, li, tr, div')
+					.text()
+					.replace(/\s+/g, ' ');
+				const dm = parentText.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+				if (dm) {
+					date = `${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`;
 				}
 
 				chapters.push({
 					id: cid,
-					title: text || `Chapter ${number}`,
+					title: titleClean || `Chapter ${number}`,
 					number: number || 0,
-					date: date || undefined
+					date
 				});
 			}
 		);
@@ -339,15 +403,6 @@ export class AreakomikSource extends BaseSource {
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 		const latestChapter =
 			chapters.length > 0 ? String(chapters[0].number) : undefined;
-
-		const description = [
-			authors.length && `Author: ${authors.join(', ')}`,
-			`Type: ${type}`,
-			`Status: ${status}`,
-			synopsis
-		]
-			.filter(Boolean)
-			.join('\n');
 
 		console.log(`[areakomik] details ${path} → ch=${chapters.length}`);
 
@@ -358,7 +413,7 @@ export class AreakomikSource extends BaseSource {
 			cover,
 			type,
 			status,
-			description,
+			description: synopsis,
 			authors,
 			genres,
 			chapters,
@@ -385,17 +440,17 @@ export class AreakomikSource extends BaseSource {
 				src = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
 				if (!/^https?:\/\//i.test(src)) return;
 				if (
-					/logo|icon|avatar|donasi|gravatar|banner|ads|betcoin|katsu|premium|gif$/i.test(
+					/wm-chapter|foxdoor|logo|icon|avatar|donasi|gravatar|banner|ads|betcoin|katsu|premium|lospollos|tele-pdf|\.gif$/i.test(
 						src
 					)
-				)
+				) {
 					return;
+				}
 				if (seen.has(src)) return;
 				seen.add(src);
 				urls.push(src);
 			};
 
-			// Primary: class chapter-img
 			$('img.chapter-img').each((_, img) => {
 				const $img = $(img);
 				pick($img.attr('src') || $img.attr('data-src') || '');
@@ -410,9 +465,8 @@ export class AreakomikSource extends BaseSource {
 				});
 			}
 
-			// Prefer CDN chapter images
 			const cdn = urls.filter((u) =>
-				/gudangkomik|pic\.|cdn\.|r2\.dev/i.test(u)
+				/gudangkomik|pic\.gudangkomik/i.test(u)
 			);
 			const finalUrls = cdn.length ? cdn : urls;
 

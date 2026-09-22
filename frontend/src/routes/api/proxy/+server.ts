@@ -244,6 +244,9 @@ export const GET: RequestHandler = async ({ url }) => {
 		const isSoftkomik =
 			sourceId === 'softkomik' ||
 			/image\.komik\.im|psy1\.komik\.im|softkomik\.(co|org)/i.test(decodedUrl);
+		const isAreakomik =
+            sourceId === 'areakomik' ||
+            /areakomik\.com|pic\.gudangkomik\.top|gudangkomik\.top/i.test(decodedUrl);
 
 		const skipWeserv =
 			isHitomi ||
@@ -266,6 +269,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			isVoratoon ||
 			isManhuagui ||
 			isRyukomik ||
+			isAreakomik ||
 			isSoftkomik;
 
 		// ============================================================
@@ -289,7 +293,6 @@ export const GET: RequestHandler = async ({ url }) => {
 			return Response.redirect(weserv, 302);
 		}
 
-		// Softkomik CDN watermarks datacenter IPs — let the browser fetch directly
 		if (isSoftkomik && /^https?:\/\//i.test(decodedUrl)) {
 			return Response.redirect(decodedUrl, 302);
 		}
@@ -371,7 +374,9 @@ export const GET: RequestHandler = async ({ url }) => {
 			} else {
 				referer = 'https://ryukomik.my.id/';
 			}
-		}
+		} else if (sourceId === 'areakomik' || /gudangkomik|pic\.gudangkomik/i.test(decodedUrl)) {
+            referer = 'https://areakomik.com/';
+        }
 
 		// ============================================================
 		// FETCH IMAGE
