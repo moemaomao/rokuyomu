@@ -104,6 +104,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	demonicscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-purple-600' },
 	areakomik: { flag: 'id', lang: 'ID', isR18: true, color: 'bg-red-600' },
 	genztoons: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-purple-600' },
+	setsuscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

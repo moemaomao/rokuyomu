@@ -104,6 +104,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'silentquill', name: 'SilentQuill' },
 	{ id: 'areakomik', name: 'Areakomik' },
 	{ id: 'genztoons', name: 'Genz Toons' },
+	{ id: 'setsuscans', name: 'Setsu Scans' },
 ];
 
 export function getSourceList(): SourceMeta[] {

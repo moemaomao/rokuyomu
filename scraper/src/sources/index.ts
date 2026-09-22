@@ -100,11 +100,13 @@ import { HentailoopSource } from './impl/Hentailoop';
 import { SilentQuillSource } from './impl/SilentQuill';
 import { AreakomikSource } from './impl/Areakomik';
 import { GenzToonsSource } from './impl/GenzToons';
+import { SetsuScansSource } from './impl/SetsuScans';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
     silentquill: new SilentQuillSource(),
     genztoons: new GenzToonsSource(),
+    setsuscans: new SetsuScansSource(),
     areakomik: new AreakomikSource(),
     gdscans: new GDScansSource(),
     hentailoop: new HentailoopSource(),
