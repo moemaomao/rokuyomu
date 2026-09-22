@@ -16,6 +16,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	gdscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	ksgroupscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	vortexscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
+	silentquill: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	doujins: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-emerald-500' },
 	cucumbermanga: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-emerald-500' },
 	weebcentral: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
