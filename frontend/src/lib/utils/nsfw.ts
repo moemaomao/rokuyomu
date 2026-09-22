@@ -1,11 +1,6 @@
-/**
- * NSFW / R18 age-gate helpers.
- * Confirmation is stored in localStorage so the user is only asked once.
- */
 import { browser } from '$app/environment';
 
 export const NSFW_STORAGE_KEY = 'rokuyomu_nsfw_confirmed';
-
 export function isNsfwConfirmed(): boolean {
 	if (!browser) return false;
 	try {
@@ -24,7 +19,7 @@ export function setNsfwConfirmed(value = true): void {
 			localStorage.removeItem(NSFW_STORAGE_KEY);
 		}
 	} catch {
-		/* ignore quota / private mode */
+		
 	}
 }
 

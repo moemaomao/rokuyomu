@@ -440,7 +440,7 @@
 			{#if manga.cover}
 				<div
 					class="detail-bg pointer-events-none absolute inset-0 scale-[1.05] bg-cover bg-center"
-					style="background-image: url('{proxyImage(manga.cover, 120, 180)}'); filter: blur(4px);"
+					style="background-image: url('{proxyImage(manga.cover, 120, 180)}');"
 				></div>
 				<div class="detail-overlay absolute inset-0"></div>
 			{/if}
@@ -803,7 +803,7 @@
 									{/if}
 									<button
 										type="button"
-										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-fuchsia-600 disabled:opacity-50"
+										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-300 disabled:opacity-50"
 										title="Download chapter"
 										aria-label="Download {chapter.title}"
 										disabled={isDownloading(chapter.id)}
@@ -861,7 +861,7 @@
 									</a>
 									<button
 										type="button"
-										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-white/15 bg-black/50 text-white/90 backdrop-blur-sm transition hover:bg-fuchsia-600 hover:text-white disabled:opacity-50"
+										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 transition hover:bg-emerald-500/30 hover:text-emerald-300 disabled:opacity-50"
 										title="Download chapter"
 										aria-label="Download {chapter.title}"
 										disabled={isDownloading(chapter.id)}
@@ -914,7 +914,7 @@
 									</div>
 									<button
 										type="button"
-										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-zinc-200 hover:bg-fuchsia-600 hover:text-white disabled:opacity-50"
+										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-300 disabled:opacity-50"
 										title="Download chapter"
 										aria-label="Download {chapter.title}"
 										disabled={isDownloading(chapter.id)}
@@ -975,7 +975,7 @@
 		border-color: rgba(255, 255, 255, 0.1);
 	}
 	.detail-bg {
-		opacity: 0.45;
+		opacity: 0.50;
 	}
 	.detail-overlay {
 		background: rgba(15, 15, 30, 0.514);
@@ -1085,8 +1085,9 @@
 		background: rgba(0, 0, 0, 0.25);
 	}
 	.detail-chapter-text {
-		background: rgba(255, 255, 255, 0.05);
-		border-color: rgba(255, 255, 255, 0.15);
+		background: rgba(0, 0, 0, 0.1);
+		border-color: rgba(255, 255, 255, 0.204);
+		backdrop-filter: none;
 	}
 	.detail-chapter-list {
 		background: rgba(0, 0, 0, 0.2);
@@ -1157,8 +1158,9 @@
 		background: rgba(0, 0, 0, 0.06);
 	}
 	:global(html.light) .detail-chapter-text {
-		background: rgba(0, 0, 0, 0.04);
-		border-color: rgba(0, 0, 0, 0.12);
+		background: rgba(0, 0, 0, 0.1);
+		border-color: rgba(0, 0, 0, 0.14);
+		backdrop-filter: none;
 	}
 	:global(html.light) .detail-chapter-list {
 		background: rgba(0, 0, 0, 0.04);
