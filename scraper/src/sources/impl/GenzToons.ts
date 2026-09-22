@@ -12,16 +12,10 @@ import * as cheerio from 'cheerio';
  * Chapter : /chapter/{seriesId}-{chapterId}/
  * Images  : https://cdn.meowing.org/uploads/{uid}
  *           (img.myImage[uid] di reader)
- *
- * Cover di list/detail sering lewat:
- *   style="background-image:url(https://wsrv.nl/?url=cdn.meowing.org/uploads/...)"
- *   atau og:image / i0.wp.com proxy
- *
+ * 
  * ID format:
  *   manga   : "/series/{slug}"
  *   chapter : "/chapter/{seriesId}-{chapterId}"
- *
- * Chapter locked (coins) → title ditandai 🔒, pages kosong.
  */
 export class GenzToonsSource extends BaseSource {
 	id = 'genztoons';
@@ -77,9 +71,6 @@ export class GenzToonsSource extends BaseSource {
 			.trim();
 	}
 
-	/**
-	 * Unwrap proxies (wsrv.nl, i0.wp.com, images.weserv.nl) → direct CDN URL
-	 */
 	private normalizeCover(url: string): string {
 		if (!url) return '';
 		let u = url.trim().replace(/^url\(['"]?|['"]?\)$/gi, '');
@@ -120,7 +111,6 @@ export class GenzToonsSource extends BaseSource {
 		return this.absUrl(u).split('?')[0];
 	}
 
-	/** Extract background-image URL from inline style */
 	private bgFromStyle(style?: string | null): string {
 		if (!style) return '';
 		const m = style.match(
@@ -182,10 +172,6 @@ export class GenzToonsSource extends BaseSource {
 		return undefined;
 	}
 
-	/**
-	 * List cards: cover is on <a style="background-image:url(...)">,
-	 * title often on a sibling <a><h3>...
-	 */
 	private parseCards($: cheerio.CheerioAPI): Manga[] {
 		const res: Manga[] = [];
 		const seen = new Set<string>();
@@ -214,21 +200,48 @@ export class GenzToonsSource extends BaseSource {
 
 			if (!title && !cover) return;
 
+			let scopeText = '';
+			let $node: cheerio.Cheerio<any> = $a;
+			for (let i = 0; i < 5; i++) {
+				$node = $node.parent();
+				if (!$node.length) break;
+				const t = $node.text().replace(/\s+/g, ' ').trim();
+				if (/Chapter\s+\d+/i.test(t)) {
+					scopeText = t;
+					break;
+				}
+			}
+			if (!scopeText) {
+				scopeText = ($a.parent().text() || $a.text() || '').replace(
+					/\s+/g,
+					' '
+				);
+			}
+
+			// First "Chapter N" in the card = latest
+			let latestChapter: string | undefined;
+			const chMatch = scopeText.match(/Chapter\s+(\d+(?:\.\d+)?)/i);
+			if (chMatch) latestChapter = chMatch[1];
+
+			const type = this.mapType(scopeText.toLowerCase());
+
 			const existing = res.find((m) => m.id === id);
 			if (existing) {
-				if (title && (!existing.title || existing.title === id.split('/').pop())) {
+				if (
+					title &&
+					(!existing.title || existing.title === id.split('/').pop())
+				) {
 					existing.title = title;
 				}
 				if (cover && !existing.cover) existing.cover = cover;
+				if (latestChapter && !existing.latestChapter) {
+					existing.latestChapter = latestChapter;
+				}
 				return;
 			}
 
 			if (seen.has(id)) return;
 			seen.add(id);
-
-			const cardText = ($a.text() || '').toLowerCase();
-			const parentText = ($a.parent().text() || '').toLowerCase();
-			const type = this.mapType(cardText + ' ' + parentText);
 
 			res.push({
 				id,
@@ -237,6 +250,7 @@ export class GenzToonsSource extends BaseSource {
 				sourceId: this.id,
 				type,
 				status: 'Ongoing',
+				latestChapter,
 				lang: this.DEFAULT_LANG
 			});
 		});
