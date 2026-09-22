@@ -88,6 +88,7 @@ export class AreakomikSource extends BaseSource {
 		if (!t) return undefined;
 		const n = this.parseChapterNumber(t);
 		if (n > 0) return String(n);
+	
 		const m = t.match(/(?:ch\.?|chapter)\s*([0-9]+(?:\.[0-9]+)?)/i);
 		if (m) return m[1];
 		return undefined;
@@ -126,7 +127,6 @@ export class AreakomikSource extends BaseSource {
 				lang: this.DEFAULT_LANG
 			});
 		};
-
 
 		$('article.komik-card, .komik-card').each((_, el) => {
 			const $el = $(el);
@@ -172,7 +172,6 @@ export class AreakomikSource extends BaseSource {
 			push(href, title, cover, typeText, statusText, chText);
 		});
 
-	
 		$('.linut-item, .lin-update-today .linut-item, .update-item').each((_, el) => {
 			const $el = $(el);
 			const seriesA = $el.find('a[href*="/series/"]').first();
@@ -295,26 +294,33 @@ export class AreakomikSource extends BaseSource {
 		return out;
 	}
 
-
 	private parseUpdateTerbaru($: cheerio.CheerioAPI): Manga[] {
+	
+		const grids = $('.komik-grid').toArray();
+		if (!grids.length) {
+			console.warn('[areakomik] no .komik-grid found');
+			return [];
+		}
+
 		const $h2 = $('h2')
 			.filter((_, el) => /UPDATE\s*TERBARU/i.test($(el).text()))
 			.first();
-
 		if ($h2.length) {
-			const $grid = $h2.nextAll('.komik-grid').first();
-			if ($grid.length) {
-				const list = this.parseCardsIn($, $grid);
-				if (list.length) {
+			const after = $h2.nextAll('.komik-grid').first();
+			if (after.length) {
+				const n = after.find('article.komik-card, .komik-card').length;
+			
+				if (n >= 12) {
+					const list = this.parseCardsIn($, after);
 					console.log(
-						`[areakomik] UPDATE TERBARU via h2+nextAll → ${list.length}`
+						`[areakomik] UPDATE via h2 → ${list.length} cards | first="${list[0]?.title?.slice(0, 40)}"`
 					);
 					return list;
 				}
 			}
 		}
 
-		const grids = $('.komik-grid').toArray();
+		// Fallback: grid terbesar
 		let best: cheerio.Cheerio<any> | null = null;
 		let bestCount = 0;
 		for (const g of grids) {
@@ -325,15 +331,17 @@ export class AreakomikSource extends BaseSource {
 				best = $g;
 			}
 		}
-		if (best && bestCount > 0) {
+		if (best && bestCount >= 8) {
 			const list = this.parseCardsIn($, best);
 			console.log(
-				`[areakomik] UPDATE TERBARU via largest grid → ${list.length} (cards=${bestCount})`
+				`[areakomik] UPDATE via largest grid → ${list.length} (raw=${bestCount}) | first="${list[0]?.title?.slice(0, 40)}"`
 			);
 			return list;
 		}
 
-		console.warn('[areakomik] UPDATE TERBARU grid not found');
+		console.warn(
+			`[areakomik] UPDATE TERBARU not found (grids=${grids.length}, maxCards=${bestCount})`
+		);
 		return [];
 	}
 
@@ -343,9 +351,11 @@ export class AreakomikSource extends BaseSource {
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
+		
 			const path = p <= 1 ? `/` : `/page/${p}/`;
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
+
 			const list = this.parseUpdateTerbaru($);
 			const pageList = list.slice(0, this.PER_PAGE);
 
@@ -454,6 +464,7 @@ export class AreakomikSource extends BaseSource {
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
 
+		// Sinopsis bersih — jangan campur meta
 		const synopsis = (
 			$('.series-sinopsis, .sinopsis').first().text() ||
 			$('.entry-content').first().text() ||
