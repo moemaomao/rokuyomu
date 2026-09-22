@@ -97,11 +97,11 @@ function triggerDownload(blob: Blob, filename: string) {
 
 async function tryLoadJSZip(): Promise<any | null> {
 	try {
-		// Prefer installed package
+	
 		const mod = await import('jszip');
 		return (mod as any).default || mod;
 	} catch {
-		/* CDN fallback */
+		
 	}
 	try {
 		const g = globalThis as any;
@@ -119,10 +119,6 @@ async function tryLoadJSZip(): Promise<any | null> {
 	}
 }
 
-/**
- * Download one chapter as .cbz (zip of images).
- * chapterId must match reader path (e.g. "/manga/slug/chapter-1").
- */
 export async function downloadChapter(opts: {
 	source: string;
 	chapterId: string;
@@ -167,12 +163,11 @@ export async function downloadChapter(opts: {
 			compression: 'DEFLATE',
 			compressionOptions: { level: 6 }
 		});
-		triggerDownload(out, `${baseName}.cbz`);
+		triggerDownload(out, `${baseName}.zip`);
 		report({ phase: 'done', current: urls.length, total: urls.length });
 		return;
 	}
 
-	// Fallback: download images one-by-one (no zip)
 	for (let i = 0; i < urls.length; i++) {
 		report({
 			phase: 'images',
