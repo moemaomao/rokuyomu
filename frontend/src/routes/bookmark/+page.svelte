@@ -68,7 +68,7 @@
 		<div class="grid grid-cols-3 gap-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each bookmarks as bm (bm.mangaId + bm.sourceId)}
 				<div
-					class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/50 transition hover:border-zinc-700"
+					class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
 				>
 					<a
 						href={formatMangaHref(bm.sourceId, bm.mangaId)}
@@ -100,7 +100,7 @@
 					<div class="flex flex-1 flex-col justify-between p-3">
 						<a
 							href={formatMangaHref(bm.sourceId, bm.mangaId)}
-							class="line-clamp-2 text-xs font-semibold hover:text-violet-400"
+							class="line-clamp-2 text-xs font-semibold hover:text-violet-100"
 						>
 							{bm.mangaTitle}
 						</a>
@@ -109,7 +109,7 @@
 							onclick={() => handleRemove(bm.mangaId)}
 							class="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500 hover:text-white"
 						>
-							<Trash2 class="h-3.5 w-3.5" /> Hapus
+							<Trash2 class="h-3.5 w-3.5" /> Delete
 						</button>
 					</div>
 				</div>

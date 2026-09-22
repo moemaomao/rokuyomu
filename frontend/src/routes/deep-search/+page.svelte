@@ -219,11 +219,11 @@
 
 	<!-- Results -->
 	{#if results.length > 0}
-		<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+		<div class="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each results as m (m.sourceId + ':' + m.id)}
 				<a
 					href={mangaHref(m)}
-					class="group overflow-hidden rounded-xl bg-zinc-900/50 transition hover:bg-zinc-800/80"
+					class="group overflow-hidden rounded-xl bg-zinc-900/10 transition hover:bg-zinc-800/80"
 				>
 					<div class="relative aspect-[2/3] overflow-hidden bg-zinc-800">
 						{#if m.cover}

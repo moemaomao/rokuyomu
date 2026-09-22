@@ -77,7 +77,7 @@
                 {@const readHref = `/reader/${entry.sourceId}${entry.chapterId}`}
 
                 <div
-                    class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/50 transition hover:border-zinc-700"
+                    class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
                 >
                     <!-- Cover -->
                     <a
@@ -110,7 +110,7 @@
                             <a
                                 href={mangaHref}
                                 onclick={(e) => handleNavigate(e, mangaHref)}
-                                class="line-clamp-1 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
+                                class="line-clamp-1 text-xs font-semibold text-zinc-500 hover:text-white transition-colors"
                                 title={entry.mangaTitle}
                             >
                                 {entry.mangaTitle}
