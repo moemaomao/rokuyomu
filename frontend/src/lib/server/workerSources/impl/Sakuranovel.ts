@@ -63,16 +63,18 @@ export class SakuranovelSource extends BaseSource {
 
 	/**
 	 * Latest list for homepage.
-	 * Halaman /series/ sering hanya ~10–12 kartu → gabung page 1+2 (dan fallback homepage).
+	 * Halaman /series/ sering hanya ~10–12 kartu → gabung homepage + page 1–3.
 	 */
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		if (page <= 1) {
-			const [p1, p2, home] = await Promise.all([
-				this.fetchSeriesPage(1),
+			const [home, p1, p2, p3] = await Promise.all([
+				this.parseHomeLatest().catch(() => [] as Manga[]),
+				this.fetchSeriesPage(1).catch(() => [] as Manga[]),
 				this.fetchSeriesPage(2).catch(() => [] as Manga[]),
-				this.parseHomeLatest().catch(() => [] as Manga[])
+				this.fetchSeriesPage(3).catch(() => [] as Manga[])
 			]);
-			const merged = this.dedupeById([...home, ...p1, ...p2]);
+			// Home dulu (punya latestChapter), lalu series pages
+			const merged = this.dedupeById([...home, ...p1, ...p2, ...p3]);
 			return merged.slice(0, 24);
 		}
 		return this.fetchSeriesPage(page);
@@ -122,6 +124,12 @@ export class SakuranovelSource extends BaseSource {
 				if (!title || title.length < 2) return;
 				const id = pathOnly(href);
 				if (list.some((x) => x.id === id)) return;
+				const latestRaw =
+					$(el).find('.epx, .chapter, .latest, .latest-chapter, .lchapter').first().text().trim() ||
+					'';
+				const chMatch =
+					latestRaw.match(/(?:chapter|ch\.?|bab)\s*(\d+(?:\.\d+)?)/i) ||
+					latestRaw.match(/(\d+(?:\.\d+)?)/);
 				list.push({
 					id,
 					title,
@@ -130,10 +138,10 @@ export class SakuranovelSource extends BaseSource {
 					type: typeText || 'novel',
 					status,
 					lang: 'id',
-					latestChapter: $(el).find('.epx, .chapter, .latest').first().text().trim() || undefined
+					latestChapter: chMatch ? chMatch[1] : latestRaw || undefined
 				});
 			});
-			if (list.length >= 12) break;
+			if (list.length >= 16) break;
 		}
 		return list;
 	}
@@ -469,6 +477,30 @@ export class SakuranovelSource extends BaseSource {
 		};
 	}
 
+	/** Ambil teks chapter terbaru dari kartu (untuk badge Ch. di homepage) */
+	private extractLatestChapter($: cheerio.CheerioAPI, el: any): string | undefined {
+		const root = $(el);
+		const candidates = [
+			root.find('.epx').first().text(),
+			root.find('.chapter').first().text(),
+			root.find('.latest').first().text(),
+			root.find('.latest-chapter').first().text(),
+			root.find('.lchapter').first().text(),
+			root.find('.bigor .epxs').first().text(),
+			root.find('[class*="chapter"]').first().text(),
+			root.find('span').filter((_, s) => /chapter|ch\.?\s*\d|bab\s*\d/i.test($(s).text())).first().text()
+		];
+		for (const raw of candidates) {
+			const t = (raw || '').replace(/\s+/g, ' ').trim();
+			if (!t) continue;
+			// Ambil nomor jika ada, biar badge "Ch. 123"
+			const m = t.match(/(?:chapter|ch\.?|bab)\s*(\d+(?:\.\d+)?)/i) || t.match(/(\d+(?:\.\d+)?)/);
+			if (m) return m[1];
+			if (t.length < 40) return t;
+		}
+		return undefined;
+	}
+
 	private parseSeriesCards(html: string): Manga[] {
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
@@ -484,7 +516,9 @@ export class SakuranovelSource extends BaseSource {
 				'.series-item',
 				'.list-series .item',
 				'.serieslist li',
-				'.post-list .post'
+				'.post-list .post',
+				'.bs',
+				'.bsx'
 			].join(', ')
 		);
 
@@ -508,6 +542,7 @@ export class SakuranovelSource extends BaseSource {
 					$(el).find('.status, .status-series').text().trim() || undefined;
 				const typeText =
 					$(el).find('.type, span.type, .series-type').first().text().trim() || 'novel';
+				const latestChapter = this.extractLatestChapter($, el);
 				if (href && title && /\/series\//.test(href)) {
 					const id = pathOnly(href);
 					if (list.some((x) => x.id === id)) return;
@@ -518,7 +553,8 @@ export class SakuranovelSource extends BaseSource {
 						sourceId: this.id,
 						type: typeText || 'novel',
 						status,
-						lang: 'id'
+						lang: 'id',
+						latestChapter
 					});
 				}
 			});
@@ -535,13 +571,15 @@ export class SakuranovelSource extends BaseSource {
 					parent.find('img').attr('data-src') || parent.find('img').attr('src') || '';
 				const id = pathOnly(href);
 				if (list.some((x) => x.id === id)) return;
+				const latestChapter = this.extractLatestChapter($, parent.get(0) || el);
 				list.push({
 					id,
 					title,
 					cover: absUrl(this.baseUrl, cover.split('?')[0]),
 					sourceId: this.id,
 					type: 'novel',
-					lang: 'id'
+					lang: 'id',
+					latestChapter
 				});
 			});
 		}
