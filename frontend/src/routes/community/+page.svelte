@@ -8,7 +8,7 @@
 		formatForumDate
 	} from '$lib/stores/forum';
 	import { getUser } from '$lib/stores/auth.svelte';
-	import { MessageSquare, Plus, Pin, Lock, MessageCircle } from 'lucide-svelte';
+	import { MessagesSquare, Plus, Pin, Lock, MessageCircle } from 'lucide-svelte';
 
 	let categories = $state<ForumCategory[]>([]);
 	let threads = $state<ForumThread[]>([]);
@@ -40,9 +40,9 @@
 	>
 		<div>
 			<h1 class="flex items-center gap-2 text-xl font-bold text-black md:text-2xl dark:text-zinc-100">
-	<MessageSquare class="h-6 w-6 text-violet-600 dark:text-violet-400" />
-	Community
-</h1>
+				<MessagesSquare class="h-6 w-6 text-violet-600 dark:text-violet-400" />
+				Community
+			</h1>
 			<p class="mt-1 text-xs text-zinc-500">
 				Discuss manga, share recommendations, report issues.
 			</p>
@@ -60,94 +60,84 @@
 		{/if}
 	</div>
 
-	{#if error}
-		<p class="mb-4 text-sm text-red-500">{error}</p>
-	{/if}
-
-	<section class="mb-8">
-		<h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">Categories</h2>
-		{#if loading && categories.length === 0}
-			<div class="grid gap-2 sm:grid-cols-2">
-				{#each [1, 2, 3, 4] as _}
-					<div
-						class="h-24 animate-pulse rounded-xl border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/40"
-					></div>
-				{/each}
-			</div>
-		{:else}
+	{#if loading}
+		<p class="py-12 text-center text-sm text-zinc-500">Loading…</p>
+	{:else if error}
+		<p class="py-12 text-center text-sm text-red-500 dark:text-red-400">{error}</p>
+	{:else}
+		<!-- Categories -->
+		<section class="mb-8">
+			<h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-black dark:text-zinc-500">
+				Categories
+			</h2>
 			<div class="grid gap-2 sm:grid-cols-2">
 				{#each categories as c}
 					<a
 						href="/community/category/{c.slug}?id={c.id}"
 						class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 transition hover:border-violet-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-violet-500/40 dark:hover:bg-zinc-900/70"
 					>
-						<p class="font-medium text-zinc-900 dark:text-zinc-100">{c.name}</p>
-						<p class="mt-1 line-clamp-2 text-xs text-zinc-500">{c.description}</p>
+						<p class="font-medium text-black dark:text-zinc-100">{c.name}</p>
+						<p class="mt-1 line-clamp-2 text-xs text-zinc-600 dark:text-zinc-500">{c.description}</p>
 						{#if c.threadCount != null}
-							<p class="mt-2 text-[10px] text-zinc-400 dark:text-zinc-600">{c.threadCount} threads</p>
+							<p class="mt-2 text-[10px] text-zinc-500 dark:text-zinc-600">{c.threadCount} threads</p>
 						{/if}
 					</a>
 				{/each}
 			</div>
-		{/if}
-	</section>
+		</section>
 
-	<section>
-		<h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">Recent activity</h2>
-		{#if loading && threads.length === 0}
-			<div class="space-y-2">
-				{#each [1, 2, 3] as _}
-					<div
-						class="h-14 animate-pulse rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/40"
-					></div>
-				{/each}
-			</div>
-		{:else if threads.length === 0}
-			<p
-				class="rounded-xl border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-500 dark:border-zinc-800"
-			>
-				No threads yet. Be the first to start a discussion.
-			</p>
-		{:else}
-			<ul
-				class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800"
-			>
-				{#each threads as t}
-					<li>
-						<a
-							href="/community/thread/{t.id}"
-							class="flex gap-3 px-4 py-3 transition hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
-						>
-							<div class="min-w-0 flex-1">
-								<div class="flex flex-wrap items-center gap-1.5">
-									{#if t.pinned}
-										<Pin class="h-3 w-3 text-amber-500" />
-									{/if}
-									{#if t.locked}
-										<Lock class="h-3 w-3 text-zinc-400" />
-									{/if}
-									<span class="line-clamp-1 text-sm font-medium text-zinc-900 dark:text-zinc-100"
-										>{t.title}</span
-									>
+		<!-- Recent threads -->
+		<section>
+			<h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-black dark:text-zinc-500">
+				Recent activity
+			</h2>
+			{#if threads.length === 0}
+				<p
+					class="rounded-xl border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-500 dark:border-zinc-800"
+				>
+					No threads yet. Be the first to start a discussion.
+				</p>
+			{:else}
+				<ul
+					class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800"
+				>
+					{#each threads as t}
+						<li>
+							<a
+								href="/community/thread/{t.id}"
+								class="flex gap-3 px-4 py-3 transition hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+							>
+								<div class="min-w-0 flex-1">
+									<div class="flex flex-wrap items-center gap-1.5">
+										{#if t.pinned}
+											<Pin class="h-3 w-3 text-amber-500 dark:text-amber-400" />
+										{/if}
+										{#if t.locked}
+											<Lock class="h-3 w-3 text-zinc-400 dark:text-zinc-500" />
+										{/if}
+										<span class="line-clamp-1 text-sm font-medium text-black dark:text-zinc-100">
+											{t.title}
+										</span>
+									</div>
+									<p class="mt-0.5 text-[11px] text-zinc-500">
+										{t.authorName} · {t.categorySlug}
+										{#if t.mangaRef}
+											· <span class="text-violet-600 dark:text-violet-400/80">{t.mangaRef.title}</span>
+										{/if}
+									</p>
 								</div>
-								<p class="mt-0.5 text-[11px] text-zinc-500">
-									{t.authorName} · {t.categorySlug}
-									{#if t.mangaRef}
-										· <span class="text-violet-600 dark:text-violet-400/80">{t.mangaRef.title}</span>
-									{/if}
-								</p>
-							</div>
-							<div class="shrink-0 text-right text-[11px] text-zinc-500">
-								<div class="flex items-center justify-end gap-1">
-									<MessageCircle class="h-3 w-3" />
-									{t.replyCount}
+								<div class="shrink-0 text-right text-[11px] text-zinc-500">
+									<div class="flex items-center justify-end gap-1">
+										<MessageCircle class="h-3 w-3" />
+										{t.replyCount}
+									</div>
+									<p class="mt-0.5">{formatForumDate(t.lastReplyAt)}</p>
 								</div>
-								<p class="mt-0.5">{formatForumDate(t.lastReplyAt)}</p>
-							</div>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</section>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
 </div>

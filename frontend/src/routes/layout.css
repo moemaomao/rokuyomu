@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* ===== Global Theme Variables for Header Components ===== --> */
 :root, html.light {
