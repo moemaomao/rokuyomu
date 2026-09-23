@@ -10,12 +10,12 @@
 	} from '$lib/stores/forum';
 	import { getUser } from '$lib/stores/auth.svelte';
 	import { isAdmin } from '$lib/admin';
-	import { MessageCircle, ImagePlus, Pencil, Trash2, Send, X } from 'lucide-svelte';
+	import { MessageCircle, ImagePlus, Pencil, Trash2, Send, X, Reply } from 'lucide-svelte';
 
 	type PendingImage = {
 		id: string;
-		preview: string; // object URL for UI
-		dataUrl: string; // compressed base64 for send
+		preview: string;
+		dataUrl: string;
 	};
 
 	let messages = $state<ChatMessage[]>([]);
@@ -40,7 +40,6 @@
 
 	onDestroy(() => {
 		unsub?.();
-		// cleanup object URLs
 		pendingImages.forEach((p) => URL.revokeObjectURL(p.preview));
 	});
 
@@ -94,10 +93,7 @@
 					continue;
 				}
 				const preview = URL.createObjectURL(file);
-				pendingImages = [
-					...pendingImages,
-					{ id: crypto.randomUUID(), preview, dataUrl }
-				];
+				pendingImages = [...pendingImages, { id: crypto.randomUUID(), preview, dataUrl }];
 			} catch (err: any) {
 				error = err?.message || 'Failed to process image';
 			}
@@ -118,7 +114,6 @@
 		sending = true;
 		error = '';
 		try {
-			// build final body: text + markdown images
 			let body = text;
 			for (const img of pendingImages) {
 				body += `\n![image](${img.dataUrl})`;
@@ -128,7 +123,6 @@
 
 			await sendChatMessage(body);
 
-			// cleanup
 			pendingImages.forEach((p) => URL.revokeObjectURL(p.preview));
 			pendingImages = [];
 			input = '';
@@ -168,6 +162,16 @@
 		}
 	}
 
+	function replyTo(m: ChatMessage) {
+		const plain = m.body
+			.replace(/!\[.*?\]\(data:image\/[^)]+\)/g, '[image]')
+			.replace(/!\[.*?\]\(https?:\/\/[^)]+\)/g, '[image]')
+			.trim()
+			.slice(0, 120);
+		const quote = `> **${m.authorName}**: ${plain}\n\n`;
+		input = quote + input;
+	}
+
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
@@ -185,6 +189,7 @@
 			.replace(/</g, '&lt;')
 			.replace(/>/g, '&gt;');
 
+		// images
 		s = s.replace(
 			/!\[([^\]]*)\]\((data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=\s]+|https?:\/\/[^)\s]+)\)/g,
 			(_, alt, src) => {
@@ -192,13 +197,23 @@
 				return `<img src="${cleanSrc}" alt="${alt}" class="chat-img" loading="lazy" />`;
 			}
 		);
+		// bold
 		s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+		// italic
 		s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+		// code
 		s = s.replace(/`([^`]+)`/g, '<code class="chat-code">$1</code>');
+		// links
 		s = s.replace(
 			/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
 			'<a href="$2" target="_blank" rel="noopener" class="text-violet-600 dark:text-violet-400 underline">$1</a>'
 		);
+		// blockquote (reply quote)
+		s = s.replace(
+			/^&gt; (.+)$/gm,
+			'<span class="block border-l-2 border-violet-400 pl-2 text-zinc-500 dark:text-zinc-400">$1</span>'
+		);
+		// newlines
 		s = s.replace(/\n/g, '<br/>');
 		return s;
 	}
@@ -281,22 +296,33 @@
 						{/if}
 					</div>
 
-					{#if canModify(m) && editingId !== m.id}
+					{#if editingId !== m.id}
 						<div class="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100">
-							<button
-								onclick={() => startEdit(m)}
-								class="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-								title="Edit"
-							>
-								<Pencil class="h-3.5 w-3.5" />
-							</button>
-							<button
-								onclick={() => handleDelete(m.id)}
-								class="rounded p-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40"
-								title="Delete"
-							>
-								<Trash2 class="h-3.5 w-3.5" />
-							</button>
+							{#if user}
+								<button
+									onclick={() => replyTo(m)}
+									class="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-violet-600 dark:hover:bg-zinc-800 dark:hover:text-violet-400"
+									title="Reply"
+								>
+									<Reply class="h-3.5 w-3.5" />
+								</button>
+							{/if}
+							{#if canModify(m)}
+								<button
+									onclick={() => startEdit(m)}
+									class="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+									title="Edit"
+								>
+									<Pencil class="h-3.5 w-3.5" />
+								</button>
+								<button
+									onclick={() => handleDelete(m.id)}
+									class="rounded p-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40"
+									title="Delete"
+								>
+									<Trash2 class="h-3.5 w-3.5" />
+								</button>
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -311,7 +337,6 @@
 		{/if}
 
 		{#if user}
-			<!-- Image previews -->
 			{#if pendingImages.length > 0}
 				<div class="mb-2 flex flex-wrap gap-2">
 					{#each pendingImages as img (img.id)}
