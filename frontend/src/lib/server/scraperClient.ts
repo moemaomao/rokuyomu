@@ -76,7 +76,7 @@ export async function remoteMangaDetails(
 	lang = 'all'
 ): Promise<MangaDetails> {
 	if (isWorkerSource(sourceId)) {
-		const adapter = await getWorkerSource(sourceId); // ← await
+		const adapter = await getWorkerSource(sourceId);
 		const id = mangaId.startsWith('/') ? mangaId : `/${mangaId.replace(/^\/+/, '')}`;
 		return adapter.getMangaDetails(id, { lang });
 	}
@@ -89,7 +89,7 @@ export async function remoteMangaDetails(
 
 export async function remoteChapterPages(sourceId: string, chapterId: string): Promise<string[]> {
 	if (isWorkerSource(sourceId)) {
-		const adapter = await getWorkerSource(sourceId); // ← await
+		const adapter = await getWorkerSource(sourceId);
 		const id = chapterId.startsWith('/') ? chapterId : `/${chapterId.replace(/^\/+/, '')}`;
 		const pages = await adapter.getChapterPages(id);
 		return Array.isArray(pages) ? pages : [];
@@ -121,6 +121,57 @@ export async function remoteMangaFromChapter(
 	} catch {
 		return null;
 	}
+}
+
+// ── Novel chapter (teks) ────────────────────────────────────────────────────
+
+export type NovelChapterPayload = {
+	title: string;
+	content: string;
+	prevChapterId?: string | null;
+	nextChapterId?: string | null;
+	novelInfo?: { title?: string; id?: string } | null;
+	chapters?: { id: string; title: string; number?: number }[];
+	currentChapter?: { id: string; title?: string } | null;
+	prevChapter?: { id: string } | null;
+	nextChapter?: { id: string } | null;
+};
+
+export async function remoteNovelChapter(
+	sourceId: string,
+	chapterId: string
+): Promise<NovelChapterPayload> {
+	const id = chapterId.startsWith('/') ? chapterId : `/${chapterId.replace(/^\/+/, '')}`;
+
+	// Hybrid: Worker source (sakuranovel, dll.)
+	if (isWorkerSource(sourceId)) {
+		const adapter = (await getWorkerSource(sourceId)) as {
+			getChapterContent?: (chapterId: string) => Promise<{
+				title: string;
+				content: string;
+				prevChapterId?: string | null;
+				nextChapterId?: string | null;
+			}>;
+		};
+		if (typeof adapter.getChapterContent === 'function') {
+			const data = await adapter.getChapterContent(id);
+			return {
+				title: data.title || 'Chapter',
+				content: data.content || '',
+				prevChapterId: data.prevChapterId ?? null,
+				nextChapterId: data.nextChapterId ?? null,
+				prevChapter: data.prevChapterId ? { id: data.prevChapterId } : null,
+				nextChapter: data.nextChapterId ? { id: data.nextChapterId } : null
+			};
+		}
+		throw new Error(`Source "${sourceId}" has no getChapterContent()`);
+	}
+
+	// Remote scraper microservice
+	const pathId = id.replace(/^\/+/, '');
+	return scraperFetch<NovelChapterPayload>(
+		`/${encodeURIComponent(sourceId)}/novel-chapter/${pathId}`
+	);
 }
 
 export { isWorkerSource, WORKER_SOURCE_IDS } from '$lib/server/workerSources';

@@ -80,6 +80,36 @@ app.get('/:sourceId/chapter/*', async (req, res) => {
   }
 });
 
+// ── Novel chapter (teks) ────────────────────────────────────────────────────
+app.get('/:sourceId/novel-chapter/*', async (req, res) => {
+  try {
+    const sourceId = req.params.sourceId;
+    const raw = (req.params as any)[0] || '';
+    const chapterId = '/' + String(raw).replace(/^\/+/, '');
+    if (!chapterId || chapterId === '/') {
+      return res.status(400).json({ error: 'Invalid chapterId' });
+    }
+    const adapter = getSource(sourceId) as any;
+    if (typeof adapter.getChapterContent !== 'function') {
+      return res.status(400).json({
+        error: `Source "${sourceId}" does not support novel chapters (no getChapterContent)`
+      });
+    }
+    const data = await adapter.getChapterContent(chapterId);
+    res.json({
+      title: data?.title || 'Chapter',
+      content: data?.content || '',
+      prevChapterId: data?.prevChapterId ?? null,
+      nextChapterId: data?.nextChapterId ?? null,
+      prevChapter: data?.prevChapterId ? { id: data.prevChapterId } : null,
+      nextChapter: data?.nextChapterId ? { id: data.nextChapterId } : null
+    });
+  } catch (e: any) {
+    console.error('[novel-chapter]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'scraping failed' });
+  }
+});
+
 app.get('/:sourceId/manga-from-chapter', async (req, res) => {
   try {
     const { sourceId } = req.params;
@@ -92,7 +122,7 @@ app.get('/:sourceId/manga-from-chapter', async (req, res) => {
       const mangaId = await adapter.resolveMangaIdFromChapter(chapter);
       return res.json({ mangaId: mangaId || null });
     }
-    
+
     const hierarchical = chapter.replace(
       /\/(chapter|ch|episode|ep)[-/_]?[\d.-]*\/?$/i,
       ''
