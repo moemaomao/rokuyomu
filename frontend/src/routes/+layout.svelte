@@ -50,7 +50,8 @@
 		LogOut,
 		Github,
 		Settings,
-		Search
+		Search,
+		Bell
 	} from 'lucide-svelte';
 
 	// Stores
@@ -59,6 +60,10 @@
 		removeBookmark,
 		type BookmarkEntry
 	} from '$lib/stores/bookmark.svelte';
+	import {
+		getUnreadCount,
+		checkForNewChapters
+	} from '$lib/stores/notification.svelte';
 	import { getImpl } from '$lib/stores/impl';
 
 	// ── Progress bar ─────────────────────────────────────────────────────────
@@ -92,6 +97,11 @@
 	let isHistoryOpen = $state(true);
 	let bookmarks = $state<BookmarkEntry[]>([]);
 	let isHeaderHidden = $state(false);
+	let notifUnread = $state(0);
+
+	function loadNotifBadge() {
+		notifUnread = getUnreadCount();
+	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 	function formatMangaHref(sourceId: string, mangaId: string): string {
@@ -316,6 +326,10 @@ onMount(() => {
 	loadBookmarks();
 	window.addEventListener('bookmarks-changed', loadBookmarks);
 
+	loadNotifBadge();
+	window.addEventListener('notifications-changed', loadNotifBadge);
+	checkForNewChapters().then(loadNotifBadge);
+
 	const onDocClick = (e: MouseEvent) => {
 		const t = e.target as HTMLElement;
 		if (!t.closest('[data-dropdown]') && !t.closest('[data-dropdown-btn]')) {
@@ -374,6 +388,7 @@ if (db) {
 	return () => {
 		mq.removeEventListener('change', applyMq);
 		window.removeEventListener('bookmarks-changed', loadBookmarks);
+		window.removeEventListener('notifications-changed', loadNotifBadge);
 		document.removeEventListener('click', onDocClick);
 		window.removeEventListener('scroll', handleScroll);
 		unsubBroken?.();
@@ -472,6 +487,20 @@ $effect(() => {
 				<Bookmark class="h-5 w-5 shrink-0" /> Bookmark
 			</a>
 			<a
+				href="/notification"
+				onclick={(e) => handleNavigate(e, '/notification')}
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<Bell class="h-5 w-5 shrink-0" /> Notifikasi
+				{#if notifUnread > 0}
+					<span
+						class="ml-auto rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white"
+					>
+						{notifUnread > 99 ? '99+' : notifUnread}
+					</span>
+				{/if}
+			</a>
+			<a
 				href="/history"
 				onclick={(e) => handleNavigate(e, '/history')}
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
@@ -554,6 +583,24 @@ $effect(() => {
 
 		<!-- Right: actions -->
 		<div class="relative flex shrink-0 items-center gap-0.5">
+			<!-- Notification bell (dekat dark/light mode) -->
+			<a
+				href="/notification"
+				onclick={(e) => handleNavigate(e, '/notification')}
+				class="relative rounded-lg p-1.5 transition {iconBtnClass()}"
+				aria-label="Notifikasi"
+				title="Notifikasi chapter"
+			>
+				<Bell class="h-5 w-5" />
+				{#if notifUnread > 0}
+					<span
+						class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 text-white px-0.5 text-[9px] font-bold text-white"
+					>
+						{notifUnread > 99 ? '99+' : notifUnread}
+					</span>
+				{/if}
+			</a>
+
 			<!-- Theme -->
 			<button
 				onclick={toggleDarkMode}
@@ -592,7 +639,7 @@ $effect(() => {
 					<Bookmark class="h-5 w-5" />
 					{#if bookmarks.length > 0}
 						<span
-							class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-orange-500 px-0.5 text-[9px] font-bold text-white"
+							class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-violet-500 text-white px-0.5 text-[9px] font-bold text-white"
 						>
 							{bookmarks.length > 99 ? '99+' : bookmarks.length}
 						</span>

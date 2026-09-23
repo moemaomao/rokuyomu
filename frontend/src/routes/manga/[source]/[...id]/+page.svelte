@@ -2,7 +2,9 @@
 	import type { PageData } from './$types';
 	import { onMount } from 'svelte';
 	import { toggleBookmark, isBookmarked } from '$lib/stores/bookmark.svelte';
+	import { toggleNotification, isNotified } from '$lib/stores/notification.svelte';
 	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
+	import { Bell, BellOff } from 'lucide-svelte';
 
 	const { data }: { data: PageData } = $props();
 
@@ -17,6 +19,7 @@
 	let sortNewest = $state(true);
 	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
 	let bookmarked = $state(false);
+	let notified = $state(false);
 	let loadMoreEl: HTMLElement | null = $state(null);
 
 	let loadingMore = $state(false);
@@ -301,6 +304,26 @@
 		});
 	}
 
+	async function handleNotify() {
+		if (!manga) return;
+		const chapters = manga.chapters || [];
+		const latest = [...chapters].sort(
+			(a: any, b: any) => (b.number || 0) - (a.number || 0)
+		)[0];
+		notified = await toggleNotification({
+			mangaId: manga.id,
+			mangaSlug: manga.id,
+			mangaTitle: manga.title,
+			cover: manga.cover || '',
+			sourceId: source,
+			lastChapterId: latest ? String(latest.id || latest.number || '') : '',
+			lastChapterTitle: latest
+				? String(latest.title || latest.name || `Ch. ${latest.number ?? ''}`)
+				: '',
+			lastChapterNumber: latest ? Number(latest.number) || 0 : 0
+		});
+	}
+
 	function setViewMode(mode: 'grid-thumb' | 'grid-text' | 'list-thumb') {
 		viewMode = mode;
 		try {
@@ -375,13 +398,23 @@
 			/* ignore */
 		}
 
-		if (manga?.id) bookmarked = isBookmarked(manga.id, source);
+		if (manga?.id) {
+			bookmarked = isBookmarked(manga.id, source);
+			notified = isNotified(manga.id, source);
+		}
 
 		const onChange = () => {
-			if (manga?.id) bookmarked = isBookmarked(manga.id, source);
+			if (manga?.id) {
+				bookmarked = isBookmarked(manga.id, source);
+				notified = isNotified(manga.id, source);
+			}
 		};
 		window.addEventListener('bookmarks-changed', onChange);
-		return () => window.removeEventListener('bookmarks-changed', onChange);
+		window.addEventListener('notifications-changed', onChange);
+		return () => {
+			window.removeEventListener('bookmarks-changed', onChange);
+			window.removeEventListener('notifications-changed', onChange);
+		};
 	});
 
 	$effect(() => {
@@ -494,21 +527,42 @@
 							<span class="detail-muted text-[12px] font-medium">{rating}</span>
 						</div>
 
-						<button
-							type="button"
-							onclick={handleBookmark}
-							class="bookmark-btn flex w-full max-w-[80px] items-center justify-center gap-1.5 rounded-lg border-2 px-1 py-1 text-[10px] font-semibold transition md:max-w-[140px] md:px-6 md:py-2.5 md:text-sm {bookmarked
-								? 'bookmarked'
-								: ''}"
-						>
-							{#if bookmarked}
-								<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5" /></svg>
-								Bookmarked
-							{:else}
-								<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" /></svg>
-								Bookmark
-							{/if}
-						</button>
+						<div class="flex w-full max-w-[120px] items-center gap-1.5 md:max-w-[180px]">
+							<!-- Notify icon-only — di depan Bookmark -->
+							<button
+								type="button"
+								onclick={handleNotify}
+								class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border-2 transition md:h-[38px] md:w-[38px]
+									{notified
+										? 'border-orange-500/60 bg-orange-500/15 text-orange-400'
+										: 'border-zinc-500/50 bg-transparent text-zinc-400 hover:border-orange-500/50 hover:text-orange-300'}"
+								title={notified ? 'Matikan notifikasi chapter' : 'Aktifkan notifikasi chapter baru'}
+								aria-label={notified ? 'Matikan notifikasi' : 'Aktifkan notifikasi'}
+							>
+								{#if notified}
+									<Bell class="h-4 w-4 md:h-[18px] md:w-[18px]" />
+								{:else}
+									<BellOff class="h-4 w-4 md:h-[18px] md:w-[18px]" />
+								{/if}
+							</button>
+
+							<!-- Bookmark -->
+							<button
+								type="button"
+								onclick={handleBookmark}
+								class="bookmark-btn flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-1 py-1 text-[10px] font-semibold transition md:px-3 md:py-2.5 md:text-sm {bookmarked
+									? 'bookmarked'
+									: ''}"
+							>
+								{#if bookmarked}
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5" /></svg>
+									Bookmarked
+								{:else}
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" /></svg>
+									Bookmark
+								{/if}
+							</button>
+						</div>
 					</div>
 
 					<div class="min-w-0 flex-1">
