@@ -9,6 +9,7 @@
 	} from '$lib/stores/forum';
 	import { getUser } from '$lib/stores/auth.svelte';
 	import { MessagesSquare, Plus, Pin, Lock, MessageCircle } from 'lucide-svelte';
+	import CommunityChat from '$lib/components/CommunityChat.svelte';
 
 	let categories = $state<ForumCategory[]>([]);
 	let threads = $state<ForumThread[]>([]);
@@ -65,6 +66,9 @@
 	{:else if error}
 		<p class="py-12 text-center text-sm text-red-500 dark:text-red-400">{error}</p>
 	{:else}
+		<!-- Live Chat -->
+		<CommunityChat />
+
 		<!-- Categories -->
 		<section class="mb-8">
 			<h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-black dark:text-zinc-500">

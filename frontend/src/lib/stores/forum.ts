@@ -1,6 +1,6 @@
 /**
  * Forum store — Firestore-backed community forum for Rokuyomu.
- * Collections: forumCategories, forumThreads, forumPosts
+ * Collections: forumCategories, forumThreads, forumPosts, communityChat
  */
 import { browser } from '$app/environment';
 import {
@@ -17,6 +17,7 @@ import {
 	limit,
 	serverTimestamp,
 	increment,
+	onSnapshot,
 	type Timestamp
 } from 'firebase/firestore';
 import { db } from '$lib/firebase';
@@ -61,6 +62,16 @@ export type ForumPost = {
 	editedAt?: number;
 };
 
+export type ChatMessage = {
+	id: string;
+	body: string;
+	authorId: string;
+	authorName: string;
+	authorPhoto?: string;
+	createdAt: number;
+	editedAt?: number;
+};
+
 /** Default categories seeded on first load if collection empty */
 export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
 	{
@@ -95,6 +106,10 @@ export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
 	}
 ];
 
+const CHAT_COL = 'communityChat';
+const MAX_CHAT_BODY = 4000;
+const MAX_IMAGE_BASE64 = 600_000;
+
 function tsToMs(v: unknown): number {
 	if (!v) return Date.now();
 	if (typeof v === 'number') return v;
@@ -113,7 +128,6 @@ export async function ensureCategories(): Promise<ForumCategory[]> {
 	if (!snap.empty) {
 		return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ForumCategory, 'id'>) }));
 	}
-	// seed defaults (any logged-in user can seed once; ideally admin-only in rules)
 	const created: ForumCategory[] = [];
 	for (const c of DEFAULT_CATEGORIES) {
 		const ref = await addDoc(collection(db, 'forumCategories'), { ...c, threadCount: 0 });
@@ -236,7 +250,6 @@ export async function createThread(input: {
 		lastReplyAuthor: displayName(user)
 	});
 
-	// first post = OP body (optional dual-store; we keep body on thread for list preview)
 	await addDoc(collection(db, 'forumPosts'), {
 		threadId: ref.id,
 		body,
@@ -298,7 +311,6 @@ export async function deleteThread(threadId: string): Promise<void> {
 		throw new Error('Not allowed');
 	}
 
-	// delete posts
 	const posts = await getPosts(threadId);
 	await Promise.all(posts.map((p) => deleteDoc(doc(db!, 'forumPosts', p.id))));
 	await deleteDoc(doc(db, 'forumThreads', threadId));
@@ -322,6 +334,109 @@ export async function setThreadLocked(threadId: string, locked: boolean): Promis
 	const user = getUser();
 	if (!user || !isAdmin(user.uid) || !db) throw new Error('Admin only');
 	await updateDoc(doc(db, 'forumThreads', threadId), { locked });
+}
+
+// ── Community Chat ──────────────────────────────────────────────────────────
+
+export async function getChatMessages(max = 80): Promise<ChatMessage[]> {
+	if (!browser || !db) return [];
+	const snap = await getDocs(
+		query(collection(db, CHAT_COL), orderBy('createdAt', 'desc'), limit(max))
+	);
+	return snap.docs
+		.map((d) => {
+			const x = d.data();
+			return {
+				id: d.id,
+				body: String(x.body || ''),
+				authorId: String(x.authorId || ''),
+				authorName: String(x.authorName || 'User'),
+				authorPhoto: x.authorPhoto ? String(x.authorPhoto) : undefined,
+				createdAt: tsToMs(x.createdAt),
+				editedAt: x.editedAt ? tsToMs(x.editedAt) : undefined
+			};
+		})
+		.reverse();
+}
+
+export function subscribeChatMessages(
+	cb: (msgs: ChatMessage[]) => void,
+	max = 80
+): () => void {
+	if (!browser || !db) return () => {};
+	const q = query(collection(db, CHAT_COL), orderBy('createdAt', 'desc'), limit(max));
+	return onSnapshot(q, (snap) => {
+		const list = snap.docs
+			.map((d) => {
+				const x = d.data();
+				return {
+					id: d.id,
+					body: String(x.body || ''),
+					authorId: String(x.authorId || ''),
+					authorName: String(x.authorName || 'User'),
+					authorPhoto: x.authorPhoto ? String(x.authorPhoto) : undefined,
+					createdAt: tsToMs(x.createdAt),
+					editedAt: x.editedAt ? tsToMs(x.editedAt) : undefined
+				};
+			})
+			.reverse();
+		cb(list);
+	});
+}
+
+export async function sendChatMessage(body: string): Promise<void> {
+	if (!browser || !db) throw new Error('Not available');
+	const user = getUser();
+	if (!user) throw new Error('Login required');
+
+	const text = body.trim().slice(0, MAX_CHAT_BODY);
+	if (!text) throw new Error('Message cannot be empty');
+
+	if (text.includes('data:image') && text.length > MAX_IMAGE_BASE64 + 200) {
+		throw new Error('Image too large (max ~450KB)');
+	}
+
+	await addDoc(collection(db, CHAT_COL), {
+		body: text,
+		authorId: user.uid,
+		authorName: displayName(user),
+		authorPhoto: user.photoURL || '',
+		createdAt: Date.now()
+	});
+}
+
+export async function editChatMessage(id: string, body: string): Promise<void> {
+	if (!browser || !db) throw new Error('Not available');
+	const user = getUser();
+	if (!user) throw new Error('Login required');
+
+	const text = body.trim().slice(0, MAX_CHAT_BODY);
+	if (!text) throw new Error('Message cannot be empty');
+
+	const ref = doc(db, CHAT_COL, id);
+	const snap = await getDoc(ref);
+	if (!snap.exists()) throw new Error('Message not found');
+	const data = snap.data();
+	if (data.authorId !== user.uid && !isAdmin(user.uid)) {
+		throw new Error('Not allowed');
+	}
+
+	await updateDoc(ref, { body: text, editedAt: Date.now() });
+}
+
+export async function deleteChatMessage(id: string): Promise<void> {
+	if (!browser || !db) throw new Error('Not available');
+	const user = getUser();
+	if (!user) throw new Error('Login required');
+
+	const ref = doc(db, CHAT_COL, id);
+	const snap = await getDoc(ref);
+	if (!snap.exists()) return;
+	const data = snap.data();
+	if (data.authorId !== user.uid && !isAdmin(user.uid)) {
+		throw new Error('Not allowed');
+	}
+	await deleteDoc(ref);
 }
 
 export function formatForumDate(ms: number): string {
