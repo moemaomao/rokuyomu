@@ -5,6 +5,7 @@
 	import { toggleNotification, isNotified } from '$lib/stores/notification.svelte';
 	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
 	import { Bell, BellOff } from 'lucide-svelte';
+	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 
 	const { data }: { data: PageData } = $props();
 
@@ -841,7 +842,7 @@
 						>
 							{#each displayedChapters as chapter}
 								<a
-									href="/reader/{source}{chapter.id}"
+									href={chapterHref(source, chapter.id)}
 									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105"
 								>
 									{#if chapterCover(chapter)}

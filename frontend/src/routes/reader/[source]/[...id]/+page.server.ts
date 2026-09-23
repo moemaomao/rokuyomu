@@ -4,9 +4,10 @@ import {
 	remoteMangaFromChapter
 } from '$lib/server/scraperClient';
 import { isValidSource } from '$lib/server/sources';
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import debug from '$lib/utils/debug';
+import { isNovelSource } from '$lib/utils/novelSources';
 
 const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	komiku: '/manga',
@@ -147,6 +148,12 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 
 	if (!source || !isValidSource(source)) {
 		throw error(404, { message: 'Source not found' });
+	}
+
+	// Novel → novel-reader (bukan image reader)
+	if (isNovelSource(source)) {
+		const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+		throw redirect(302, `/novel-reader/${source}${path}`);
 	}
 
 	try {
