@@ -102,9 +102,11 @@ import { AreakomikSource } from './impl/Areakomik';
 import { GenzToonsSource } from './impl/GenzToons';
 import { SetsuScansSource } from './impl/SetsuScans';
 import Noveltoon from './impl/Noveltoon';
+import SakuranovelSource from './impl/Sakuranovel';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    sakuranovel: new SakuranovelSource(),
     noveltoon: new Noveltoon(),
     silentquill: new SilentQuillSource(),
     genztoons: new GenzToonsSource(),
