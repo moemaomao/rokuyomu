@@ -48,12 +48,14 @@ export const WORKER_SOURCE_IDS = new Set([
 	'ngomik',
 	'pixhentai',
 	'sasangeyou',
-	'siikomik'
+	'siikomik',
+	'sakuranovel'
 ]);
 
 const instanceCache = new Map<string, IMangaSource>();
 
 const loaders: Record<string, () => Promise<IMangaSource>> = {
+	sakuranovel: async () => new (await import('./impl/Sakuranovel')).SakuranovelSource(),
 	klz9: async () => new (await import('./impl/Klz9')).Klz9Source(),
 	rawkuma: async () => new (await import('./impl/Rawkuma')).RawkumaSource(),
 	athreascans: async () => new (await import('./impl/AthreaScans')).AthreaScansSource(),
