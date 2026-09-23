@@ -118,7 +118,6 @@
         try {
             let body = text;
             
-            // Menggunakan enter (\n) agar teks balasan tidak menempel rapat dengan mention user
             if (replyingTo) {
                 body = `@${replyingTo.authorName}\n${body}`;
             }
@@ -228,7 +227,6 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
 
-        // Styling khusus mention @username agar berwarna amber (tidak putih)
         s = s.replace(
             /@([a-zA-Z0-9_.-]+)/g,
             '<span class="chat-mention">@$1</span>'
@@ -263,10 +261,10 @@
 </script>
 
 <section
-    class="mb-8 overflow-hidden rounded-xl border-2 border-zinc-400 bg-white dark:border-zinc-600 dark:bg-zinc-900/40 shadow-md"
+    class="mb-8 overflow-hidden rounded-xl border border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-900/40 shadow-sm"
 >
     <div
-        class="flex items-center gap-2 border-b-2 border-zinc-400 px-4 py-2.5 dark:border-zinc-600"
+        class="flex items-center gap-2 border-b border-zinc-300 px-4 py-2.5 dark:border-zinc-700"
     >
         <MessageCircle class="h-4 w-4 text-red-600 dark:text-red-500" />
         <h2 class="text-sm font-bold text-red-600 dark:text-red-500">Live Chat</h2>
@@ -404,7 +402,7 @@
     </div>
 
     <!-- Composer -->
-    <div class="border-t-2 border-zinc-400 p-3 dark:border-zinc-600">
+    <div class="border-t border-zinc-300 p-3 dark:border-zinc-700">
         {#if error}
             <p class="mb-2 text-xs text-red-500">{error}</p>
         {/if}
@@ -452,13 +450,13 @@
                     onkeydown={onKeydown}
                     rows="2"
                     placeholder="Write a message… (Enter to send)"
-                    class="min-h-[40px] flex-1 resize-none rounded-lg border-2 border-zinc-400 bg-white px-3 py-2 text-sm text-black outline-none focus:border-violet-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                    class="min-h-[40px] flex-1 resize-none rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-black outline-none focus:border-violet-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 ></textarea>
 
                 <div class="flex flex-col gap-1">
                     <button
                         onclick={pickImage}
-                        class="rounded-lg border-2 border-zinc-400 p-2 text-zinc-500 transition hover:bg-zinc-50 hover:text-violet-600 dark:border-zinc-600 dark:hover:bg-zinc-800"
+                        class="rounded-lg border border-zinc-300 p-2 text-zinc-500 transition hover:bg-zinc-50 hover:text-violet-600 dark:border-zinc-700 dark:hover:bg-zinc-800"
                         title="Upload image"
                     >
                         <ImagePlus class="h-4 w-4" />
