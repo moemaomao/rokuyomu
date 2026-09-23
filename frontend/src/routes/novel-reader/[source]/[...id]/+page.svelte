@@ -39,6 +39,7 @@
 	let showSettings = $state(false);
 	let isSpeaking = $state(false);
 	let isPaused = $state(false);
+	let settingsReady = $state(false);
 	let scrollInterval: ReturnType<typeof setInterval> | null = null;
 	let voices = $state<SpeechSynthesisVoice[]>([]);
 
@@ -67,7 +68,7 @@
 	}
 
 	function saveSettings() {
-		if (!browser) return;
+		if (!browser || !settingsReady) return;
 		localStorage.setItem(
 			'novelReaderSettings',
 			JSON.stringify({
@@ -83,7 +84,17 @@
 		);
 	}
 
+	// Track semua setting; save hanya setelah load selesai
 	$effect(() => {
+		fontFamily;
+		fontSize;
+		lineHeight;
+		maxWidth;
+		isDark;
+		scrollSpeed;
+		ttsRate;
+		ttsVoiceURI;
+		if (!settingsReady) return;
 		saveSettings();
 	});
 
@@ -191,6 +202,8 @@
 
 	onMount(() => {
 		loadSettings();
+		settingsReady = true;
+
 		loadVoices();
 		if (browser && window.speechSynthesis) {
 			window.speechSynthesis.onvoiceschanged = loadVoices;
@@ -236,7 +249,6 @@
 		: 'bg-amber-50 text-zinc-900'}"
 	onclick={toggleTap}
 >
-	<!-- Title bar saja (tanpa tombol back) -->
 	<header
 		class="fixed top-0 inset-x-0 z-[100] px-4 py-3 text-center backdrop-blur-md transition-transform duration-300 {showControls
 			? 'translate-y-0'
@@ -264,7 +276,6 @@
 		{@html content || '<p>No content</p>'}
 	</article>
 
-	<!-- Bottom: Prev / Next -->
 	<div
 		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3 transition-transform duration-300 {showControls
 			? 'translate-y-0'
@@ -313,7 +324,6 @@
 		</button>
 	</div>
 
-	<!-- FAB kanan bawah -->
 	<div
 		class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5 transition-opacity duration-300 {showControls
 			? 'opacity-100'
@@ -411,8 +421,8 @@
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-xl max-h-[80vh] overflow-y-auto {isDark
-					? 'bg-zinc-900'
-					: 'bg-white'}"
+					? 'bg-zinc-900 text-zinc-100'
+					: 'bg-white text-zinc-900'}"
 				onclick={(e) => e.stopPropagation()}
 				role="dialog"
 				aria-modal="true"
@@ -427,9 +437,12 @@
 					{#each Object.keys(FONTS) as f (f)}
 						<button
 							type="button"
-							class="py-2 px-3 rounded-lg border text-sm capitalize {fontFamily === f
+							class="py-2 px-3 rounded-lg border text-sm capitalize transition
+								{fontFamily === f
 								? 'border-emerald-500 bg-emerald-500/20'
-								: ''}"
+								: isDark
+									? 'border-white/15 hover:bg-white/5'
+									: 'border-zinc-300 hover:bg-zinc-50'}"
 							style:font-family={FONTS[f]}
 							onclick={() => (fontFamily = f)}
 						>
@@ -499,18 +512,26 @@
 					<label class="block text-sm mb-1 opacity-70" for="tts-voice">Voice</label>
 					<select
 						id="tts-voice"
-						class="w-full rounded-lg border px-3 py-2 mb-4 bg-transparent"
+						class="w-full rounded-lg border px-3 py-2 mb-4 outline-none
+							{isDark
+							? 'bg-zinc-800 border-white/15 text-zinc-100'
+							: 'bg-white border-zinc-300 text-zinc-900'}"
 						bind:value={ttsVoiceURI}
 					>
 						{#each voices as v (v.voiceURI)}
-							<option value={v.voiceURI}>{v.name} ({v.lang})</option>
+							<option
+								value={v.voiceURI}
+								class={isDark ? 'bg-zinc-800 text-zinc-100' : 'bg-white text-zinc-900'}
+							>
+								{v.name} ({v.lang})
+							</option>
 						{/each}
 					</select>
 				{/if}
 
 				<button
 					type="button"
-					class="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-medium"
+					class="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-500 transition"
 					onclick={() => (showSettings = false)}
 				>
 					Done
