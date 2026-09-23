@@ -100,6 +100,9 @@
 		const clean = ref.mangaId.startsWith('/') ? ref.mangaId : `/${ref.mangaId}`;
 		return `/manga/${ref.sourceId}${clean}`;
 	}
+
+	const fieldClass =
+		'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-violet-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500';
 </script>
 
 <svelte:head>
@@ -107,35 +110,44 @@
 </svelte:head>
 
 <div class="mx-auto max-w-3xl p-4 md:p-6">
-	<a href="/community" class="mb-4 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
+	<a
+		href="/community"
+		class="mb-4 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+	>
 		<ArrowLeft class="h-3.5 w-3.5" /> Community
 	</a>
 
-	{#if loading}
-		<p class="py-12 text-center text-sm text-zinc-500">Loading…</p>
-	{:else if error}
-		<p class="py-12 text-center text-sm text-red-400">{error}</p>
+	{#if error}
+		<p class="py-12 text-center text-sm text-red-500">{error}</p>
+	{:else if loading && !thread}
+		<div class="space-y-3">
+			<div class="h-8 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800"></div>
+			<div class="h-4 w-1/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800"></div>
+			<div class="mt-6 h-32 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900/50"></div>
+		</div>
 	{:else if thread}
-		<header class="mb-6 border-b border-zinc-800 pb-4">
+		<header class="mb-6 border-b border-zinc-200 pb-4 dark:border-zinc-800">
 			<div class="flex flex-wrap items-start justify-between gap-2">
 				<div class="min-w-0 flex-1">
 					<div class="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
 						{#if thread.pinned}
-							<span class="flex items-center gap-0.5 text-amber-400"><Pin class="h-3 w-3" /> Pinned</span>
+							<span class="flex items-center gap-0.5 text-amber-500"
+								><Pin class="h-3 w-3" /> Pinned</span
+							>
 						{/if}
 						{#if thread.locked}
 							<span class="flex items-center gap-0.5"><Lock class="h-3 w-3" /> Locked</span>
 						{/if}
 						<span class="capitalize">{thread.categorySlug}</span>
 					</div>
-					<h1 class="text-xl font-bold md:text-2xl">{thread.title}</h1>
+					<h1 class="text-xl font-bold text-zinc-900 md:text-2xl dark:text-zinc-100">{thread.title}</h1>
 					<p class="mt-1 text-xs text-zinc-500">
 						by {thread.authorName} · {formatForumDate(thread.createdAt)}
 					</p>
 					{#if thread.mangaRef}
 						<a
 							href={mangaHref(thread.mangaRef)}
-							class="mt-2 inline-block text-xs text-violet-400 hover:underline"
+							class="mt-2 inline-block text-xs text-violet-600 hover:underline dark:text-violet-400"
 						>
 							Related: {thread.mangaRef.title}
 						</a>
@@ -147,14 +159,14 @@
 							<button
 								type="button"
 								onclick={togglePin}
-								class="rounded-md border border-zinc-700 px-2 py-1 text-[10px] hover:bg-zinc-800"
+								class="rounded-md border border-zinc-300 px-2 py-1 text-[10px] text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
 							>
 								{thread.pinned ? 'Unpin' : 'Pin'}
 							</button>
 							<button
 								type="button"
 								onclick={toggleLock}
-								class="rounded-md border border-zinc-700 px-2 py-1 text-[10px] hover:bg-zinc-800"
+								class="rounded-md border border-zinc-300 px-2 py-1 text-[10px] text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
 							>
 								{thread.locked ? 'Unlock' : 'Lock'}
 							</button>
@@ -162,7 +174,7 @@
 						<button
 							type="button"
 							onclick={handleDelete}
-							class="flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-1 text-[10px] text-red-400 hover:bg-red-500/10"
+							class="flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/10"
 						>
 							<Trash2 class="h-3 w-3" /> Delete
 						</button>
@@ -172,13 +184,14 @@
 		</header>
 
 		{#if actionMsg}
-			<p class="mb-3 text-xs text-red-400">{actionMsg}</p>
+			<p class="mb-3 text-xs text-red-500">{actionMsg}</p>
 		{/if}
 
-		<!-- Posts -->
 		<div class="space-y-4">
 			{#each posts as p, i}
-				<article class="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
+				<article
+					class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30"
+				>
 					<div class="mb-2 flex items-center gap-2">
 						{#if p.authorPhoto}
 							<img src={p.authorPhoto} alt="" class="h-7 w-7 rounded-full object-cover" />
@@ -190,39 +203,43 @@
 							</span>
 						{/if}
 						<div>
-							<p class="text-xs font-medium">{p.authorName}</p>
+							<p class="text-xs font-medium text-zinc-900 dark:text-zinc-100">{p.authorName}</p>
 							<p class="text-[10px] text-zinc-500">
 								{formatForumDate(p.createdAt)}
-								{#if i === 0}<span class="ml-1 text-violet-400">OP</span>{/if}
+								{#if i === 0}<span class="ml-1 text-violet-600 dark:text-violet-400">OP</span>{/if}
 							</p>
 						</div>
 					</div>
-					<div class="forum-body text-sm leading-relaxed text-zinc-200">
+					<div class="forum-body text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
 						{@html renderBodyHtml(p.body)}
 					</div>
 				</article>
 			{/each}
 		</div>
 
-		<!-- Reply box -->
 		{#if thread.locked}
-			<p class="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-center text-xs text-zinc-500">
+			<p
+				class="mt-6 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/40"
+			>
 				This thread is locked.
 			</p>
 		{:else if getUser()}
 			<form
-				class="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4"
+				class="mt-6 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
 				onsubmit={(e) => {
 					e.preventDefault();
 					handleReply();
 				}}
 			>
-				<label class="mb-2 block text-xs font-medium text-zinc-400">Reply</label>
+				<label for="forum-reply" class="mb-2 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+					>Reply</label
+				>
 				<textarea
+					id="forum-reply"
 					bind:value={replyBody}
 					rows="4"
 					placeholder="Write a reply… Use ||spoiler text|| for spoilers."
-					class="w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-sm outline-none focus:border-violet-500"
+					class={fieldClass}
 				></textarea>
 				<button
 					type="submit"
@@ -241,12 +258,15 @@
 
 <style>
 	:global(.forum-body .spoiler) {
-		background: #3f3f46;
+		background: #d4d4d8;
 		color: transparent;
 		border-radius: 4px;
 		padding: 0 4px;
 		cursor: pointer;
 		user-select: none;
+	}
+	:global(html.dark .forum-body .spoiler) {
+		background: #3f3f46;
 	}
 	:global(.forum-body .spoiler.revealed) {
 		background: transparent;

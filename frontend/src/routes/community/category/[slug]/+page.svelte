@@ -43,13 +43,18 @@
 </svelte:head>
 
 <div class="mx-auto max-w-4xl p-4 md:p-6">
-	<a href="/community" class="mb-4 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
+	<a
+		href="/community"
+		class="mb-4 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+	>
 		<ArrowLeft class="h-3.5 w-3.5" /> Back to Community
 	</a>
 
-	<div class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-4">
+	<div
+		class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-800"
+	>
 		<div>
-			<h1 class="text-xl font-bold">{category?.name || '…'}</h1>
+			<h1 class="text-xl font-bold text-zinc-900 dark:text-zinc-100">{category?.name || '…'}</h1>
 			{#if category}
 				<p class="mt-1 text-xs text-zinc-500">{category.description}</p>
 			{/if}
@@ -64,24 +69,39 @@
 		{/if}
 	</div>
 
-	{#if loading}
-		<p class="py-12 text-center text-sm text-zinc-500">Loading…</p>
-	{:else if error}
-		<p class="py-12 text-center text-sm text-red-400">{error}</p>
+	{#if error}
+		<p class="text-sm text-red-500">{error}</p>
+	{:else if loading && threads.length === 0}
+		<div class="space-y-2">
+			{#each [1, 2, 3] as _}
+				<div
+					class="h-14 animate-pulse rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/40"
+				></div>
+			{/each}
+		</div>
 	{:else if threads.length === 0}
-		<p class="rounded-xl border border-dashed border-zinc-800 py-10 text-center text-sm text-zinc-500">
+		<p
+			class="rounded-xl border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-500 dark:border-zinc-800"
+		>
 			No threads in this category yet.
 		</p>
 	{:else}
-		<ul class="divide-y divide-zinc-800 overflow-hidden rounded-xl border border-zinc-800">
+		<ul
+			class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800"
+		>
 			{#each threads as t}
 				<li>
-					<a href="/community/thread/{t.id}" class="flex gap-3 px-4 py-3 hover:bg-zinc-900/60">
+					<a
+						href="/community/thread/{t.id}"
+						class="flex gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+					>
 						<div class="min-w-0 flex-1">
 							<div class="flex flex-wrap items-center gap-1.5">
-								{#if t.pinned}<Pin class="h-3 w-3 text-amber-400" />{/if}
-								{#if t.locked}<Lock class="h-3 w-3 text-zinc-500" />{/if}
-								<span class="line-clamp-1 text-sm font-medium">{t.title}</span>
+								{#if t.pinned}<Pin class="h-3 w-3 text-amber-500" />{/if}
+								{#if t.locked}<Lock class="h-3 w-3 text-zinc-400" />{/if}
+								<span class="line-clamp-1 text-sm font-medium text-zinc-900 dark:text-zinc-100"
+									>{t.title}</span
+								>
 							</div>
 							<p class="mt-0.5 text-[11px] text-zinc-500">
 								{t.authorName} · {formatForumDate(t.createdAt)}
