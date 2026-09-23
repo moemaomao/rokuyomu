@@ -106,8 +106,8 @@ export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
 ];
 
 const CHAT_COL = 'communityChat';
-const MAX_CHAT_BODY = 4000;
-const MAX_IMAGE_BASE64 = 900_000;
+const MAX_CHAT_BODY = 900_000;
+const MAX_IMAGE_BASE64 = 700_000;
 
 function tsToMs(v: unknown): number {
 	if (!v) return Date.now();
