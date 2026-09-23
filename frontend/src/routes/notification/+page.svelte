@@ -77,21 +77,21 @@
 </script>
 
 <svelte:head>
-	<title>Notifikasi | Rokuyomu</title>
+	<title>Notifications | Rokuyomu</title>
 </svelte:head>
 
 <div class="mx-auto max-w-6xl p-4 md:p-6">
 	<div class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-4">
 		<div>
-			<h1 class="text-xl font-bold md:text-2xl">Notifikasi Chapter</h1>
+			<h1 class="text-xl font-bold md:text-2xl">Chapter Notifications</h1>
 			<p class="mt-1 text-xs text-zinc-500">
-				Manga yang kamu pantau — badge muncul di header jika ada chapter baru.
+				Manga you are tracking — a badge appears in the header when a new chapter is out.
 			</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
 			<span class="text-sm text-zinc-400">
-				{items.length} dipantau{#if unread > 0}
-					· <span class="font-semibold text-orange-400">{unread} baru</span>
+				{items.length} tracked{#if unread > 0}
+					· <span class="font-semibold text-orange-400">{unread} new</span>
 				{/if}
 			</span>
 			<button
@@ -99,10 +99,10 @@
 				onclick={handleRefresh}
 				disabled={checking}
 				class="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-800 disabled:opacity-50"
-				title="Cek chapter terbaru"
+				title="Check for latest chapters"
 			>
 				<RefreshCw class="h-3.5 w-3.5 {checking ? 'animate-spin' : ''}" />
-				Cek ulang
+				Refresh
 			</button>
 			{#if unread > 0}
 				<button
@@ -111,7 +111,7 @@
 					class="flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-300 transition hover:bg-violet-500/20"
 				>
 					<CheckCheck class="h-3.5 w-3.5" />
-					Tandai semua dibaca
+					Mark all as read
 				</button>
 			{/if}
 		</div>
@@ -120,10 +120,10 @@
 	{#if items.length === 0}
 		<div class="flex flex-col items-center justify-center py-16 text-center text-zinc-500">
 			<Bell class="mb-3 h-12 w-12 opacity-40" />
-			<p class="text-base font-medium">Belum ada manga yang dipantau.</p>
+			<p class="text-base font-medium">No manga is being tracked yet.</p>
 			<p class="mt-1 max-w-sm text-xs opacity-75">
-				Buka detail manga, lalu klik tombol lonceng (sebelum Bookmark) untuk mengaktifkan notifikasi
-				chapter baru.
+				Open a manga detail page and click the bell button (next to Bookmark) to enable new chapter
+				notifications.
 			</p>
 		</div>
 	{:else}
@@ -173,14 +173,14 @@
 
 						{#if n.hasNew}
 							<p class="mt-2 line-clamp-2 text-xs font-medium text-orange-400">
-								Chapter baru: {n.newChapterTitle || `Ch. ${n.newChapterNumber}`}
+								New chapter: {n.newChapterTitle || `Ch. ${n.newChapterNumber}`}
 							</p>
 						{:else if n.lastChapterTitle}
 							<p class="mt-2 line-clamp-1 text-xs text-zinc-500">
-								Terakhir: {n.lastChapterTitle}
+								Latest: {n.lastChapterTitle}
 							</p>
 						{:else}
-							<p class="mt-2 text-xs text-zinc-600">Menunggu cek chapter…</p>
+							<p class="mt-2 text-xs text-zinc-600">Waiting for chapter check…</p>
 						{/if}
 
 						<div class="mt-3 flex flex-wrap gap-1.5">
@@ -190,7 +190,7 @@
 									onclick={() => handleMarkRead(n.mangaId, n.sourceId)}
 									class="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-medium text-violet-300 transition hover:bg-violet-500/20"
 								>
-									Tandai dibaca
+									Mark as read
 								</button>
 							{/if}
 							<button
@@ -199,7 +199,7 @@
 								class="flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-400 transition hover:bg-red-500 hover:text-white"
 							>
 								<BellOff class="h-3 w-3" />
-								Matikan
+								Turn off
 							</button>
 						</div>
 					</div>
