@@ -43,6 +43,9 @@
 		Library,
 		History,
 		MessageSquare,
+		MessagesSquare,
+		MessageSquarePlus,
+		UsersRound,
 		DollarSign,
 		Trash2,
 		FileText,
@@ -508,18 +511,18 @@ $effect(() => {
 				<History class="h-5 w-5 shrink-0" /> History
 			</a>
 			<a
-				href="/report"
-				onclick={(e) => handleNavigate(e, '/report')}
-				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
-			>
-				<MessageSquare class="h-5 w-5 shrink-0" /> Report & Request
-			</a>
+	            href="/report"
+	            onclick={(e) => handleNavigate(e, '/report')}
+	            class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+            >
+	            <MessageSquarePlus class="h-5 w-5 shrink-0" /> Report & Request
+            </a>
 			<a
-               href="/community"
-               onclick={(e) => handleNavigate(e, '/community')}
-               class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
-              >
-                <MessageSquare class="h-5 w-5 shrink-0" /> Community
+                href="/community"
+                onclick={(e) => handleNavigate(e, '/community')}
+                class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+             >
+                <MessagesSquare class="h-5 w-5 shrink-0" /> Community
             </a>
 			<a
 				href="/settings"
@@ -590,7 +593,6 @@ $effect(() => {
 
 		<!-- Right: actions -->
 		<div class="relative flex shrink-0 items-center gap-0.5">
-			<!-- Notification bell (dekat dark/light mode) -->
 			<a
 				href="/notification"
 				onclick={(e) => handleNavigate(e, '/notification')}
@@ -739,7 +741,6 @@ $effect(() => {
 							</span>
 						{/if}
 					{:else}
-						<!-- Icon login polos, sama style bookmark / theme -->
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							class="h-5 w-5"
