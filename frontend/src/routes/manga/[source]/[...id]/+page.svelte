@@ -527,22 +527,21 @@
 							<span class="detail-muted text-[12px] font-medium">{rating}</span>
 						</div>
 
-						<div class="flex w-full max-w-[120px] items-center gap-1.5 md:max-w-[180px]">
-							<!-- Notify icon-only — di depan Bookmark -->
+						<div class="flex w-full max-w-[120px] items-stretch gap-1.5 md:max-w-[180px]">
+							<!-- Notify — icon only, same border/height as Bookmark -->
 							<button
 								type="button"
 								onclick={handleNotify}
-								class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border-2 transition md:h-[38px] md:w-[38px]
-									{notified
-										? 'border-orange-500/60 bg-orange-500/15 text-orange-400'
-										: 'border-zinc-500/50 bg-transparent text-zinc-400 hover:border-orange-500/50 hover:text-orange-300'}"
-								title={notified ? 'Matikan notifikasi chapter' : 'Aktifkan notifikasi chapter baru'}
-								aria-label={notified ? 'Matikan notifikasi' : 'Aktifkan notifikasi'}
+								class="bookmark-btn flex shrink-0 items-center justify-center rounded-lg border-2 px-2 py-1 transition md:px-2.5 md:py-2.5 {notified
+									? 'bookmarked'
+									: ''}"
+								title={notified ? 'Turn off chapter notifications' : 'Enable new chapter notifications'}
+								aria-label={notified ? 'Turn off notifications' : 'Enable notifications'}
 							>
 								{#if notified}
-									<Bell class="h-4 w-4 md:h-[18px] md:w-[18px]" />
+									<Bell class="h-3.5 w-3.5 md:h-4 md:w-4" />
 								{:else}
-									<BellOff class="h-4 w-4 md:h-[18px] md:w-[18px]" />
+									<BellOff class="h-3.5 w-3.5 md:h-4 md:w-4" />
 								{/if}
 							</button>
 
