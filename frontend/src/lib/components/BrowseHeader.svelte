@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { onMount, tick } from 'svelte';
-	import { Search, Loader2, ChevronDown, Check, Layers } from 'lucide-svelte';
+	import { Search, Loader2, ChevronDown, Check, Layers, BookOpen, BookMarked } from 'lucide-svelte';
 	import { getImpl, setImpl, setMultiMode } from '$lib/stores/impl';
 	import {
 		getSourceMeta,
@@ -9,10 +10,12 @@
 		LANG_LABELS,
 		LANG_FILTER_SOURCES
 	} from '$lib/utils/sourceMeta';
+	import { isNovelSource } from '$lib/utils/novelSources';
 	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 
 	type SourceItem = { id: string; name: string };
+	type ContentKind = 'comic' | 'novel';
 
 	let {
 		sources,
@@ -46,7 +49,8 @@
 		{ id: 'vietnamese', name: 'Vietnamese', flag: 'vn', code: 'VI' }
 	] as const;
 
-	const TYPES = [
+	/** Types for comic mode (existing) */
+	const COMIC_TYPES = [
 		{ id: 'all', name: 'All Types', icon: '✨' },
 		{ id: 'manga', name: 'Manga', icon: '📖' },
 		{ id: 'manhwa', name: 'Manhwa', icon: 'kr' },
@@ -65,25 +69,76 @@
 		{ id: 'misc', name: 'Miscellaneous', icon: '📦' }
 	] as const;
 
+	/**
+	 * Types for novel mode — only JP / CN / KR style novels
+	 * (novel jepang, china, korea) as requested.
+	 */
+	const NOVEL_TYPES = [
+		{ id: 'all', name: 'All Types', icon: '✨' },
+		{ id: 'japanese', name: 'Novel Jepang', icon: 'jp' },
+		{ id: 'chinese', name: 'Novel China', icon: 'cn' },
+		{ id: 'korean', name: 'Novel Korea', icon: 'kr' }
+	] as const;
+
+	const KIND_OPTIONS: { id: ContentKind; name: string; icon: 'comic' | 'novel' }[] = [
+		{ id: 'comic', name: 'Comic', icon: 'comic' },
+		{ id: 'novel', name: 'Novel', icon: 'novel' }
+	];
+
 	// ── State ────────────────────────────────────────────────────────────────
 	let searchInput = $state('');
-	let activeDropdown = $state<'source' | 'lang' | 'type' | null>(null);
+	let activeDropdown = $state<'kind' | 'source' | 'lang' | 'type' | null>(null);
 	let sourceListEl = $state<HTMLDivElement | null>(null);
 	let sourceScrollTop = $state(0);
 
 	let showAgeGate = $state(false);
 	let pendingSourceId = $state<string | null>(null);
 
+	/** Content kind: comic | novel — from URL ?kind= or inferred from current source */
+	function readKindFromUrl(): ContentKind {
+		const k = ($page.url.searchParams.get('kind') || '').toLowerCase();
+		if (k === 'novel') return 'novel';
+		if (k === 'comic') return 'comic';
+		// Infer from selected source
+		if (currentSource && isNovelSource(currentSource)) return 'novel';
+		return 'comic';
+	}
+
+	let selectedKind = $state<ContentKind>(readKindFromUrl());
+
+	// Sync kind when URL / source changes
+	$effect(() => {
+		const fromUrl = readKindFromUrl();
+		if (fromUrl !== selectedKind) selectedKind = fromUrl;
+	});
+
 	// ── Derived ──────────────────────────────────────────────────────────────
 	let isMultiMode = $derived(!currentSource);
-	let groupedSources = $derived(groupSourcesByLang(sources));
+
+	/** Filter sources by content kind */
+	let filteredSources = $derived(
+		sources.filter((s) => {
+			const isNovel = isNovelSource(s.id);
+			return selectedKind === 'novel' ? isNovel : !isNovel;
+		})
+	);
+
+	let groupedSources = $derived(groupSourcesByLang(filteredSources));
+
+	let TYPES = $derived(selectedKind === 'novel' ? NOVEL_TYPES : COMIC_TYPES);
+
 	let currentSourceName = $derived(
 		isMultiMode
 			? 'Multi (Preferred)'
-			: sources.find((s) => s.id === currentSource)?.name || currentSource || 'Select Source'
+			: filteredSources.find((s) => s.id === currentSource)?.name ||
+					sources.find((s) => s.id === currentSource)?.name ||
+					currentSource ||
+					'Select Source'
 	);
 	let currentLangObj = $derived(LANGUAGES.find((l) => l.id === selectedLang) ?? LANGUAGES[0]);
 	let currentTypeObj = $derived(TYPES.find((t) => t.id === selectedType) ?? TYPES[0]);
+	let currentKindObj = $derived(KIND_OPTIONS.find((k) => k.id === selectedKind) ?? KIND_OPTIONS[0]);
+
 	let showLangFilter = $derived(
 		!isMultiMode && LANG_FILTER_SOURCES.includes((currentSource || '').toLowerCase())
 	);
@@ -112,7 +167,7 @@
 		if (sourceListEl) sourceListEl.scrollTop = sourceScrollTop;
 	}
 
-	function toggleDropdown(type: 'source' | 'lang' | 'type') {
+	function toggleDropdown(type: 'kind' | 'source' | 'lang' | 'type') {
 		if (activeDropdown === 'source') saveSourceScroll();
 		const next = activeDropdown === type ? null : type;
 		activeDropdown = next;
@@ -151,6 +206,11 @@
 	function buildParams(overrides: Record<string, string> = {}) {
 		const params = new URLSearchParams();
 
+		const kind = overrides.kind ?? selectedKind;
+		// Always persist kind so filter stays after navigation
+		if (kind && kind !== 'comic') params.set('kind', kind);
+		// comic = default, omit to keep URL clean; still accepted if present
+
 		const source = overrides.source ?? (isMultiMode ? '' : currentSource);
 		if (source) params.set('source', source);
 
@@ -171,6 +231,30 @@
 		navigate(buildParams());
 	}
 
+	function selectKind(id: ContentKind) {
+		if (id === selectedKind) {
+			closeDropdown();
+			return;
+		}
+		selectedKind = id;
+		selectedLang = 'all';
+		selectedType = 'all';
+		closeDropdown();
+
+		// Switching kind → drop current source (may be wrong category) → multi mode
+		setMultiMode();
+		loading = true;
+		const params = new URLSearchParams();
+		if (id === 'novel') params.set('kind', 'novel');
+		goto(params.toString() ? `/?${params}` : '/', {
+			invalidateAll: true,
+			keepFocus: true,
+			noScroll: false
+		}).finally(() => {
+			loading = false;
+		});
+	}
+
 	function selectLang(id: string) {
 		selectedLang = id;
 		closeDropdown();
@@ -189,7 +273,13 @@
 		selectedType = 'all';
 		loading = true;
 		try {
-			await goto(`/?source=${id}`, {
+			const params = new URLSearchParams();
+			params.set('source', id);
+			if (selectedKind === 'novel' || isNovelSource(id)) {
+				params.set('kind', 'novel');
+				selectedKind = 'novel';
+			}
+			await goto(`/?${params}`, {
 				invalidateAll: true,
 				keepFocus: true
 			});
@@ -232,7 +322,9 @@
 		setMultiMode();
 		loading = true;
 		try {
-			await goto('/', {
+			const params = new URLSearchParams();
+			if (selectedKind === 'novel') params.set('kind', 'novel');
+			await goto(params.toString() ? `/?${params}` : '/', {
 				invalidateAll: true,
 				keepFocus: true,
 				noScroll: false
@@ -251,7 +343,10 @@
 		selectedLang = 'all';
 		selectedType = 'all';
 		searchInput = '';
-		goto(isMultiMode ? '/' : `/?source=${currentSource}`, { invalidateAll: true });
+		const params = new URLSearchParams();
+		if (!isMultiMode && currentSource) params.set('source', currentSource);
+		if (selectedKind === 'novel') params.set('kind', 'novel');
+		goto(params.toString() ? `/?${params}` : '/', { invalidateAll: true });
 	}
 </script>
 
@@ -276,6 +371,55 @@
 	class="relative z-30 mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
 	use:clickOutside
 >
+	<!-- KIND: Comic | Novel (di depan source list) -->
+	<div class="relative">
+		<button
+			type="button"
+			onclick={() => toggleDropdown('kind')}
+			aria-expanded={activeDropdown === 'kind'}
+			class="filter-btn flex w-full min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium shadow-sm transition active:scale-[0.98] sm:w-auto sm:min-w-[120px]"
+		>
+			{#if selectedKind === 'novel'}
+				<BookOpen class="h-4 w-4 shrink-0 text-amber-500" />
+			{:else}
+				<BookMarked class="h-4 w-4 shrink-0 text-violet-500" />
+			{/if}
+			<span class="max-w-[90px] truncate">{currentKindObj.name}</span>
+			{@render chevron(activeDropdown === 'kind')}
+		</button>
+
+		{#if activeDropdown === 'kind'}
+			<div
+				class="dropdown-menu absolute left-0 top-full z-[200] mt-2 w-[200px] overflow-hidden rounded-2xl border shadow-2xl"
+			>
+				<div class="max-h-[60vh] overflow-y-auto p-1.5">
+					{#each KIND_OPTIONS as k (k.id)}
+						{@const isSelected = k.id === selectedKind}
+						<button
+							type="button"
+							onclick={() => selectKind(k.id)}
+							class="dropdown-item flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition {isSelected
+								? 'active-item'
+								: ''}"
+						>
+							<span class="icon-wrapper flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+								{#if k.id === 'novel'}
+									<BookOpen class="h-4 w-4 text-amber-500" />
+								{:else}
+									<BookMarked class="h-4 w-4 text-violet-500" />
+								{/if}
+							</span>
+							<span class="flex-1 truncate text-sm font-medium">{k.name}</span>
+							{#if isSelected}
+								<Check class="h-4 w-4 shrink-0 text-violet-500" />
+							{/if}
+						</button>
+					{/each}
+				</div>
+			</div>
+		{/if}
+	</div>
+
 	<!-- SOURCE -->
 	<div class="relative">
 		<button
@@ -298,7 +442,10 @@
 				<span class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">R18</span>
 			{/if}
 			{#if !isMultiMode && (getSourceMeta(currentSource).isError || isBrokenSource(currentSource))}
-				<span class="rounded border border-red-500/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400">ERROR</span>
+				<span
+					class="rounded border border-red-500/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400"
+					>ERROR</span
+				>
 			{/if}
 
 			{@render chevron(activeDropdown === 'source')}
@@ -337,56 +484,65 @@
 
 					<div class="my-1.5 border-t border-zinc-600/40"></div>
 
-					{#each Object.entries(groupedSources) as [langKey, items]}
-						<div
-							class="dropdown-header sticky top-0 z-10 -mx-1.5 my-1 px-3 py-1 text-[11px] font-bold uppercase tracking-wider"
-						>
-							{LANG_LABELS[langKey] || langKey}
-						</div>
-
-						{#each items as source (source.id)}
-							{@const meta = getSourceMeta(source.id)}
-							{@const isSelected =
-								!isMultiMode &&
-								source.id.toLowerCase() === (currentSource || '').toLowerCase()}
-
-							<button
-								type="button"
-								onclick={() => selectSource(source.id)}
-								class="dropdown-item flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition {isSelected
-									? 'active-item'
-									: ''}"
+					{#if filteredSources.length === 0}
+						<p class="px-3 py-4 text-center text-xs opacity-60">
+							{selectedKind === 'novel'
+								? 'Belum ada source novel terdaftar.'
+								: 'Tidak ada source comic.'}
+						</p>
+					{:else}
+						{#each Object.entries(groupedSources) as [langKey, items]}
+							<div
+								class="dropdown-header sticky top-0 z-10 -mx-1.5 my-1 px-3 py-1 text-[11px] font-bold uppercase tracking-wider"
 							>
-								<span
-									class="icon-wrapper flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg"
+								{LANG_LABELS[langKey] || langKey}
+							</div>
+
+							{#each items as source (source.id)}
+								{@const meta = getSourceMeta(source.id)}
+								{@const isSelected =
+									!isMultiMode &&
+									source.id.toLowerCase() === (currentSource || '').toLowerCase()}
+
+								<button
+									type="button"
+									onclick={() => selectSource(source.id)}
+									class="dropdown-item flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition {isSelected
+										? 'active-item'
+										: ''}"
 								>
-									{@render renderIcon(meta.flag)}
-								</span>
-								<div class="min-w-0 flex-1">
-									<div class="flex items-center gap-2">
-										<span class="truncate text-sm font-medium">{source.name}</span>
-										{#if meta.isR18}
-											<span
-												class="rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
-											>
-												R18
-											</span>
-										{/if}
-										{#if meta.isError || isBrokenSource(source.id)}
-											<span
-												class="rounded border border-red-500/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400">
-												ERROR
-											</span>
-										{/if}
+									<span
+										class="icon-wrapper flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg"
+									>
+										{@render renderIcon(meta.flag)}
+									</span>
+									<div class="min-w-0 flex-1">
+										<div class="flex items-center gap-2">
+											<span class="truncate text-sm font-medium">{source.name}</span>
+											{#if meta.isR18}
+												<span
+													class="rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
+												>
+													R18
+												</span>
+											{/if}
+											{#if meta.isError || isBrokenSource(source.id)}
+												<span
+													class="rounded border border-red-500/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400"
+												>
+													ERROR
+												</span>
+											{/if}
+										</div>
+										<p class="mt-0.5 text-[11px] opacity-60">{meta.lang}</p>
 									</div>
-									<p class="mt-0.5 text-[11px] opacity-60">{meta.lang}</p>
-								</div>
-								{#if isSelected}
-									<Check class="h-4 w-4 shrink-0 text-violet-500" />
-								{/if}
-							</button>
+									{#if isSelected}
+										<Check class="h-4 w-4 shrink-0 text-violet-500" />
+									{/if}
+								</button>
+							{/each}
 						{/each}
-					{/each}
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -493,7 +649,7 @@
 			<Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 opacity-40" />
 			<input
 				type="text"
-				placeholder="Search manga..."
+				placeholder={selectedKind === 'novel' ? 'Search novel...' : 'Search manga...'}
 				bind:value={searchInput}
 				class="filter-btn w-full rounded-full border py-2.5 pr-4 pl-9 text-sm transition-colors focus:ring-1 focus:ring-violet-500 focus:outline-none"
 			/>
@@ -535,7 +691,6 @@
 	</p>
 {/if}
 
-
 <!-- Age Gate Modal (R18) -->
 {#if showAgeGate}
 	<div
@@ -546,7 +701,9 @@
 	>
 		<div class="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
 			<div class="mb-4 flex items-center justify-center">
-				<span class="rounded-lg bg-red-600 px-3 py-1 text-sm font-bold tracking-wide text-white">R18</span>
+				<span class="rounded-lg bg-red-600 px-3 py-1 text-sm font-bold tracking-wide text-white"
+					>R18</span
+				>
 			</div>
 			<h2 id="age-gate-title" class="mb-2 text-center text-lg font-bold text-white">
 				You must be 18+ to see it

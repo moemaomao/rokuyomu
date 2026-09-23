@@ -1,18 +1,15 @@
 /**
- * Sakuranovel.id — novel source adapter for Rokuyomu
- * Site: https://sakuranovel.id/
- * Note: site uses Cloudflare; if Vercel IP is blocked, register this
- * adapter under frontend workerSources (hybrid) as well.
+ * Sakuranovel.id — hybrid worker adapter (Cloudflare Worker)
+ * Path: frontend/src/lib/server/workerSources/impl/Sakuranovel.ts
+ *
+ * Fixes:
+ * - Homepage: ambil lebih banyak judul (target ~24)
+ * - Chapter list: chapter terbaru di atas
+ * - Metadata: status, type, authors, genres, alt title, rating lebih lengkap
  */
 import * as cheerio from 'cheerio';
-import { BaseSource } from '../BaseSource.js';
-import type {
-	Novel,
-	NovelDetails,
-	NovelChapterContent,
-	INovelSource
-} from '../types-novel.js';
-import type { Manga, MangaDetails } from '../types.js';
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails, Chapter } from '../types';
 
 function absUrl(base: string, href: string | undefined): string {
 	if (!href) return '';
@@ -27,30 +24,132 @@ function absUrl(base: string, href: string | undefined): string {
 
 function pathOnly(href: string): string {
 	try {
-		const u = new URL(href.startsWith('http') ? href : `https://sakuranovel.id${href.startsWith('/') ? '' : '/'}${href}`);
+		const u = new URL(
+			href.startsWith('http')
+				? href
+				: `https://sakuranovel.id${href.startsWith('/') ? '' : '/'}${href}`
+		);
 		return u.pathname.replace(/\/$/, '') || '/';
 	} catch {
 		return href.startsWith('/') ? href : `/${href}`;
 	}
 }
 
-export class SakuranovelSource extends BaseSource implements INovelSource {
+function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+}
+
+/** Extract chapter number from title e.g. "Chapter 282 – ..." → 282 */
+function parseChapterNumber(title: string, fallback: number): number {
+	const m =
+		title.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
+		title.match(/\bch\.?\s*(\d+(?:\.\d+)?)/i) ||
+		title.match(/\b(\d+(?:\.\d+)?)\s*[-–—]/);
+	if (m) {
+		const n = parseFloat(m[1]);
+		if (!Number.isNaN(n)) return n;
+	}
+	return fallback;
+}
+
+export class SakuranovelSource extends BaseSource {
 	id = 'sakuranovel';
 	name = 'Sakuranovel';
 	baseUrl = 'https://sakuranovel.id';
-	kind = 'novel' as const;
 
-	// ── Novel API ────────────────────────────────────────────────────────────
+	/**
+	 * Latest list for homepage.
+	 * Halaman /series/ sering hanya ~10–12 kartu → gabung page 1+2 (dan fallback homepage).
+	 */
+	async getLatestManga(page = 1): Promise<Manga[]> {
+		if (page <= 1) {
+			const [p1, p2, home] = await Promise.all([
+				this.fetchSeriesPage(1),
+				this.fetchSeriesPage(2).catch(() => [] as Manga[]),
+				this.parseHomeLatest().catch(() => [] as Manga[])
+			]);
+			const merged = this.dedupeById([...home, ...p1, ...p2]);
+			return merged.slice(0, 24);
+		}
+		return this.fetchSeriesPage(page);
+	}
 
-	async getLatestNovels(page = 1): Promise<Novel[]> {
-		// Series archive (paginated)
+	private async fetchSeriesPage(page: number): Promise<Manga[]> {
 		const path = page <= 1 ? '/series/' : `/series/page/${page}/`;
 		const html = await this.fetchHtml(path);
 		return this.parseSeriesCards(html);
 	}
 
-	async searchNovels(query: string, opts?: { page?: number }): Promise<Novel[]> {
-		// Prefer WP AJAX search (same as site live search)
+	/** Kartu "Latest Update" di homepage — biasanya lebih fresh */
+	private async parseHomeLatest(): Promise<Manga[]> {
+		const html = await this.fetchHtml('/');
+		const $ = cheerio.load(html);
+		const list: Manga[] = [];
+
+		// Beberapa layout: latest update / listupd / flexbox
+		const selectors = [
+			'.listupd .bs',
+			'.listupd .bsx',
+			'.latest .series',
+			'.flexbox2 .flexbox2-item',
+			'.serieslist .serieslist-item',
+			'article.series',
+			'.post-item'
+		];
+
+		for (const sel of selectors) {
+			$(sel).each((_, el) => {
+				const a = $(el).find('a[href*="/series/"]').first();
+				const href = a.attr('href') || $(el).find('a').first().attr('href') || '';
+				if (!href || !/\/series\//.test(href)) return;
+				const title =
+					a.attr('title') ||
+					$(el).find('.tt, .title, h2, h3, .series-title, .entry-title').first().text().trim() ||
+					a.text().trim();
+				const cover =
+					$(el).find('img').attr('data-src') ||
+					$(el).find('img').attr('data-lazy-src') ||
+					$(el).find('img').attr('src') ||
+					'';
+				const status =
+					$(el).find('.status, .status-series, .hot').text().trim() || undefined;
+				const typeText =
+					$(el).find('.type, .series-type, span.type').first().text().trim() || 'novel';
+				if (!title || title.length < 2) return;
+				const id = pathOnly(href);
+				if (list.some((x) => x.id === id)) return;
+				list.push({
+					id,
+					title,
+					cover: absUrl(this.baseUrl, cover.split('?')[0]),
+					sourceId: this.id,
+					type: typeText || 'novel',
+					status,
+					lang: 'id',
+					latestChapter: $(el).find('.epx, .chapter, .latest').first().text().trim() || undefined
+				});
+			});
+			if (list.length >= 12) break;
+		}
+		return list;
+	}
+
+	private dedupeById(items: Manga[]): Manga[] {
+		const seen = new Set<string>();
+		const out: Manga[] = [];
+		for (const m of items) {
+			if (seen.has(m.id)) continue;
+			seen.add(m.id);
+			out.push(m);
+		}
+		return out;
+	}
+
+	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
 		try {
 			const body = new URLSearchParams({
 				action: 'data_fetch',
@@ -70,7 +169,7 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 			if (res.ok) {
 				const html = await res.text();
 				const $ = cheerio.load(html);
-				const list: Novel[] = [];
+				const list: Manga[] = [];
 				$('.searchbox').each((_, el) => {
 					const a = $(el).find('a').first();
 					const href = a.attr('href') || '';
@@ -81,6 +180,7 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 						.find('.type')
 						.map((_, t) => $(t).text().trim())
 						.get()
+						.filter(Boolean)
 						.join(', ');
 					if (href && title) {
 						list.push({
@@ -97,20 +197,17 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 				if (list.length) return list;
 			}
 		} catch {
-			/* fall through to GET search */
+			/* fall through */
 		}
 
-		// Fallback: advanced-search style GET
 		const page = opts?.page ?? 1;
 		const q = encodeURIComponent(query);
-		const html = await this.fetchHtml(
-			`/advanced-search/?title=${q}&page=${page}`
-		);
+		const html = await this.fetchHtml(`/advanced-search/?title=${q}&page=${page}`);
 		return this.parseSeriesCards(html);
 	}
 
-	async getNovelDetails(novelId: string): Promise<NovelDetails> {
-		const path = novelId.startsWith('/') ? novelId : `/${novelId}`;
+	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
+		const path = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
 
@@ -136,17 +233,54 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 			.join('\n\n');
 
 		const authors: string[] = [];
+		const artists: string[] = [];
+		let altTitle = '';
+		let typeLabel = 'novel';
+		let published = '';
+
 		left.find('ul.series-infolist li').each((_, el) => {
-			const label = $(el).find('b').text().toLowerCase();
-			if (label.includes('author') || label.includes('penulis') || label.includes('artist')) {
-				$(el)
-					.find('a, span')
-					.each((_, a) => {
-						const t = $(a).text().trim();
-						if (t && !authors.includes(t)) authors.push(t);
-					});
+			const label = $(el).find('b').text().toLowerCase().trim();
+			const valueText = $(el)
+				.clone()
+				.children('b')
+				.remove()
+				.end()
+				.text()
+				.trim();
+			const links: string[] = [];
+			$(el)
+				.find('a')
+				.each((_, a) => {
+					const t = $(a).text().trim();
+					if (t) links.push(t);
+				});
+
+			if (label.includes('author') || label.includes('penulis') || label.includes('pengarang')) {
+				const names = links.length ? links : valueText ? [valueText] : [];
+				for (const n of names) {
+					if (n && !authors.includes(n)) authors.push(n);
+				}
+			} else if (label.includes('artist') || label.includes('ilustrator')) {
+				const names = links.length ? links : valueText ? [valueText] : [];
+				for (const n of names) {
+					if (n && !artists.includes(n)) artists.push(n);
+				}
+			} else if (
+				label.includes('alternative') ||
+				label.includes('judul lain') ||
+				label.includes('native') ||
+				label.includes('original')
+			) {
+				altTitle = links.join(', ') || valueText;
+			} else if (label.includes('type') || label.includes('tipe') || label.includes('jenis')) {
+				typeLabel = links.join(', ') || valueText || typeLabel;
+			} else if (label.includes('released') || label.includes('tahun') || label.includes('year')) {
+				published = valueText;
 			}
 		});
+
+		// Gabung artist ke authors jika kosong
+		if (!authors.length && artists.length) authors.push(...artists);
 
 		const genres: string[] = [];
 		right.find('.series-genres a').each((_, el) => {
@@ -155,33 +289,54 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 		});
 
 		let status = 'Ongoing';
-		left.find('.series-infoz.block span').each((_, el) => {
+		left.find('.series-infoz.block span, .series-infoz span').each((_, el) => {
 			const cls = ($(el).attr('class') || '').toLowerCase();
 			const t = $(el).text().trim();
-			if (cls.includes('status') || /ongoing|completed|tamat|hiatus/i.test(t)) {
+			if (cls.includes('status') || /ongoing|completed|tamat|hiatus|complete/i.test(t)) {
 				status = t || status;
+			}
+			// Type badge di infoz (China / Japan / Korea / Web Novel)
+			if (cls.includes('type') || /china|japan|korea|web\s*novel|light\s*novel/i.test(t)) {
+				if (t && typeLabel === 'novel') typeLabel = t;
 			}
 		});
 
-		const chapters: NovelDetails['chapters'] = [];
+		// Rating
+		let rating: string | undefined;
+		const ratingEl = left.find('.series-infoz .rating, .rating, [class*="rating"]').first();
+		if (ratingEl.length) {
+			rating = ratingEl.text().trim() || ratingEl.attr('data-rating') || undefined;
+		}
+
+		// ── Chapters: site biasanya newest-first; pastikan newest di atas ──
+		const rawChapters: Chapter[] = [];
 		right.find('ul.series-chapterlists li').each((i, el) => {
 			const a = $(el).find('a').first();
 			const href = a.attr('href') || '';
-			const ctitle = a.attr('title') || a.text().trim();
+			const ctitle = (a.attr('title') || a.text().trim()).replace(/\s+/g, ' ').trim();
 			const date = $(el).find('span.date').text().trim() || undefined;
 			if (href && ctitle) {
-				chapters.push({
+				rawChapters.push({
 					id: pathOnly(href),
 					title: ctitle,
-					number: i + 1,
+					number: parseChapterNumber(ctitle, i + 1),
 					date
 				});
 			}
 		});
 
-		// Site often lists newest first — keep as-is (UI can reverse)
+		// Sort: chapter number descending (newest / highest first)
+		rawChapters.sort((a, b) => {
+			const na = typeof a.number === 'number' ? a.number : parseChapterNumber(a.title, 0);
+			const nb = typeof b.number === 'number' ? b.number : parseChapterNumber(b.title, 0);
+			if (nb !== na) return nb - na;
+			// fallback: jika number sama, jaga urutan DOM (asumsi newest first di HTML)
+			return 0;
+		});
 
-		return {
+		const chapters = rawChapters;
+
+		const details: MangaDetails = {
 			id: pathOnly(path),
 			title,
 			cover: absUrl(this.baseUrl, cover),
@@ -191,90 +346,177 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 			status,
 			genres,
 			chapters,
-			type: 'novel',
+			type: typeLabel || 'novel',
 			lang: 'id'
 		};
+
+		// Field ekstra jika tipe mendukung (hindari break type)
+		const extra = details as MangaDetails & {
+			artists?: string[];
+			altTitles?: string[];
+			rating?: string;
+			published?: string;
+		};
+		if (artists.length) extra.artists = artists;
+		if (altTitle) extra.altTitles = [altTitle];
+		if (rating) extra.rating = rating;
+		if (published) extra.published = published;
+
+		return details;
 	}
 
-	async getChapterContent(chapterId: string): Promise<NovelChapterContent> {
+	async getChapterPages(_chapterId: string): Promise<string[]> {
+		return [];
+	}
+
+	async getChapterContent(chapterId: string): Promise<{
+		title: string;
+		content: string;
+		prevChapterId?: string | null;
+		nextChapterId?: string | null;
+	}> {
 		const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
 
-		const main = $('main .content');
+		const bodyText = $('body').text();
+		if (
+			/just a moment|cf-browser-verification|challenge-platform|verify you are human/i.test(
+				html
+			) &&
+			bodyText.length < 500
+		) {
+			throw new Error('Cloudflare blocked this request');
+		}
+
 		const title =
-			main.find('h2.title-chapter').text().trim() ||
+			$('h2.title-chapter').first().text().trim() ||
 			$('h1').first().text().trim() ||
+			$('title').text().split('|')[0].trim() ||
 			'Chapter';
 
-		// Content paragraphs (drop trailing site footer / nav)
-		const paras = main.find('.content .asdasd p, .entry-content p, article p');
-		const texts: string[] = [];
-		paras.each((_, el) => {
-			const t = $(el).text().trim();
-			if (!t) return;
-			if (/sakuranovel\.id/i.test(t)) return;
-			if (/daftar isi|previous|next|prev/i.test(t) && t.length < 40) return;
-			texts.push(t);
-		});
+		const containers = [
+			'main .content .asdasd',
+			'main .content',
+			'.entry-content',
+			'.reading-content',
+			'#chapter-content',
+			'.chapter-content',
+			'article .content',
+			'article',
+			'.post-content',
+			'#content'
+		];
 
-		// Prefer HTML for reader (basic)
 		let contentHtml = '';
-		if (paras.length) {
-			const clone = paras.parent().clone();
-			clone.find('script, style, .ads, .ad, iframe').remove();
-			contentHtml = clone.html() || texts.map((t) => `<p>${escapeHtml(t)}</p>`).join('\n');
-		} else {
-			contentHtml = texts.map((t) => `<p>${escapeHtml(t)}</p>`).join('\n');
+		for (const sel of containers) {
+			const el = $(sel).first();
+			if (!el.length) continue;
+
+			const clone = el.clone();
+			clone
+				.find('script, style, iframe, .ads, .ad, nav, .nav, .reader-settings, .comments')
+				.remove();
+
+			const paras = clone.find('p');
+			if (paras.length >= 2) {
+				const parts: string[] = [];
+				paras.each((_, p) => {
+					const t = $(p).text().trim();
+					if (!t) return;
+					if (/sakuranovel\.id/i.test(t)) return;
+					if (/^daftar isi$/i.test(t)) return;
+					parts.push(`<p>${escapeHtml(t)}</p>`);
+				});
+				if (parts.length >= 2) {
+					contentHtml = parts.join('\n');
+					break;
+				}
+			}
+
+			const inner = clone.html()?.trim() || '';
+			if (inner.length > 200) {
+				contentHtml = inner;
+				break;
+			}
+		}
+
+		if (!contentHtml || contentHtml.length < 50) {
+			const parts: string[] = [];
+			$('body p').each((_, p) => {
+				const t = $(p).text().trim();
+				if (t.length < 20) return;
+				if (/sakuranovel|cloudflare|cookie|privacy/i.test(t)) return;
+				parts.push(`<p>${escapeHtml(t)}</p>`);
+			});
+			if (parts.length) contentHtml = parts.join('\n');
 		}
 
 		const prevHref =
 			$('a[rel="prev"]').attr('href') ||
-			$('a.prev, .nav-previous a, a:contains("Prev")').first().attr('href');
+			$('a.prev, .nav-previous a, a:contains("Sebelumnya")').first().attr('href');
 		const nextHref =
 			$('a[rel="next"]').attr('href') ||
-			$('a.next, .nav-next a, a:contains("Next")').first().attr('href');
+			$('a.next, .nav-next a, a:contains("Selanjutnya")').first().attr('href');
 
 		return {
 			title,
-			content: contentHtml || '<p></p>',
+			content:
+				contentHtml ||
+				'<p><em>Konten kosong — kemungkinan diblokir Cloudflare atau selector berubah.</em></p>',
 			prevChapterId: prevHref ? pathOnly(prevHref) : null,
 			nextChapterId: nextHref ? pathOnly(nextHref) : null
 		};
 	}
 
-	// ── Helpers ──────────────────────────────────────────────────────────────
-
-	private parseSeriesCards(html: string): Novel[] {
+	private parseSeriesCards(html: string): Manga[] {
 		const $ = cheerio.load(html);
-		const list: Novel[] = [];
+		const list: Manga[] = [];
 
-		// Common card patterns on series / genre / search pages
 		const cards = $(
-			'.series-card, .listupd .bs, .listupd .bsx, article.series, .flexbox .series, .series-item, .list-series .item'
+			[
+				'.series-card',
+				'.listupd .bs',
+				'.listupd .bsx',
+				'article.series',
+				'.flexbox .series',
+				'.flexbox2-item',
+				'.series-item',
+				'.list-series .item',
+				'.serieslist li',
+				'.post-list .post'
+			].join(', ')
 		);
 
 		if (cards.length) {
 			cards.each((_, el) => {
-				const a = $(el).find('a').first();
+				const a =
+					$(el).find('a[href*="/series/"]').first().length > 0
+						? $(el).find('a[href*="/series/"]').first()
+						: $(el).find('a').first();
 				const href = a.attr('href') || '';
 				const title =
 					a.attr('title') ||
-					$(el).find('.tt, .title, h2, h3, .series-title').first().text().trim() ||
+					$(el).find('.tt, .title, h2, h3, .series-title, .entry-title').first().text().trim() ||
 					a.text().trim();
 				const cover =
 					$(el).find('img').attr('data-src') ||
+					$(el).find('img').attr('data-lazy-src') ||
 					$(el).find('img').attr('src') ||
 					'';
 				const status =
 					$(el).find('.status, .status-series').text().trim() || undefined;
+				const typeText =
+					$(el).find('.type, span.type, .series-type').first().text().trim() || 'novel';
 				if (href && title && /\/series\//.test(href)) {
+					const id = pathOnly(href);
+					if (list.some((x) => x.id === id)) return;
 					list.push({
-						id: pathOnly(href),
+						id,
 						title,
 						cover: absUrl(this.baseUrl, cover.split('?')[0]),
 						sourceId: this.id,
-						type: 'novel',
+						type: typeText || 'novel',
 						status,
 						lang: 'id'
 					});
@@ -282,19 +524,15 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 			});
 		}
 
-		// Fallback: any link under /series/
 		if (!list.length) {
 			$('a[href*="/series/"]').each((_, el) => {
 				const href = $(el).attr('href') || '';
-				if (!href || href === `${this.baseUrl}/series/` || /\/series\/page\//.test(href))
-					return;
+				if (!href || href.endsWith('/series/') || /\/series\/page\//.test(href)) return;
 				const title = $(el).attr('title') || $(el).text().trim();
 				if (!title || title.length < 2) return;
 				const parent = $(el).closest('div, article, li');
 				const cover =
-					parent.find('img').attr('data-src') ||
-					parent.find('img').attr('src') ||
-					'';
+					parent.find('img').attr('data-src') || parent.find('img').attr('src') || '';
 				const id = pathOnly(href);
 				if (list.some((x) => x.id === id)) return;
 				list.push({
@@ -310,57 +548,6 @@ export class SakuranovelSource extends BaseSource implements INovelSource {
 
 		return list;
 	}
-
-	// ── Bridge: manga UI calls these ─────────────────────────────────────────
-
-	async getLatestManga(page: number, _opts?: { lang?: string; type?: string }): Promise<Manga[]> {
-		const list = await this.getLatestNovels(page);
-		return list as unknown as Manga[];
-	}
-
-	async searchManga(
-		query: string,
-		opts?: { page?: number; lang?: string; type?: string }
-	): Promise<Manga[]> {
-		const list = await this.searchNovels(query, { page: opts?.page });
-		return list as unknown as Manga[];
-	}
-
-	async getMangaDetails(mangaId: string, _opts?: { lang?: string }): Promise<MangaDetails> {
-		const d = await this.getNovelDetails(mangaId);
-		return {
-			id: d.id,
-			title: d.title,
-			cover: d.cover,
-			sourceId: d.sourceId,
-			description: d.description,
-			authors: d.authors,
-			status: d.status,
-			genres: d.genres,
-			chapters: d.chapters.map((c) => ({
-				id: c.id,
-				title: c.title,
-				number: c.number,
-				date: c.date,
-				lang: c.lang
-			})),
-			type: d.type,
-			lang: d.lang
-		};
-	}
-
-	async getChapterPages(_chapterId: string): Promise<string[]> {
-		// Text novel — no image pages. Use novel-reader + getChapterContent.
-		return [];
-	}
-}
-
-function escapeHtml(s: string): string {
-	return s
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;');
 }
 
 export default SakuranovelSource;
