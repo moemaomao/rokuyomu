@@ -515,6 +515,13 @@ $effect(() => {
 				<MessageSquare class="h-5 w-5 shrink-0" /> Report & Request
 			</a>
 			<a
+               href="/community"
+               onclick={(e) => handleNavigate(e, '/community')}
+               class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+              >
+                <MessageSquare class="h-5 w-5 shrink-0" /> Community
+            </a>
+			<a
 				href="/settings"
 				onclick={(e) => handleNavigate(e, '/settings')}
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
