@@ -153,27 +153,40 @@ export class Noveltoon extends BaseSource implements INovelSource {
 	}
 
 	// ── Manga interface stubs (required by BaseSource) ───────────────────────
-	async getLatestManga(_page: number, _opts?: { lang?: string; type?: string }): Promise<Manga[]> {
-		return [];
-	}
+	// Ganti bagian stub di akhir Noveltoon.ts:
 
-	async searchManga(
-		_query: string,
-		_opts?: { page?: number; lang?: string; type?: string }
-	): Promise<Manga[]> {
-		return [];
-	}
+async getLatestManga(page: number, _opts?: { lang?: string; type?: string }): Promise<Manga[]> {
+  const list = await this.getLatestNovels(page);
+  // Novel & Manga shape mirip — cast aman untuk browse
+  return list as unknown as Manga[];
+}
 
-	async getMangaDetails(
-		_mangaId: string,
-		_opts?: { lang?: string }
-	): Promise<MangaDetails> {
-		throw new Error('Noveltoon is a novel source, not manga');
-	}
+async searchManga(
+  query: string,
+  opts?: { page?: number; lang?: string; type?: string }
+): Promise<Manga[]> {
+  const list = await this.searchNovels(query, { page: opts?.page });
+  return list as unknown as Manga[];
+}
 
-	async getChapterPages(_chapterId: string): Promise<string[]> {
-		return [];
-	}
+async getMangaDetails(mangaId: string, _opts?: { lang?: string }): Promise<MangaDetails> {
+  const d = await this.getNovelDetails(mangaId);
+  return {
+    ...d,
+    chapters: d.chapters.map((c) => ({
+      id: c.id,
+      title: c.title,
+      number: c.number,
+      date: c.date,
+      lang: c.lang
+    }))
+  } as MangaDetails;
+}
+
+async getChapterPages(_chapterId: string): Promise<string[]> {
+  // Novel = teks, bukan gambar — reader manga tidak cocok
+  return [];
+}
 }
 
 export default Noveltoon;
