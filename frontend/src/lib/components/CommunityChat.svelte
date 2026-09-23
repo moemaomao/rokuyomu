@@ -91,22 +91,52 @@
 		fileInput?.click();
 	}
 
+	/** Compress image via canvas then return data URL (jpeg) */
+	function compressImage(file: File, maxW = 800, quality = 0.7): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const img = new Image();
+			const url = URL.createObjectURL(file);
+			img.onload = () => {
+				URL.revokeObjectURL(url);
+				let w = img.width;
+				let h = img.height;
+				if (w > maxW) {
+					h = Math.round((h * maxW) / w);
+					w = maxW;
+				}
+				const canvas = document.createElement('canvas');
+				canvas.width = w;
+				canvas.height = h;
+				const ctx = canvas.getContext('2d');
+				if (!ctx) return reject(new Error('Canvas not supported'));
+				ctx.drawImage(img, 0, 0, w, h);
+				resolve(canvas.toDataURL('image/jpeg', quality));
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(url);
+				reject(new Error('Failed to load image'));
+			};
+			img.src = url;
+		});
+	}
+
 	async function onFileChange(e: Event) {
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (!file || !file.type.startsWith('image/')) return;
+		error = '';
 
-		if (file.size > 400_000) {
-			error = 'Image too large (max 400KB)';
-			return;
+		try {
+			const dataUrl = await compressImage(file);
+			// ~ data URL length limit soft check (Firestore doc ~1MB)
+			if (dataUrl.length > 700_000) {
+				error = 'Image still too large after compress. Try a smaller one.';
+				return;
+			}
+			const md = `\n![image](${dataUrl})\n`;
+			input = (input + md).slice(0, 900_000);
+		} catch (err: any) {
+			error = err?.message || 'Failed to process image';
 		}
-
-		const reader = new FileReader();
-		reader.onload = () => {
-			const base64 = reader.result as string;
-			const md = `\n![image](${base64})\n`;
-			input = (input + md).slice(0, 4000);
-		};
-		reader.readAsDataURL(file);
 		(e.target as HTMLInputElement).value = '';
 	}
 
@@ -116,9 +146,13 @@
 			.replace(/</g, '&lt;')
 			.replace(/>/g, '&gt;');
 
+		// images (base64 or http) — more permissive
 		s = s.replace(
-			/!\[([^\]]*)\]\((data:image\/[^;]+;base64,[A-Za-z0-9+/=]+|https?:\/\/[^)]+)\)/g,
-			'<img src="$2" alt="$1" class="chat-img" loading="lazy" />'
+			/!\[([^\]]*)\]\((data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=\s]+|https?:\/\/[^)\s]+)\)/g,
+			(_, alt, src) => {
+				const cleanSrc = src.replace(/\s/g, '');
+				return `<img src="${cleanSrc}" alt="${alt}" class="chat-img" loading="lazy" />`;
+			}
 		);
 		s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 		s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
@@ -273,7 +307,7 @@
 				onchange={onFileChange}
 			/>
 			<p class="mt-1.5 text-[10px] text-zinc-400">
-				**bold** · *italic* · `code` · ![img](url) · max image ~400KB
+				**bold** · *italic* · `code` · images auto-compressed
 			</p>
 		{:else}
 			<p class="py-2 text-center text-sm text-zinc-500">Login to join the chat</p>
