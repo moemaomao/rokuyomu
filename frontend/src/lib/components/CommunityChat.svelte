@@ -163,13 +163,11 @@
 	}
 
 	function replyTo(m: ChatMessage) {
-		const plain = m.body
-			.replace(/!\[.*?\]\(data:image\/[^)]+\)/g, '[image]')
-			.replace(/!\[.*?\]\(https?:\/\/[^)]+\)/g, '[image]')
-			.trim()
-			.slice(0, 120);
-		const quote = `> **${m.authorName}**: ${plain}\n\n`;
-		input = quote + input;
+		// Hanya mention, tidak membawa isi pesan orang lain
+		const mention = `@${m.authorName} `;
+		if (!input.startsWith(mention)) {
+			input = mention + input;
+		}
 	}
 
 	function onKeydown(e: KeyboardEvent) {
