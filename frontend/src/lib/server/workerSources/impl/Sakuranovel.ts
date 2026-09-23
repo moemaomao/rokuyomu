@@ -188,64 +188,105 @@ export class SakuranovelSource extends BaseSource {
 		};
 	}
 
-	/**
-	 * Novel = teks. Return [] supaya caller tahu bukan image chapter.
-	 * Untuk baca teks, pakai scraper getChapterContent / novel-reader.
-	 */
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
 	}
 
-	/** Optional: chapter text for novel reader (if worker exposes it) */
 	async getChapterContent(chapterId: string): Promise<{
-		title: string;
-		content: string;
-		prevChapterId?: string | null;
-		nextChapterId?: string | null;
-	}> {
-		const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-		const $ = cheerio.load(html);
+	title: string;
+	content: string;
+	prevChapterId?: string | null;
+	nextChapterId?: string | null;
+}> {
+	const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+	const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+	const $ = cheerio.load(html);
 
-		const main = $('main .content');
-		const title =
-			main.find('h2.title-chapter').text().trim() ||
-			$('h1').first().text().trim() ||
-			'Chapter';
+	const bodyText = $('body').text();
+	if (
+		/just a moment|cf-browser-verification|challenge-platform|verify you are human/i.test(
+			html
+		) &&
+		bodyText.length < 500
+	) {
+		throw new Error('Cloudflare blocked this request');
+	}
 
-		const paras = main.find('.content .asdasd p, .entry-content p, article p');
-		const texts: string[] = [];
-		paras.each((_, el) => {
-			const t = $(el).text().trim();
-			if (!t) return;
-			if (/sakuranovel\.id/i.test(t)) return;
-			if (/daftar isi|previous|next|prev/i.test(t) && t.length < 40) return;
-			texts.push(t);
-		});
+	const title =
+		$('h2.title-chapter').first().text().trim() ||
+		$('h1').first().text().trim() ||
+		$('title').text().split('|')[0].trim() ||
+		'Chapter';
 
-		let contentHtml = '';
-		if (paras.length) {
-			const parent = paras.parent();
-			const htmlContent = parent.html() || '';
-			contentHtml = htmlContent || texts.map((t) => `<p>${escapeHtml(t)}</p>`).join('\n');
-		} else {
-			contentHtml = texts.map((t) => `<p>${escapeHtml(t)}</p>`).join('\n');
+	const containers = [
+		'main .content .asdasd',
+		'main .content',
+		'.entry-content',
+		'.reading-content',
+		'#chapter-content',
+		'.chapter-content',
+		'article .content',
+		'article',
+		'.post-content',
+		'#content'
+	];
+
+	let contentHtml = '';
+	for (const sel of containers) {
+		const el = $(sel).first();
+		if (!el.length) continue;
+
+		const clone = el.clone();
+		clone.find('script, style, iframe, .ads, .ad, nav, .nav, .reader-settings, .comments').remove();
+
+		const paras = clone.find('p');
+		if (paras.length >= 2) {
+			const parts: string[] = [];
+			paras.each((_, p) => {
+				const t = $(p).text().trim();
+				if (!t) return;
+				if (/sakuranovel\.id/i.test(t)) return;
+				if (/^daftar isi$/i.test(t)) return;
+				parts.push(`<p>${escapeHtml(t)}</p>`);
+			});
+			if (parts.length >= 2) {
+				contentHtml = parts.join('\n');
+				break;
+			}
 		}
 
-		const prevHref =
-			$('a[rel="prev"]').attr('href') ||
-			$('a.prev, .nav-previous a').first().attr('href');
-		const nextHref =
-			$('a[rel="next"]').attr('href') ||
-			$('a.next, .nav-next a').first().attr('href');
-
-		return {
-			title,
-			content: contentHtml || '<p></p>',
-			prevChapterId: prevHref ? pathOnly(prevHref) : null,
-			nextChapterId: nextHref ? pathOnly(nextHref) : null
-		};
+		const inner = clone.html()?.trim() || '';
+		if (inner.length > 200) {
+			contentHtml = inner;
+			break;
+		}
 	}
+
+	if (!contentHtml || contentHtml.length < 50) {
+		const parts: string[] = [];
+		$('body p').each((_, p) => {
+			const t = $(p).text().trim();
+			if (t.length < 20) return;
+			if (/sakuranovel|cloudflare|cookie|privacy/i.test(t)) return;
+			parts.push(`<p>${escapeHtml(t)}</p>`);
+		});
+		if (parts.length) contentHtml = parts.join('\n');
+	}
+
+	const prevHref =
+		$('a[rel="prev"]').attr('href') ||
+		$('a.prev, .nav-previous a, a:contains("Sebelumnya")').first().attr('href');
+	const nextHref =
+		$('a[rel="next"]').attr('href') ||
+		$('a.next, .nav-next a, a:contains("Selanjutnya")').first().attr('href');
+
+	return {
+		title,
+		content: contentHtml || '<p><em>Konten kosong — kemungkinan diblokir Cloudflare atau selector berubah.</em></p>',
+		prevChapterId: prevHref ? pathOnly(prevHref) : null,
+		nextChapterId: nextHref ? pathOnly(nextHref) : null
+	};
+}
 
 	private parseSeriesCards(html: string): Manga[] {
 		const $ = cheerio.load(html);
