@@ -88,7 +88,10 @@
 	// ── Props & derived ──────────────────────────────────────────────────────
 	let { data, children } = $props();
 
-	let isReaderPage = $derived($page.url.pathname.startsWith('/reader/'));
+	let isReaderPage = $derived(
+	$page.url.pathname.startsWith('/reader/') ||
+		$page.url.pathname.startsWith('/novel-reader/')
+    );
 
 	// ── UI state ─────────────────────────────────────────────────────────────
 	let isDesktop = $state(true);

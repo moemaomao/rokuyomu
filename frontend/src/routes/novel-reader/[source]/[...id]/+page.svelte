@@ -4,13 +4,13 @@
 	import { goto } from '$app/navigation';
 	import {
 		ChevronLeft,
-		ChevronRight,
 		Settings,
 		Play,
 		Pause,
 		Square,
 		Type,
-		Volume2
+		Volume2,
+		ChevronsUp
 	} from 'lucide-svelte';
 
 	const { data } = $props();
@@ -168,12 +168,26 @@
 		isPaused = false;
 	}
 
-	function goChapter(ch: { id: string } | null | undefined) {
+	async function goChapter(ch: { id?: string } | null | undefined) {
 		if (!ch?.id || !source) return;
 		stopTTS();
 		stopAutoScroll();
-		const id = String(ch.id).replace(/^\//, '');
-		goto(`/novel-reader/${source}/${encodeURIComponent(id)}`);
+		const cleanId = String(ch.id).replace(/^\/+/, '');
+		await goto(`/novel-reader/${source}/${cleanId}`, {
+			replaceState: true,
+			invalidateAll: true
+		});
+		window.scrollTo(0, 0);
+	}
+
+	function scrollToTop() {
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	function toggleTap(e: MouseEvent) {
+		const t = e.target as HTMLElement;
+		if (t.closest('button, a, input, select, label, [role="dialog"]')) return;
+		showControls = !showControls;
 	}
 
 	onMount(() => {
@@ -182,14 +196,29 @@
 		if (browser && window.speechSynthesis) {
 			window.speechSynthesis.onvoiceschanged = loadVoices;
 		}
+
+		// Keyboard: ← prev / → next (seperti manga)
+		const onKey = (e: KeyboardEvent) => {
+			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
+				return;
+			if (e.key === 'ArrowLeft') goChapter(prevChapter);
+			if (e.key === 'ArrowRight') goChapter(nextChapter);
+		};
+		window.addEventListener('keydown', onKey);
+
 		let lastY = 0;
 		const onScroll = () => {
 			const y = window.scrollY;
-			showControls = y < lastY || y < 80;
+			if (y > lastY + 12 && y > 80) showControls = false;
+			else if (y < lastY - 8) showControls = true;
 			lastY = y;
 		};
 		window.addEventListener('scroll', onScroll, { passive: true });
-		return () => window.removeEventListener('scroll', onScroll);
+
+		return () => {
+			window.removeEventListener('keydown', onKey);
+			window.removeEventListener('scroll', onScroll);
+		};
 	});
 
 	onDestroy(() => {
@@ -203,35 +232,33 @@
 </svelte:head>
 
 <div
+	role="presentation"
 	class="min-h-screen transition-colors duration-200 {isDark
 		? 'bg-zinc-950 text-zinc-100'
 		: 'bg-amber-50 text-zinc-900'}"
+	onclick={toggleTap}
 >
 	<header
-		class="fixed top-0 inset-x-0 z-40 flex items-center justify-between gap-2 px-3 py-2 backdrop-blur-md transition-transform duration-300 {showControls
+		class="fixed top-0 inset-x-0 z-[100] flex items-center justify-between gap-2 px-3 py-2 backdrop-blur-md transition-transform duration-300 {showControls
 			? 'translate-y-0'
-			: '-translate-y-full'} {isDark ? 'bg-zinc-900/80' : 'bg-white/80'}"
+			: '-translate-y-full'} {isDark ? 'bg-zinc-900/85 border-b border-white/5' : 'bg-white/85 border-b border-zinc-200'}"
 	>
 		<button
 			type="button"
 			class="p-2 rounded-lg hover:bg-white/10"
-			onclick={() => history.back()}
+			onclick={(e) => {
+				e.stopPropagation();
+				history.back();
+			}}
 			aria-label="Back"
 		>
 			<ChevronLeft size={22} />
 		</button>
 		<div class="flex-1 min-w-0 text-center">
-			<p class="text-sm font-medium truncate">{novelInfo?.title || ''}</p>
+			<p class="text-sm font-medium truncate">{novelInfo?.title || title}</p>
 			<p class="text-xs opacity-70 truncate">{title}</p>
 		</div>
-		<button
-			type="button"
-			class="p-2 rounded-lg hover:bg-white/10"
-			onclick={() => (showSettings = !showSettings)}
-			aria-label="Settings"
-		>
-			<Settings size={22} />
-		</button>
+		<div class="w-10"></div>
 	</header>
 
 	<article
@@ -241,81 +268,156 @@
 		style:font-size="{fontSize}px"
 		style:line-height={lineHeight}
 		style:max-width="{maxWidth}px"
+		style:color={isDark ? '#e5e5e5' : '#171717'}
 	>
 		{@html content || '<p>No content</p>'}
 	</article>
 
-	<footer
-		class="fixed bottom-0 inset-x-0 z-40 flex items-center justify-between gap-2 px-3 py-3 backdrop-blur-md transition-transform duration-300 {showControls
+	<!-- Bottom bar: Prev / Next (style manga reader) -->
+	<div
+		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3 transition-transform duration-300 {showControls
 			? 'translate-y-0'
-			: 'translate-y-full'} {isDark ? 'bg-zinc-900/90' : 'bg-white/90'}"
+			: 'translate-y-full'} {isDark
+			? 'border-white/5 bg-zinc-950/80 backdrop-blur-md'
+			: 'border-zinc-300/60 bg-white/70 backdrop-blur-md'}"
 	>
 		<button
 			type="button"
-			class="flex items-center gap-1 px-3 py-2 rounded-lg text-sm disabled:opacity-40"
+			onclick={(e) => {
+				e.stopPropagation();
+				goChapter(prevChapter);
+			}}
 			disabled={!prevChapter}
-			onclick={() => goChapter(prevChapter)}
+			aria-label="Previous chapter"
+			title="Previous chapter"
+			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
+				{isDark
+					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
+					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
 		>
-			<ChevronLeft size={18} /> Prev
+			<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+				<path d="M13 5l-7 7 7 7" />
+				<path d="M19 5l-7 7 7 7" opacity="0.6" />
+			</svg>
 		</button>
-
-		<div class="flex items-center gap-2">
-			<button
-				type="button"
-				class="p-2 rounded-full hover:bg-white/10"
-				onclick={isSpeaking ? stopTTS : speak}
-				title="Text to Speech"
-			>
-				{#if isSpeaking}
-					<Square size={20} />
-				{:else}
-					<Volume2 size={20} />
-				{/if}
-			</button>
-			{#if isSpeaking}
-				<button type="button" class="p-2 rounded-full hover:bg-white/10" onclick={pauseTTS}>
-					{#if isPaused}
-						<Play size={20} />
-					{:else}
-						<Pause size={20} />
-					{/if}
-				</button>
-			{/if}
-
-			<button
-				type="button"
-				class="p-2 rounded-full hover:bg-white/10 {autoScroll ? 'bg-emerald-600/30' : ''}"
-				onclick={toggleAutoScroll}
-				title="Auto scroll"
-			>
-				{#if autoScroll}
-					<Pause size={20} />
-				{:else}
-					<Play size={20} />
-				{/if}
-			</button>
-		</div>
 
 		<button
 			type="button"
-			class="flex items-center gap-1 px-3 py-2 rounded-lg text-sm disabled:opacity-40"
+			onclick={(e) => {
+				e.stopPropagation();
+				goChapter(nextChapter);
+			}}
 			disabled={!nextChapter}
-			onclick={() => goChapter(nextChapter)}
+			aria-label="Next chapter"
+			title="Next chapter"
+			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
+				{isDark
+					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
+					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
 		>
-			Next <ChevronRight size={18} />
+			<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+				<path d="M11 5l7 7-7 7" />
+				<path d="M5 5l7 7-7 7" opacity="0.6" />
+			</svg>
 		</button>
-	</footer>
+	</div>
+
+	<!-- FAB kanan bawah: scroll-top, TTS, auto-scroll, settings -->
+	<div
+		class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5 transition-opacity duration-300 {showControls
+			? 'opacity-100'
+			: 'opacity-0 pointer-events-none'}"
+	>
+		<button
+			type="button"
+			onclick={(e) => {
+				e.stopPropagation();
+				scrollToTop();
+			}}
+			class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,150,255,0.15)] text-[#4da6ff] backdrop-blur-md transition hover:scale-105 hover:bg-[rgba(0,150,255,0.25)]"
+			title="Scroll to top"
+		>
+			<ChevronsUp class="h-5 w-5" />
+		</button>
+
+		<button
+			type="button"
+			onclick={(e) => {
+				e.stopPropagation();
+				isSpeaking ? stopTTS() : speak();
+			}}
+			class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.15)] text-[#35d98a] backdrop-blur-md transition hover:scale-105"
+			title="Text to Speech"
+		>
+			{#if isSpeaking}
+				<Square class="h-5 w-5" />
+			{:else}
+				<Volume2 class="h-5 w-5" />
+			{/if}
+		</button>
+
+		{#if isSpeaking}
+			<button
+				type="button"
+				onclick={(e) => {
+					e.stopPropagation();
+					pauseTTS();
+				}}
+				class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(255,180,0,0.15)] text-amber-400 backdrop-blur-md transition hover:scale-105"
+				title={isPaused ? 'Resume' : 'Pause'}
+			>
+				{#if isPaused}
+					<Play class="h-5 w-5" />
+				{:else}
+					<Pause class="h-5 w-5" />
+				{/if}
+			</button>
+		{/if}
+
+		<button
+			type="button"
+			onclick={(e) => {
+				e.stopPropagation();
+				toggleAutoScroll();
+			}}
+			class="flex h-10 w-10 items-center justify-center rounded-full border-0 backdrop-blur-md transition hover:scale-105 {autoScroll
+				? 'bg-emerald-600/40 text-emerald-300'
+				: 'bg-[rgba(120,80,255,0.15)] text-purple-400'}"
+			title="Auto scroll"
+		>
+			{#if autoScroll}
+				<Pause class="h-5 w-5" />
+			{:else}
+				<Play class="h-5 w-5" />
+			{/if}
+		</button>
+
+		<button
+			type="button"
+			onclick={(e) => {
+				e.stopPropagation();
+				showSettings = !showSettings;
+			}}
+			class="flex h-[42px] w-[42px] items-center justify-center rounded-full border-0 bg-transparent text-purple-500 transition hover:rotate-90"
+			title="Settings"
+		>
+			<Settings class="h-6 w-6" strokeWidth={2} />
+		</button>
+	</div>
 
 	{#if showSettings}
 		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
-			onclick={() => (showSettings = false)}
+			class="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/50"
+			onclick={(e) => {
+				e.stopPropagation();
+				showSettings = false;
+			}}
 			role="presentation"
 		>
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<div
-				class="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-xl {isDark
+				class="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-xl max-h-[80vh] overflow-y-auto {isDark
 					? 'bg-zinc-900'
 					: 'bg-white'}"
 				onclick={(e) => e.stopPropagation()}
@@ -343,17 +445,8 @@
 					{/each}
 				</div>
 
-				<label class="block text-sm mb-1 opacity-70" for="font-size">
-					Font size: {fontSize}px
-				</label>
-				<input
-					id="font-size"
-					type="range"
-					min="14"
-					max="32"
-					bind:value={fontSize}
-					class="w-full mb-4"
-				/>
+				<label class="block text-sm mb-1 opacity-70" for="font-size">Font size: {fontSize}px</label>
+				<input id="font-size" type="range" min="14" max="32" bind:value={fontSize} class="w-full mb-4" />
 
 				<label class="block text-sm mb-1 opacity-70" for="line-height">
 					Line height: {lineHeight.toFixed(1)}
@@ -368,9 +461,7 @@
 					class="w-full mb-4"
 				/>
 
-				<label class="block text-sm mb-1 opacity-70" for="max-width">
-					Max width: {maxWidth}px
-				</label>
+				<label class="block text-sm mb-1 opacity-70" for="max-width">Max width: {maxWidth}px</label>
 				<input
 					id="max-width"
 					type="range"
@@ -387,7 +478,7 @@
 				</label>
 
 				<label class="block text-sm mb-1 opacity-70" for="scroll-speed">
-					Auto-scroll speed: {scrollSpeed} px/s
+					Auto-scroll: {scrollSpeed} px/s
 				</label>
 				<input
 					id="scroll-speed"
