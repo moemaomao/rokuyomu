@@ -163,7 +163,6 @@
 	}
 
 	function replyTo(m: ChatMessage) {
-		// Hanya mention, tidak membawa isi pesan orang lain
 		const mention = `@${m.authorName} `;
 		if (!input.startsWith(mention)) {
 			input = mention + input;
@@ -295,7 +294,10 @@
 					</div>
 
 					{#if editingId !== m.id}
-						<div class="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100">
+						
+						<div
+							class="flex shrink-0 gap-0.5 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100"
+						>
 							{#if user}
 								<button
 									onclick={() => replyTo(m)}
