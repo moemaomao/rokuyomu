@@ -3,7 +3,6 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import {
-		ChevronLeft,
 		Settings,
 		Play,
 		Pause,
@@ -197,7 +196,6 @@
 			window.speechSynthesis.onvoiceschanged = loadVoices;
 		}
 
-		// Keyboard: ← prev / → next (seperti manga)
 		const onKey = (e: KeyboardEvent) => {
 			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
 				return;
@@ -238,32 +236,25 @@
 		: 'bg-amber-50 text-zinc-900'}"
 	onclick={toggleTap}
 >
+	<!-- Title bar saja (tanpa tombol back) -->
 	<header
-		class="fixed top-0 inset-x-0 z-[100] flex items-center justify-between gap-2 px-3 py-2 backdrop-blur-md transition-transform duration-300 {showControls
+		class="fixed top-0 inset-x-0 z-[100] px-4 py-3 text-center backdrop-blur-md transition-transform duration-300 {showControls
 			? 'translate-y-0'
-			: '-translate-y-full'} {isDark ? 'bg-zinc-900/85 border-b border-white/5' : 'bg-white/85 border-b border-zinc-200'}"
+			: '-translate-y-full'} {isDark
+			? 'bg-zinc-900/85 border-b border-white/5'
+			: 'bg-white/85 border-b border-zinc-200'}"
 	>
-		<button
-			type="button"
-			class="p-2 rounded-lg hover:bg-white/10"
-			onclick={(e) => {
-				e.stopPropagation();
-				history.back();
-			}}
-			aria-label="Back"
-		>
-			<ChevronLeft size={22} />
-		</button>
-		<div class="flex-1 min-w-0 text-center">
-			<p class="text-sm font-medium truncate">{novelInfo?.title || title}</p>
-			<p class="text-xs opacity-70 truncate">{title}</p>
-		</div>
-		<div class="w-10"></div>
+		<p class="m-0 text-[1.02em] font-medium opacity-85 truncate">
+			{#if novelInfo?.title}{novelInfo.title}{/if}
+			{#if title}
+				{' '}{title}
+			{/if}
+		</p>
 	</header>
 
 	<article
 		id="novel-content"
-		class="mx-auto px-4 pt-20 pb-28 prose max-w-none {isDark ? 'prose-invert' : ''}"
+		class="mx-auto px-4 pt-16 pb-28 prose max-w-none {isDark ? 'prose-invert' : ''}"
 		style:font-family={FONTS[fontFamily] || FONTS.serif}
 		style:font-size="{fontSize}px"
 		style:line-height={lineHeight}
@@ -273,7 +264,7 @@
 		{@html content || '<p>No content</p>'}
 	</article>
 
-	<!-- Bottom bar: Prev / Next (style manga reader) -->
+	<!-- Bottom: Prev / Next -->
 	<div
 		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3 transition-transform duration-300 {showControls
 			? 'translate-y-0'
@@ -322,7 +313,7 @@
 		</button>
 	</div>
 
-	<!-- FAB kanan bawah: scroll-top, TTS, auto-scroll, settings -->
+	<!-- FAB kanan bawah -->
 	<div
 		class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5 transition-opacity duration-300 {showControls
 			? 'opacity-100'
@@ -406,7 +397,8 @@
 	</div>
 
 	{#if showSettings}
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/50"
 			onclick={(e) => {
@@ -415,7 +407,8 @@
 			}}
 			role="presentation"
 		>
-			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-xl max-h-[80vh] overflow-y-auto {isDark
 					? 'bg-zinc-900'
