@@ -10,7 +10,13 @@
 	} from '$lib/stores/forum';
 	import { getUser } from '$lib/stores/auth.svelte';
 	import { isAdmin } from '$lib/admin';
-	import { MessageCircle, ImagePlus, Pencil, Trash2, Send } from 'lucide-svelte';
+	import { MessageCircle, ImagePlus, Pencil, Trash2, Send, X } from 'lucide-svelte';
+
+	type PendingImage = {
+		id: string;
+		preview: string; // object URL for UI
+		dataUrl: string; // compressed base64 for send
+	};
 
 	let messages = $state<ChatMessage[]>([]);
 	let input = $state('');
@@ -18,6 +24,7 @@
 	let error = $state('');
 	let editingId = $state<string | null>(null);
 	let editText = $state('');
+	let pendingImages = $state<PendingImage[]>([]);
 	let fileInput: HTMLInputElement | null = $state(null);
 	let listEl: HTMLDivElement | null = $state(null);
 	let unsub: (() => void) | undefined;
@@ -31,18 +38,99 @@
 		});
 	});
 
-	onDestroy(() => unsub?.());
+	onDestroy(() => {
+		unsub?.();
+		// cleanup object URLs
+		pendingImages.forEach((p) => URL.revokeObjectURL(p.preview));
+	});
 
 	function scrollToBottom() {
 		if (listEl) listEl.scrollTop = listEl.scrollHeight;
 	}
 
+	function compressImage(file: File, maxW = 800, quality = 0.72): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const img = new Image();
+			const url = URL.createObjectURL(file);
+			img.onload = () => {
+				URL.revokeObjectURL(url);
+				let w = img.width;
+				let h = img.height;
+				if (w > maxW) {
+					h = Math.round((h * maxW) / w);
+					w = maxW;
+				}
+				const canvas = document.createElement('canvas');
+				canvas.width = w;
+				canvas.height = h;
+				const ctx = canvas.getContext('2d');
+				if (!ctx) return reject(new Error('Canvas not supported'));
+				ctx.drawImage(img, 0, 0, w, h);
+				resolve(canvas.toDataURL('image/jpeg', quality));
+			};
+			img.onerror = () => {
+				URL.revokeObjectURL(url);
+				reject(new Error('Failed to load image'));
+			};
+			img.src = url;
+		});
+	}
+
+	async function onFileChange(e: Event) {
+		const files = (e.target as HTMLInputElement).files;
+		if (!files?.length) return;
+		error = '';
+
+		for (const file of Array.from(files)) {
+			if (!file.type.startsWith('image/')) continue;
+			if (pendingImages.length >= 4) {
+				error = 'Max 4 images per message';
+				break;
+			}
+			try {
+				const dataUrl = await compressImage(file);
+				if (dataUrl.length > 700_000) {
+					error = 'One image is still too large after compress';
+					continue;
+				}
+				const preview = URL.createObjectURL(file);
+				pendingImages = [
+					...pendingImages,
+					{ id: crypto.randomUUID(), preview, dataUrl }
+				];
+			} catch (err: any) {
+				error = err?.message || 'Failed to process image';
+			}
+		}
+		(e.target as HTMLInputElement).value = '';
+	}
+
+	function removePending(id: string) {
+		const item = pendingImages.find((p) => p.id === id);
+		if (item) URL.revokeObjectURL(item.preview);
+		pendingImages = pendingImages.filter((p) => p.id !== id);
+	}
+
 	async function handleSend() {
-		if (!input.trim() || sending) return;
+		const text = input.trim();
+		if ((!text && pendingImages.length === 0) || sending) return;
+
 		sending = true;
 		error = '';
 		try {
-			await sendChatMessage(input);
+			// build final body: text + markdown images
+			let body = text;
+			for (const img of pendingImages) {
+				body += `\n![image](${img.dataUrl})`;
+			}
+			body = body.trim();
+			if (!body) return;
+
+			await sendChatMessage(body);
+
+			// cleanup
+			pendingImages.forEach((p) => URL.revokeObjectURL(p.preview));
+			pendingImages = [];
 			input = '';
 		} catch (e: any) {
 			error = e?.message || 'Failed to send';
@@ -91,66 +179,16 @@
 		fileInput?.click();
 	}
 
-	/** Compress image via canvas then return data URL (jpeg) */
-	function compressImage(file: File, maxW = 800, quality = 0.7): Promise<string> {
-		return new Promise((resolve, reject) => {
-			const img = new Image();
-			const url = URL.createObjectURL(file);
-			img.onload = () => {
-				URL.revokeObjectURL(url);
-				let w = img.width;
-				let h = img.height;
-				if (w > maxW) {
-					h = Math.round((h * maxW) / w);
-					w = maxW;
-				}
-				const canvas = document.createElement('canvas');
-				canvas.width = w;
-				canvas.height = h;
-				const ctx = canvas.getContext('2d');
-				if (!ctx) return reject(new Error('Canvas not supported'));
-				ctx.drawImage(img, 0, 0, w, h);
-				resolve(canvas.toDataURL('image/jpeg', quality));
-			};
-			img.onerror = () => {
-				URL.revokeObjectURL(url);
-				reject(new Error('Failed to load image'));
-			};
-			img.src = url;
-		});
-	}
-
-	async function onFileChange(e: Event) {
-		const file = (e.target as HTMLInputElement).files?.[0];
-		if (!file || !file.type.startsWith('image/')) return;
-		error = '';
-
-		try {
-			const dataUrl = await compressImage(file);
-			// ~ data URL length limit soft check (Firestore doc ~1MB)
-			if (dataUrl.length > 700_000) {
-				error = 'Image still too large after compress. Try a smaller one.';
-				return;
-			}
-			const md = `\n![image](${dataUrl})\n`;
-			input = (input + md).slice(0, 900_000);
-		} catch (err: any) {
-			error = err?.message || 'Failed to process image';
-		}
-		(e.target as HTMLInputElement).value = '';
-	}
-
 	function renderMarkdown(raw: string): string {
 		let s = raw
 			.replace(/&/g, '&amp;')
 			.replace(/</g, '&lt;')
 			.replace(/>/g, '&gt;');
 
-		// images (base64 or http) — more permissive
 		s = s.replace(
 			/!\[([^\]]*)\]\((data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=\s]+|https?:\/\/[^)\s]+)\)/g,
 			(_, alt, src) => {
-				const cleanSrc = src.replace(/\s/g, '');
+				const cleanSrc = String(src).replace(/\s/g, '');
 				return `<img src="${cleanSrc}" alt="${alt}" class="chat-img" loading="lazy" />`;
 			}
 		);
@@ -266,18 +304,41 @@
 		{/if}
 	</div>
 
+	<!-- Composer -->
 	<div class="border-t border-zinc-200 p-3 dark:border-zinc-800">
 		{#if error}
 			<p class="mb-2 text-xs text-red-500">{error}</p>
 		{/if}
 
 		{#if user}
+			<!-- Image previews -->
+			{#if pendingImages.length > 0}
+				<div class="mb-2 flex flex-wrap gap-2">
+					{#each pendingImages as img (img.id)}
+						<div class="relative">
+							<img
+								src={img.preview}
+								alt="preview"
+								class="h-16 w-16 rounded-lg border border-zinc-200 object-cover dark:border-zinc-700"
+							/>
+							<button
+								onclick={() => removePending(img.id)}
+								class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-800 text-white shadow hover:bg-red-500"
+								title="Remove"
+							>
+								<X class="h-3 w-3" />
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
 			<div class="flex gap-2">
 				<textarea
 					bind:value={input}
 					onkeydown={onKeydown}
 					rows="2"
-					placeholder="Write a message… (Markdown supported, Enter to send)"
+					placeholder="Write a message… (Enter to send)"
 					class="min-h-[40px] flex-1 resize-none rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-black outline-none focus:border-violet-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
 				></textarea>
 
@@ -291,7 +352,7 @@
 					</button>
 					<button
 						onclick={handleSend}
-						disabled={sending || !input.trim()}
+						disabled={sending || (!input.trim() && pendingImages.length === 0)}
 						class="rounded-lg bg-violet-600 p-2 text-white transition hover:bg-violet-500 disabled:opacity-40"
 						title="Send"
 					>
@@ -299,15 +360,17 @@
 					</button>
 				</div>
 			</div>
+
 			<input
 				bind:this={fileInput}
 				type="file"
 				accept="image/*"
+				multiple
 				class="hidden"
 				onchange={onFileChange}
 			/>
 			<p class="mt-1.5 text-[10px] text-zinc-400">
-				**bold** · *italic* · `code` · images auto-compressed
+				**bold** · *italic* · `code` · max 4 images · auto-compressed
 			</p>
 		{:else}
 			<p class="py-2 text-center text-sm text-zinc-500">Login to join the chat</p>

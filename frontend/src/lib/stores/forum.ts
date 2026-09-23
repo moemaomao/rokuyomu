@@ -72,7 +72,6 @@ export type ChatMessage = {
 	editedAt?: number;
 };
 
-/** Default categories seeded on first load if collection empty */
 export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
 	{
 		name: 'General',
@@ -108,7 +107,7 @@ export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
 
 const CHAT_COL = 'communityChat';
 const MAX_CHAT_BODY = 4000;
-const MAX_IMAGE_BASE64 = 600_000;
+const MAX_IMAGE_BASE64 = 900_000;
 
 function tsToMs(v: unknown): number {
 	if (!v) return Date.now();
@@ -450,7 +449,6 @@ export function formatForumDate(ms: number): string {
 	return d.toLocaleDateString();
 }
 
-/** Simple spoiler: ||text|| → details/summary in render (client helper) */
 export function renderBodyHtml(raw: string): string {
 	const escaped = raw
 		.replace(/&/g, '&amp;')
