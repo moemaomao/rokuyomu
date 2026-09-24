@@ -15,7 +15,6 @@
         Check
     } from 'lucide-svelte';
 
-    // Props definition using Svelte 5 runes
     interface Chapter {
         id?: string | number;
         title?: string;
@@ -27,7 +26,7 @@
             title?: string;
             source?: string;
             chapterId?: string;
-            novelInfo?: { title?: string };
+            novelInfo?: { title?: string; id?: string; cover?: string };
             chapters?: Chapter[];
             currentChapter?: Chapter;
             prevChapter?: Chapter | null;
@@ -236,7 +235,6 @@
         loadSettings();
         settingsReady = true;
 
-        // Save to reading history (same as comic reader)
         try {
             const nid = (novelInfo as { id?: string; title?: string; cover?: string } | null)?.id
                 || chapterId
