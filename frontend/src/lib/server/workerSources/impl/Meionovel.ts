@@ -2,9 +2,9 @@
  * Meionovels.com (MeioNovel) — Madara theme
  * Path: scraper/src/sources/impl/Meionovel.ts
  *
- * Fixes v2:
- * - Homepage: gabung home latest + archive page 1–2 (target ~24)
- * - Chapter list: AJAX manga_get_chapters + parse nested volume (HTL/MTL)
+ * Fixes v3:
+ * - Chapter list: POST {novelUrl}/ajax/chapters/?t=1  (bukan admin-ajax)
+ * - Homepage: home + archive page 1–2
  * - Judul chapter pendek: "Chapter XX"
  */
 import * as cheerio from 'cheerio';
@@ -142,16 +142,13 @@ export class MeionovelSource extends BaseSource {
 	}
 
 	private parseCard($: cheerio.CheerioAPI, el: any): Manga | null {
-		const a =
-			$(el).find('a[href*="/novel/"]').filter((_, x) => {
+		const novelLinks = $(el)
+			.find('a[href*="/novel/"]')
+			.filter((_, x) => {
 				const h = $(x).attr('href') || '';
 				return /\/novel\/[^/]+\/?$/.test(h.replace(this.baseUrl, ''));
-			}).first().length > 0
-				? $(el).find('a[href*="/novel/"]').filter((_, x) => {
-						const h = $(x).attr('href') || '';
-						return /\/novel\/[^/]+\/?$/.test(h.replace(this.baseUrl, ''));
-					}).first()
-				: $(el).find('.post-title a, h3 a, h5 a').first();
+			});
+		const a = novelLinks.first().length ? novelLinks.first() : $(el).find('.post-title a, h3 a, h5 a').first();
 
 		const href = a.attr('href') || '';
 		if (!href || !/\/novel\//.test(href)) return null;
@@ -170,10 +167,8 @@ export class MeionovelSource extends BaseSource {
 			$(el).find('img').attr('src') ||
 			'';
 
-		const typeText =
-			$(el).find('.manga-type, span.type').first().text().trim() || 'novel';
-		const status =
-			$(el).find('.manga-status, .status').first().text().trim() || undefined;
+		const typeText = $(el).find('.manga-type, span.type').first().text().trim() || 'novel';
+		const status = $(el).find('.manga-status, .status').first().text().trim() || undefined;
 
 		const chText =
 			$(el).find('.list-chapter a, .chapter-item a, .chapter a, a[href*="chapter"]').first().text() ||
@@ -232,7 +227,8 @@ export class MeionovelSource extends BaseSource {
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		const path = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+		const novelPath = path.endsWith('/') ? path : `${path}/`;
+		const html = await this.fetchHtml(novelPath);
 		const $ = cheerio.load(html);
 
 		const title =
@@ -320,7 +316,8 @@ export class MeionovelSource extends BaseSource {
 			if (m) rating = m[1];
 		}
 
-		let chapters = await this.fetchChaptersAjax($, path);
+		// ── Chapters: POST {novel}/ajax/chapters/?t=1 ──
+		let chapters = await this.fetchChaptersAjax(novelPath);
 		if (!chapters.length) {
 			chapters = this.parseChapterList($);
 		}
@@ -359,38 +356,25 @@ export class MeionovelSource extends BaseSource {
 		return details;
 	}
 
-	private async fetchChaptersAjax($: cheerio.CheerioAPI, mangaPath: string): Promise<Chapter[]> {
-		let mangaId =
-			$('#manga-chapters-holder').attr('data-id') ||
-			$('[id^="manga-chapters-holder"]').attr('data-id') ||
-			$('.listing-chapters_wrap').attr('data-id') ||
-			'';
-
-		if (!mangaId) {
-			const bodyClass = $('body').attr('class') || '';
-			const m = bodyClass.match(/postid-(\d+)/) || bodyClass.match(/post-(\d+)/);
-			if (m) mangaId = m[1];
-		}
-		if (!mangaId) {
-			mangaId = $('[data-post-id]').first().attr('data-post-id') || '';
-		}
-		if (!mangaId) return [];
+	/**
+	 * Madara modern: POST /novel/{slug}/ajax/chapters/?t=1
+	 * (HTML awal cuma ~2 chapter; full list lewat endpoint ini)
+	 */
+	private async fetchChaptersAjax(novelPath: string): Promise<Chapter[]> {
+		const base = novelPath.endsWith('/') ? novelPath : `${novelPath}/`;
+		const url = absUrl(this.baseUrl, `${base}ajax/chapters/?t=1`);
 
 		try {
-			const body = new URLSearchParams({
-				action: 'manga_get_chapters',
-				manga: mangaId
-			});
-			const res = await fetch(`${this.baseUrl}/wp-admin/admin-ajax.php`, {
+			const res = await fetch(url, {
 				method: 'POST',
 				headers: {
 					...this.headers,
-					'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
 					'X-Requested-With': 'XMLHttpRequest',
-					Referer: absUrl(this.baseUrl, mangaPath),
-					Origin: this.baseUrl
+					Referer: absUrl(this.baseUrl, base),
+					Origin: this.baseUrl,
+					'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
 				},
-				body: body.toString()
+				body: ''
 			});
 			if (!res.ok) return [];
 			const html = await res.text();
@@ -494,7 +478,9 @@ export class MeionovelSource extends BaseSource {
 			if (!el.length) continue;
 			const clone = el.clone();
 			clone
-				.find('script, style, iframe, .ads, .ad, nav, .nav, .reader-settings, .comments, .code-block, .sharedaddy, .chapter-warning')
+				.find(
+					'script, style, iframe, .ads, .ad, nav, .nav, .reader-settings, .comments, .code-block, .sharedaddy, .chapter-warning'
+				)
 				.remove();
 
 			const paras = clone.find('p');
