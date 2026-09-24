@@ -205,20 +205,34 @@ export class BacaLightNovelSource extends BaseSource {
 	}
 
 	private async fetchSeriesPage(page: number): Promise<Manga[]> {
-		const path = page <= 1 ? '/series/' : `/series/page/${page}/`;
-		try {
-			const html = await this.fetchHtml(path);
-			this.assertNotCf(html);
-			const $ = cheerio.load(html);
-			const list: Manga[] = [];
-			$('.listupd .bs, .listupd .bsx, .bixbox .bs, .bixbox .bsx, .bs, .bsx').each((_, el) => {
-				const item = this.parseCard($, el);
-				if (item && !list.some((x) => x.id === item.id)) list.push(item);
-			});
-			return list;
-		} catch {
-			return [];
+		// Themesia pagination bervariasi antar site
+		const paths =
+			page <= 1
+				? ['/series/', '/series/?orderby=update']
+				: [
+						`/series/page/${page}/`,
+						`/series/?page=${page}`,
+						`/series/?orderby=update&page=${page}`,
+						`/page/${page}/?s&post_type=wp-manga`,
+						`/series/?orderby=update&m_orderby=latest&page=${page}`
+					];
+
+		for (const path of paths) {
+			try {
+				const html = await this.fetchHtml(path);
+				this.assertNotCf(html);
+				const $ = cheerio.load(html);
+				const list: Manga[] = [];
+				$('.listupd .bs, .listupd .bsx, .bixbox .bs, .bixbox .bsx, .bs, .bsx').each((_, el) => {
+					const item = this.parseCard($, el);
+					if (item && !list.some((x) => x.id === item.id)) list.push(item);
+				});
+				if (list.length) return list;
+			} catch {
+				/* try next pattern */
+			}
 		}
+		return [];
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
@@ -268,13 +282,28 @@ export class BacaLightNovelSource extends BaseSource {
 			throw new Error('Manga not found (empty title)');
 		}
 
-		const cover =
-			$('.seriestucont .thumb img').attr('data-src') ||
-			$('.seriestucont .thumb img').attr('src') ||
-			$('.series-thumb img, .thumb img').attr('data-src') ||
-			$('.series-thumb img, .thumb img').attr('src') ||
+		// Cover — Themesia sering lazy-load (data-src / data-lazy-src / srcset)
+		const coverEl = $(
+			'.seriestucont .thumb img, .series-thumb img, .thumb img, .seriestucontent img, .infografis img, .ime img'
+		).first();
+		let cover =
+			coverEl.attr('data-src') ||
+			coverEl.attr('data-lazy-src') ||
+			coverEl.attr('data-original') ||
+			coverEl.attr('data-srcset')?.split(/[\s,]/)[0] ||
+			coverEl.attr('srcset')?.split(/[\s,]/)[0] ||
+			coverEl.attr('src') ||
 			$('meta[property="og:image"]').attr('content') ||
+			$('meta[name="twitter:image"]').attr('content') ||
 			'';
+		// Buang placeholder/svg data-uri
+		if (cover.startsWith('data:') || /placeholder|no[-_]?image|default\.(jpg|png|webp)/i.test(cover)) {
+			cover =
+				$('meta[property="og:image"]').attr('content') ||
+				$('meta[name="twitter:image"]').attr('content') ||
+				'';
+		}
+		cover = (cover || '').split('?')[0];
 
 		// Synopsis — Themesia
 		let description = '';
