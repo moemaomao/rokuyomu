@@ -2,11 +2,11 @@
  * GoldenNovel.com — WordPress NovelPress theme
  * Path: scraper/src/sources/impl/GoldenNovel.ts
  *
- * URL:
- *   Novel   : /index.php/category/{genre}/{slug}/
- *   Chapter : /index.php/{genre}/{slug}/chapter-{n}-{title}/
- *   TOC page: ?chpage={n}
- *   Content : .np-chapter__content.np-reader-content
+ * Fixes:
+ * - Jangan parse genre card sebagai novel
+ * - Cover dari .np-cover-img
+ * - TOC .np-toc__item + ?chpage=
+ * - Prev/Next: .np-chapter__nav-btn--prev/next
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -30,11 +30,17 @@ function pathOnly(href: string): string {
 				? href
 				: `https://goldennovel.com${href.startsWith('/') ? '' : '/'}${href}`
 		);
-		// drop query for stable id
 		return u.pathname.replace(/\/$/, '') || '/';
 	} catch {
 		return href.startsWith('/') ? href : `/${href}`;
 	}
+}
+
+/** Novel path harus: /.../category/{genre}/{slug}  (bukan cuma genre) */
+function isNovelPath(href: string): boolean {
+	const p = pathOnly(href);
+	// /index.php/category/fantasy/zero-soul-mage  OR  /category/fantasy/zero-soul-mage
+	return /\/category\/[^/]+\/[^/]+$/.test(p);
 }
 
 function escapeHtml(s: string): string {
@@ -103,10 +109,9 @@ export class GoldenNovelSource extends BaseSource {
 	}
 
 	private async fetchNovelList(page: number): Promise<Manga[]> {
-		// Novel List page — try common NovelPress paths
 		const paths =
 			page <= 1
-				? ['/index.php/novel-list/', '/novel-list/', '/index.php/novels/']
+				? ['/index.php/novel-list/', '/novel-list/']
 				: [
 						`/index.php/novel-list/page/${page}/`,
 						`/novel-list/page/${page}/`,
@@ -122,16 +127,6 @@ export class GoldenNovelSource extends BaseSource {
 				/* next */
 			}
 		}
-		// Fallback: homepage only already done for page 1
-		if (page > 1) {
-			try {
-				const html = await this.fetchHtml(`/page/${page}/`);
-				const $ = cheerio.load(html);
-				return this.parseNovelCards($);
-			} catch {
-				return [];
-			}
-		}
 		return [];
 	}
 
@@ -139,24 +134,31 @@ export class GoldenNovelSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// NovelPress cards
+		// Hanya .np-novel-card (bukan .np-genre-card)
 		$('.np-novel-card').each((_, el) => {
-			const a = $(el).find('a[href*="/category/"]').first().length
-				? $(el).find('a[href*="/category/"]').first()
-				: $(el).find('a').first();
+			const a =
+				$(el).find('a.np-novel-card__cover[href*="/category/"]').first().length > 0
+					? $(el).find('a.np-novel-card__cover[href*="/category/"]').first()
+					: $(el).find('a[href*="/category/"]').first();
+
 			const href = a.attr('href') || '';
-			if (!href || !/\/category\//.test(href)) return;
+			if (!href || !isNovelPath(href)) return;
+
 			const id = pathOnly(href);
 			if (seen.has(id)) return;
 			seen.add(id);
 
 			const title =
 				$(el).find('.np-novel-card__title').text().trim() ||
+				a.attr('aria-label')?.replace(/^Read\s+/i, '').trim() ||
 				a.attr('title') ||
 				a.text().trim();
 			if (!title || title.length < 2) return;
 
+			// Cover: .np-cover-img di dalam .np-cover / .np-novel-card__cover
 			const cover =
+				$(el).find('img.np-cover-img').attr('data-src') ||
+				$(el).find('img.np-cover-img').attr('src') ||
 				$(el).find('.np-novel-card__cover img').attr('data-src') ||
 				$(el).find('.np-novel-card__cover img').attr('src') ||
 				$(el).find('img').attr('data-src') ||
@@ -166,7 +168,7 @@ export class GoldenNovelSource extends BaseSource {
 			const meta = $(el).find('.np-novel-card__meta').text().replace(/\s+/g, ' ').trim();
 			const latestChapter =
 				extractChapterNum(meta) ??
-				extractChapterNum($(el).find('.np-novel-card__meta, .np-meta-item').text());
+				extractChapterNum($(el).find('.np-meta-item, .np-novel-card__meta').text());
 
 			const status = /ongoing/i.test(meta)
 				? 'Ongoing'
@@ -186,40 +188,36 @@ export class GoldenNovelSource extends BaseSource {
 			});
 		});
 
-		// Latest Updates rows
-		$('.np-chapter-row, .np-latest-item, a[href*="/category/"]').each((_, el) => {
-			const isLink = el.tagName?.toLowerCase() === 'a';
-			const a = isLink ? $(el) : $(el).find('a[href*="/category/"]').first();
-			const href = a.attr('href') || '';
-			if (!href || !/\/category\//.test(href)) return;
-			// skip pure chapter links
-			if (/\/chapter-/.test(href)) return;
-			const id = pathOnly(href);
-			if (seen.has(id)) return;
-			seen.add(id);
+		// Latest Updates: baris novel + chapter (bukan genre)
+		$('.np-chapter-row__novel a[href*="/category/"], .np-latest a[href*="/category/"]').each(
+			(_, el) => {
+				const href = $(el).attr('href') || '';
+				if (!href || !isNovelPath(href) || /\/chapter-/.test(href)) return;
+				const id = pathOnly(href);
+				if (seen.has(id)) return;
+				seen.add(id);
 
-			const title = (a.attr('title') || a.text()).replace(/\s+/g, ' ').trim();
-			if (!title || title.length < 2) return;
+				const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+				if (!title || title.length < 2) return;
 
-			const parent = isLink ? $(el).parent() : $(el);
-			const cover =
-				parent.find('img').attr('data-src') || parent.find('img').attr('src') || '';
-			const chText =
-				parent.find('a[href*="chapter"]').first().text() ||
-				parent.text().match(/Chapter\s*\d+/i)?.[0] ||
-				'';
-			const latestChapter = extractChapterNum(chText);
+				const parent = $(el).closest('.np-chapter-row, .np-latest-item, li, div');
+				const chText =
+					parent.find('a[href*="chapter"]').first().text() ||
+					parent.text().match(/Chapter\s*\d+/i)?.[0] ||
+					'';
+				const latestChapter = extractChapterNum(chText);
 
-			list.push({
-				id,
-				title,
-				cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
-				sourceId: this.id,
-				type: 'novel',
-				lang: 'en',
-				...(latestChapter != null ? { latestChapter } : {})
-			});
-		});
+				list.push({
+					id,
+					title,
+					cover: '',
+					sourceId: this.id,
+					type: 'novel',
+					lang: 'en',
+					...(latestChapter != null ? { latestChapter } : {})
+				});
+			}
+		);
 
 		return list;
 	}
@@ -227,11 +225,7 @@ export class GoldenNovelSource extends BaseSource {
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
 		const page = opts?.page ?? 1;
 		const q = encodeURIComponent(query);
-		const paths = [
-			`/?s=${q}`,
-			`/index.php/?s=${q}`,
-			`/page/${page}/?s=${q}`
-		];
+		const paths = [`/?s=${q}`, `/index.php/?s=${q}`, `/page/${page}/?s=${q}`];
 		for (const path of paths) {
 			try {
 				const html = await this.fetchHtml(path);
@@ -247,11 +241,6 @@ export class GoldenNovelSource extends BaseSource {
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		let path = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
-		// Pastikan path novel category
-		if (!path.includes('/category/')) {
-			// mungkin user punya slug saja — tetap coba
-			path = path.startsWith('/index.php') ? path : `/index.php${path}`;
-		}
 		const novelUrl = path.endsWith('/') ? path : `${path}/`;
 
 		const html = await this.fetchHtml(novelUrl);
@@ -267,7 +256,9 @@ export class GoldenNovelSource extends BaseSource {
 			throw new Error('Manga not found (empty title)');
 		}
 
-		const coverEl = $('.np-novel-cover img, .np-novel-header img, article img').first();
+		const coverEl = $(
+			'.np-novel-cover img.np-cover-img, .np-novel-cover img, .np-novel-header img, img.np-cover-img'
+		).first();
 		let cover =
 			coverEl.attr('data-src') ||
 			coverEl.attr('src') ||
@@ -275,13 +266,18 @@ export class GoldenNovelSource extends BaseSource {
 			'';
 		cover = (cover || '').split('?')[0];
 
-		// Synopsis
 		let description =
-			$('.np-novel-synopsis, .np-synopsis, .entry-content p')
+			$('.np-novel-synopsis, .np-synopsis')
+				.find('p')
+				.map((_, p) => $(p).text().trim())
+				.get()
+				.filter((t) => t.length > 30)
+				.join('\n\n') ||
+			$('.entry-content p')
 				.map((_, p) => $(p).text().trim())
 				.get()
 				.filter((t) => t.length > 40)
-				.slice(0, 8)
+				.slice(0, 6)
 				.join('\n\n') ||
 			$('meta[property="og:description"]').attr('content') ||
 			'';
@@ -290,7 +286,6 @@ export class GoldenNovelSource extends BaseSource {
 		const genres: string[] = [];
 		let status = 'Ongoing';
 
-		// Fact labels NovelPress
 		$('.np-fact-label, .np-meta-item, .np-novel-meta li').each((_, el) => {
 			const text = $(el).text().replace(/\s+/g, ' ').trim();
 			const low = text.toLowerCase();
@@ -310,17 +305,20 @@ export class GoldenNovelSource extends BaseSource {
 			}
 		});
 
-		// Author fallback
 		if (!authors.length) {
-			const authorText = $('[class*="author"]').first().text().replace(/author[:\s]*/i, '').trim();
+			const authorText = $('[class*="author"]')
+				.first()
+				.text()
+				.replace(/author[:\s]*/i, '')
+				.trim();
 			if (authorText && authorText.length < 60) authors.push(authorText);
 		}
 
-		// Genre from breadcrumbs / tags
 		$('a[href*="/category/"]').each((_, a) => {
 			const href = $(a).attr('href') || '';
-			// genre-level only: /category/{genre}/ without novel slug depth
-			if (/\/category\/[^/]+\/?$/.test(href.replace(this.baseUrl, ''))) {
+			const p = pathOnly(href);
+			// genre only: /category/{genre}
+			if (/\/category\/[^/]+$/.test(p)) {
 				const g = $(a).text().trim();
 				if (g && g.length < 40 && !/novel list|home/i.test(g) && !genres.includes(g)) {
 					genres.push(g);
@@ -328,7 +326,6 @@ export class GoldenNovelSource extends BaseSource {
 			}
 		});
 
-		// Chapters — page 1 + pagination ?chpage=
 		const chapters = await this.fetchAllChapters(novelUrl, $);
 
 		chapters.sort((a, b) => {
@@ -352,34 +349,29 @@ export class GoldenNovelSource extends BaseSource {
 		};
 	}
 
-	/** TOC: .np-toc__item + ?chpage=N */
 	private async fetchAllChapters(novelUrl: string, $first: cheerio.CheerioAPI): Promise<Chapter[]> {
 		const seen = new Set<string>();
 		const out: Chapter[] = [];
 
 		const ingest = ($: cheerio.CheerioAPI) => {
-			$('.np-toc__item a.np-toc__link, .np-toc__link, a[href*="chapter-"]').each((i, el) => {
-				const href = $(el).attr('href') || '';
-				if (!href || !/chapter-/.test(href)) return;
-				const rawTitle = (
-					$(el).find('.np-toc__num').text() ||
-					$(el).attr('title') ||
-					$(el).text()
-				)
-					.replace(/\s+/g, ' ')
-					.trim();
-				if (!rawTitle) return;
-				const num = parseChapterNumber(rawTitle, out.length + 1);
-				const id = pathOnly(href);
-				if (seen.has(id)) return;
-				seen.add(id);
-				out.push({ id, title: `Chapter ${num}`, number: num });
-			});
+			// struktur: li.np-toc__item > a.np-toc__link
+			$('li.np-toc__item a.np-toc__link, a.np-toc__link, .np-toc a[href*="chapter-"]').each(
+				(_, el) => {
+					const href = $(el).attr('href') || '';
+					if (!href || !/chapter-/.test(href)) return;
+					const rawTitle = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+					if (!rawTitle) return;
+					const num = parseChapterNumber(rawTitle, out.length + 1);
+					const id = pathOnly(href);
+					if (seen.has(id)) return;
+					seen.add(id);
+					out.push({ id, title: `Chapter ${num}`, number: num });
+				}
+			);
 		};
 
 		ingest($first);
 
-		// Max page dari pagination
 		let maxPage = 1;
 		$first('.page-numbers a, a.page-numbers').each((_, el) => {
 			const href = $first(el).attr('href') || '';
@@ -388,8 +380,6 @@ export class GoldenNovelSource extends BaseSource {
 			const t = $first(el).text().trim();
 			if (/^\d+$/.test(t)) maxPage = Math.max(maxPage, parseInt(t, 10));
 		});
-
-		// Cap biar tidak spam (max 20 halaman TOC)
 		maxPage = Math.min(maxPage, 20);
 
 		if (maxPage > 1) {
@@ -402,7 +392,7 @@ export class GoldenNovelSource extends BaseSource {
 							const html = await this.fetchHtml(`${base}?chpage=${p}`);
 							ingest(cheerio.load(html));
 						} catch {
-							/* skip page */
+							/* skip */
 						}
 					})()
 				);
@@ -429,16 +419,18 @@ export class GoldenNovelSource extends BaseSource {
 
 		const title =
 			$('h1').first().text().trim() ||
-			$('.np-reader-bar__titles, .chapter-title').first().text().trim() ||
+			$('.np-reader-bar__chapter, .np-reader-bar__titles').first().text().trim() ||
 			$('title').text().split(/[|\-–]/)[0].trim() ||
 			'Chapter';
 
-		const el = $('.np-chapter__content, .np-reader-content, .np-reader-main').first();
+		const el = $('.np-chapter__content, .np-reader-content').first();
 		let contentHtml = '';
 
 		if (el.length) {
 			const clone = el.clone();
-			clone.find('script, style, iframe, .ads, .ad, nav, .np-reader-bar, .np-toc-select').remove();
+			clone
+				.find('script, style, iframe, .ads, .ad, nav, .np-reader-bar, .np-toc-select, .np-chapter__nav')
+				.remove();
 			const paras = clone.find('p');
 			if (paras.length >= 2) {
 				const parts: string[] = [];
@@ -458,7 +450,7 @@ export class GoldenNovelSource extends BaseSource {
 
 		if (!contentHtml || contentHtml.length < 50) {
 			const parts: string[] = [];
-			$('article p, main p, .entry-content p').each((_, p) => {
+			$('article p, main p').each((_, p) => {
 				const t = $(p).text().trim();
 				if (t.length < 15) return;
 				if (/goldennovel|cookie|privacy/i.test(t)) return;
@@ -467,12 +459,20 @@ export class GoldenNovelSource extends BaseSource {
 			if (parts.length) contentHtml = parts.join('\n');
 		}
 
+		// Prev / Next — NovelPress
 		const prevHref =
-			$('a[rel="prev"]').attr('href') ||
-			$('.np-nav-prev a, a.prev-chapter').first().attr('href');
+			$('a.np-chapter__nav-btn--prev').attr('href') ||
+			$('.np-chapter__nav a[href*="chapter-"]').filter((_, a) =>
+				/previous|prev|←/i.test($(a).text())
+			).first().attr('href') ||
+			$('a[rel="prev"]').attr('href');
+
 		const nextHref =
-			$('a[rel="next"]').attr('href') ||
-			$('.np-nav-next a, a.next-chapter').first().attr('href');
+			$('a.np-chapter__nav-btn--next').attr('href') ||
+			$('.np-chapter__nav a[href*="chapter-"]').filter((_, a) =>
+				/next|→/i.test($(a).text())
+			).first().attr('href') ||
+			$('a[rel="next"]').attr('href');
 
 		return {
 			title,
