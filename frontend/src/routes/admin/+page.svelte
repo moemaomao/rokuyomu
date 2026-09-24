@@ -22,7 +22,6 @@
 		BookOpen,
 		StickyNote,
 		Activity,
-		LayoutDashboard,
 		ExternalLink
 	} from 'lucide-svelte';
 
@@ -459,53 +458,9 @@
 			</button>
 		</div>
 
-		<!-- Dashboard -->
-		<div
-			class="mb-5 rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
-		>
-			<div class="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-				<LayoutDashboard class="h-4 w-4 text-violet-500" />
-				Dashboard
-			</div>
-			<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-				<div
-					class="rounded-lg border border-amber-200/60 bg-amber-50/80 p-3 dark:border-amber-900/40 dark:bg-amber-950/30"
-				>
-					<div class="text-xs text-amber-600 dark:text-amber-400">Report open</div>
-					<div class="text-xl font-bold text-amber-700 dark:text-amber-300">
-						{openReportTotal}
-					</div>
-				</div>
-				<div
-					class="rounded-lg border border-orange-200/60 bg-orange-50/80 p-3 dark:border-orange-900/40 dark:bg-orange-950/30"
-				>
-					<div class="text-xs text-orange-600 dark:text-orange-400">Source broken</div>
-					<div class="text-xl font-bold text-orange-700 dark:text-orange-300">
-						{allReportedCount}
-					</div>
-				</div>
-				<div
-					class="rounded-lg border border-red-200/60 bg-red-50/80 p-3 dark:border-red-900/40 dark:bg-red-950/30"
-				>
-					<div class="text-xs text-red-600 dark:text-red-400">Source hidden</div>
-					<div class="text-xl font-bold text-red-700 dark:text-red-300">
-						{allDisabledCount}
-					</div>
-				</div>
-				<div
-					class="rounded-lg border border-sky-200/60 bg-sky-50/80 p-3 dark:border-sky-900/40 dark:bg-sky-950/30"
-				>
-					<div class="text-xs text-sky-600 dark:text-sky-400">With notes</div>
-					<div class="text-xl font-bold text-sky-700 dark:text-sky-300">
-						{notesCount}
-					</div>
-				</div>
-			</div>
-		</div>
-
 		<!-- Comic | Novel -->
 		<div
-			class="mb-5 flex w-full max-w-xs overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-900"
+			class="mb-4 flex w-full max-w-xs overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-900"
 		>
 			<button
 				type="button"
@@ -531,8 +486,8 @@
 			</button>
 		</div>
 
-		<!-- Kind stats -->
-		<div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+		<!-- Stats (merged: global + current kind) -->
+		<div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
 			<div
 				class="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
 			>
@@ -554,15 +509,31 @@
 			>
 				<div class="text-xs text-red-600 dark:text-red-400">Hidden</div>
 				<div class="text-lg font-semibold text-red-700 dark:text-red-300">
-					{disabledCount}
+					{allDisabledCount}
 				</div>
 			</div>
 			<div
-				class="rounded-lg border border-amber-200/60 bg-amber-50/50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30"
+				class="rounded-lg border border-amber-200/60 bg-amber-50/80 p-3 dark:border-amber-900/40 dark:bg-amber-950/30"
 			>
-				<div class="text-xs text-amber-600 dark:text-amber-400">Reported</div>
+				<div class="text-xs text-amber-600 dark:text-amber-400">Report open</div>
 				<div class="text-lg font-semibold text-amber-700 dark:text-amber-300">
-					{reportedCount}
+					{openReportTotal}
+				</div>
+			</div>
+			<div
+				class="rounded-lg border border-orange-200/60 bg-orange-50/80 p-3 dark:border-orange-900/40 dark:bg-orange-950/30"
+			>
+				<div class="text-xs text-orange-600 dark:text-orange-400">Broken</div>
+				<div class="text-lg font-semibold text-orange-700 dark:text-orange-300">
+					{allReportedCount}
+				</div>
+			</div>
+			<div
+				class="rounded-lg border border-sky-200/60 bg-sky-50/80 p-3 dark:border-sky-900/40 dark:bg-sky-950/30"
+			>
+				<div class="text-xs text-sky-600 dark:text-sky-400">Notes</div>
+				<div class="text-lg font-semibold text-sky-700 dark:text-sky-300">
+					{notesCount}
 				</div>
 			</div>
 		</div>
