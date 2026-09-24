@@ -1,89 +1,87 @@
 /**
  * Worker-local sources — HANYA source yang diblokir outbound IP Vercel.
  *
+ * File ini DIGENERATE otomatis oleh scripts/sync-worker-sources.mjs
+ * Jangan edit manual. Edit daftar ID di scripts/worker-sources.json lalu jalankan:
+ *
+ *   pnpm sync-worker-sources
+ *
  * Lazy load: module adapter hanya di-import saat source tersebut benar-benar dipakai.
  * Ini menjaga CPU free tier CF Workers (< ~10ms) karena tidak load semua Cheerio adapter di cold start.
  *
  * Alur:
  *   UI → CF Worker → (worker source?) → dynamic import + parse lokal (Cheerio)
  *                  → (else)           → fetch JSON ke scraper Vercel/Render
- *
- * Cara menambah source yang diblokir Vercel:
- * 1. Copy file adapter dari scraper/src/sources/impl/Xxx.ts
- *    ke frontend/src/lib/server/workerSources/impl/Xxx.ts
- * 2. Ubah import path: '../BaseSource' & '../types' (sudah relatif sama)
- * 3. Tambah id ke WORKER_SOURCE_IDS + entry di loaders di bawah
- * 4. Pastikan `cheerio` ada di frontend/package.json dependencies
- *
- * Jangan daftar SEMUA source di sini — target hanya yang benar-benar butuh IP Cloudflare.
  */
 
 import type { IMangaSource } from './types';
 
 export const WORKER_SOURCE_IDS = new Set([
-	'klz9',
-	'rawkuma',
-	'athreascans',
-	'flamecomics',
-	'hentairead',
-	'kingcomix',
-	'manhuarmtl',
-	'onemanga',
-	'simplyhentai',
-	'weebcentral',
 	'ainzscans',
+	'athreascans',
 	'bacakomik',
 	'bacami',
 	'crotpedia',
 	'doujinku',
+	'flamecomics',
+	'hentairead',
 	'holodek',
 	'ikiru',
+	'kingcomix',
 	'kiryuu',
+	'klz9',
 	'komikindo',
 	'komikstation',
 	'lumos',
 	'luvyaa',
+	'manhuarmtl',
 	'manhwadesu',
 	'manhwaindo',
 	'ngomik',
+	'onemanga',
 	'pixhentai',
+	'rawkuma',
+	'sakuranovel',
 	'sasangeyou',
 	'siikomik',
-	'sakuranovel'
+	'silentquill',
+	'simplyhentai',
+	'weebcentral'
 ]);
 
 const instanceCache = new Map<string, IMangaSource>();
 
 const loaders: Record<string, () => Promise<IMangaSource>> = {
-	sakuranovel: async () => new (await import('./impl/Sakuranovel')).SakuranovelSource(),
-	klz9: async () => new (await import('./impl/Klz9')).Klz9Source(),
-	rawkuma: async () => new (await import('./impl/Rawkuma')).RawkumaSource(),
-	athreascans: async () => new (await import('./impl/AthreaScans')).AthreaScansSource(),
-	flamecomics: async () => new (await import('./impl/FlameComics')).FlameComicsSource(),
-	hentairead: async () => new (await import('./impl/Hentairead')).HentaireadSource(),
-	kingcomix: async () => new (await import('./impl/Kingkomix')).KingcomixSource(),
-	manhuarmtl: async () => new (await import('./impl/Manhuarmtl')).ManhuarmtlSource(),
-	onemanga: async () => new (await import('./impl/OneManga')).OneMangaSource(),
-	simplyhentai: async () => new (await import('./impl/Simplyhentai')).SimplyHentaiSource(),
-	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
 	ainzscans: async () => new (await import('./impl/AinzScans')).AinzScansSource(),
+	athreascans: async () => new (await import('./impl/AthreaScans')).AthreaScansSource(),
 	bacakomik: async () => new (await import('./impl/Bacakomik')).BacaKomikSource(),
 	bacami: async () => new (await import('./impl/Bacami')).BacamiSource(),
 	crotpedia: async () => new (await import('./impl/Crotpedia')).CrotpediaSource(),
 	doujinku: async () => new (await import('./impl/Doujinku')).DoujinkuSource(),
+	flamecomics: async () => new (await import('./impl/FlameComics')).FlameComicsSource(),
+	hentairead: async () => new (await import('./impl/Hentairead')).HentaireadSource(),
 	holodek: async () => new (await import('./impl/Holodek')).HolodekSource(),
 	ikiru: async () => new (await import('./impl/Ikiru')).IkiruSource(),
+	kingcomix: async () => new (await import('./impl/Kingkomix')).KingcomixSource(),
 	kiryuu: async () => new (await import('./impl/Kiryuu')).KiryuuSource(),
+	klz9: async () => new (await import('./impl/Klz9')).Klz9Source(),
 	komikindo: async () => new (await import('./impl/Komikindo')).KomikindoSource(),
 	komikstation: async () => new (await import('./impl/KomikStation')).KomikStationSource(),
 	lumos: async () => new (await import('./impl/Lumos')).LumosSource(),
 	luvyaa: async () => new (await import('./impl/Luvyaa')).LuvyaaSource(),
+	manhuarmtl: async () => new (await import('./impl/Manhuarmtl')).ManhuarmtlSource(),
 	manhwadesu: async () => new (await import('./impl/ManhwaDesu')).ManhwaDesuSource(),
 	manhwaindo: async () => new (await import('./impl/ManhwaIndo')).ManhwaIndoSource(),
 	ngomik: async () => new (await import('./impl/Ngomik')).NgomikSource(),
+	onemanga: async () => new (await import('./impl/OneManga')).OneMangaSource(),
 	pixhentai: async () => new (await import('./impl/PixHentai')).PixHentaiSource(),
+	rawkuma: async () => new (await import('./impl/Rawkuma')).RawkumaSource(),
+	sakuranovel: async () => new (await import('./impl/Sakuranovel')).SakuranovelSource(),
 	sasangeyou: async () => new (await import('./impl/Sasangeyou')).SasangeyouSource(),
-	siikomik: async () => new (await import('./impl/Siikomik')).SiikomikSource()
+	siikomik: async () => new (await import('./impl/Siikomik')).SiikomikSource(),
+	silentquill: async () => new (await import('./impl/SilentQuill')).SilentQuillSource(),
+	simplyhentai: async () => new (await import('./impl/Simplyhentai')).SimplyHentaiSource(),
+	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
 };
 
 export function isWorkerSource(sourceId: string): boolean {

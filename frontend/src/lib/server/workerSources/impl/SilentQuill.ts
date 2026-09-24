@@ -3,26 +3,27 @@ import type { Chapter, Manga, MangaDetails } from '../types';
 import * as cheerio from 'cheerio';
 
 /**
- * Athrea Scans adapter (WordPress Themesia / mangareader)
+ * SilentQuill / KDT Scans adapter (MangaThemesia)
  *
- * Domain  : https://athreascans.com
+ * Domain  : https://silentquill.net
  * Latest  : /manga/?page=N&order=update
  * Search  : /?s={query}&page=N
- * Detail  : /manga/{slug}/
- * Chapter : /{slug}-chapter-{n}/   (images inside #readerarea)
+ * Detail  : /{slug}/
+ * Chapter : /{slug}-ch-{n}/  atau  /{slug}-chapter-{n}/
+ * Pages   : #readerarea img
  *
  * ID format:
- *   manga   : "/manga/{slug}"
- *   chapter : "/{slug}-chapter-{n}"   (path as on site)
+ *   manga   : "/{slug}"
+ *   chapter : "/{slug}-ch-{n}"  (path asli di site)
  *
- * Paid chapters (coins) return empty pages.
+ * Bahasa default: English
  */
-export class AthreaScansSource extends BaseSource {
-	id = 'athreascans';
-	name = 'Athrea Scans';
-	baseUrl = 'https://athreascans.com';
+export class SilentQuillSource extends BaseSource {
+	id = 'silentquill';
+	name = 'SilentQuill';
+	baseUrl = 'https://silentquill.net';
 
-	private readonly PER_PAGE = 35;
+	private readonly PER_PAGE = 30;
 	private readonly DEFAULT_LANG = 'en';
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
@@ -66,12 +67,14 @@ export class AthreaScansSource extends BaseSource {
 		if (!raw) return '';
 		return this.decodeHtml(raw)
 			.replace(/\s+/g, ' ')
-			.replace(/\s*[-|]\s*Athrea.*$/i, '')
+			.replace(/\s*[-|]\s*(Silent\s*Quill|KDT\s*Scans|Armageddon).*$/i, '')
 			.trim();
 	}
 
 	private parseChapterNumber(text: string, path = ''): number {
-		const fromPath = path.match(/chapter[_-]?(\d+)(?:[.-](\d+))?/i);
+		const fromPath =
+			path.match(/(?:ch|chapter)[_-]?(\d+)(?:[.-](\d+))?/i) ||
+			path.match(/-(\d+)(?:[.-](\d+))?\/?$/i);
 		if (fromPath) {
 			const major = parseInt(fromPath[1], 10);
 			if (fromPath[2] != null && fromPath[2].length <= 2) {
@@ -95,11 +98,10 @@ export class AthreaScansSource extends BaseSource {
 		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
 	}
 
-
 	private mangaSlug(mangaId: string): string {
 		const id = this.cleanId(mangaId);
 		const parts = id.split('/').filter(Boolean);
-	
+		// site pakai root slug, bukan /manga/{slug}
 		if (parts[0] === 'manga' && parts[1]) return parts[1];
 		return parts[parts.length - 1] || '';
 	}
@@ -107,14 +109,25 @@ export class AthreaScansSource extends BaseSource {
 	private parseCards($: cheerio.CheerioAPI): Manga[] {
 		const res: Manga[] = [];
 		const seen = new Set<string>();
-		const cards = $('div.listupd div.bsx, .postbody div.bsx, div.bsx');
+
+		const cards = $(
+			'div.listupd div.bsx, .postbody div.bsx, div.bsx, .page-item-detail, .bs'
+		);
+
 		cards.each((_, card) => {
 			const $card = $(card);
+
+			// prioritaskan link yang mengarah ke manga detail
 			const a = $card
-				.find('a[href*="/manga/"]')
+				.find('a[href]')
 				.filter((_, el) => {
 					const h = ($(el).attr('href') || '').split('?')[0];
-					return /\/manga\/[^/]+\/?$/.test(h);
+					// exclude chapter links & pagination
+					if (/-(ch|chapter)-\d+/i.test(h)) return false;
+					if (/\/page\/\d+/i.test(h)) return false;
+					if (/\/manga\/?$/i.test(h)) return false;
+					// terima /slug/ atau /manga/slug/
+					return /\/[a-z0-9-]+\/?$/i.test(h) || /\/manga\/[^/]+\/?$/i.test(h);
 				})
 				.first();
 
@@ -122,12 +135,12 @@ export class AthreaScansSource extends BaseSource {
 			if (!href) return;
 
 			const id = this.cleanId(href);
-			if (seen.has(id)) return;
+			if (seen.has(id) || id === '/' || id === '/manga') return;
 			seen.add(id);
 
 			let title =
 				a.attr('title') ||
-				$card.find('.tt a, .tt').first().text() ||
+				$card.find('.tt a, .tt, h3, h5, .title').first().text() ||
 				$card.find('img').first().attr('alt') ||
 				'';
 			title = this.normalizeTitle(title);
@@ -139,9 +152,13 @@ export class AthreaScansSource extends BaseSource {
 				img.attr('data-lazy-src') ||
 				img.attr('src') ||
 				'';
+			if (cover.startsWith('data:')) cover = '';
 			cover = this.preferFullCover(this.absUrl(cover));
 
-			const epxs = $card.find('.epxs, .fivchap, .chfiv').first().text();
+			const epxs = $card
+				.find('.epxs, .fivchap, .chfiv, .chapter, .font-meta.chapter')
+				.first()
+				.text();
 			const latestChapter = epxs
 				? String(
 						this.parseChapterNumber(epxs) ||
@@ -150,10 +167,9 @@ export class AthreaScansSource extends BaseSource {
 				: undefined;
 
 			const typeText = $card.text().toLowerCase();
-			let type = 'manhwa';
-			if (/\bmanhua\b/.test(typeText)) type = 'manhua';
-			else if (/\bmanga\b/.test(typeText) && !/\bmanhwa\b/.test(typeText))
-				type = 'manga';
+			let type = 'manga';
+			if (/\bmanhwa\b/.test(typeText)) type = 'manhwa';
+			else if (/\bmanhua\b/.test(typeText)) type = 'manhua';
 
 			res.push({
 				id,
@@ -172,24 +188,37 @@ export class AthreaScansSource extends BaseSource {
 
 	// ── Catalog ──────────────────────────────────────────────────────────────
 
-	async getLatestManga(
-		page: number,
-		_opts?: { lang?: string; type?: string }
-	): Promise<Manga[]> {
-		try {
-			const p = Math.max(1, Number(page) || 1);
-			const html = await this.fetchHtml(
-				`/manga/?page=${p}&order=update`
-			);
-			const $ = cheerio.load(html);
-			const list = this.parseCards($);
-			console.log(`[athreascans] latest page=${p} → ${list.length} items`);
-			return list;
-		} catch (e) {
-			console.error('[athreascans] getLatestManga', e);
-			return [];
-		}
-	}
+	async getLatestManga(page: number, _opts?: { lang?: string; type?: string }): Promise<Manga[]> {
+  try {
+    const p = Math.max(1, Number(page) || 1);
+    const html = await this.fetchHtml(`/manga/?page=${p}&order=update`);
+
+    console.log('[silentquill] has __NEXT_DATA__?', html.includes('__NEXT_DATA__'));
+    console.log('[silentquill] has buildId?', /"buildId"\s*:\s*"/.test(html));
+    
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (nextDataMatch) {
+      console.log('[silentquill] __NEXT_DATA__ sample:', nextDataMatch[1].slice(0, 1500));
+    }
+
+    const apiMatches = html.match(/\/api\/[a-z0-9/_-]+/gi) || [];
+    console.log('[silentquill] API paths found:', [...new Set(apiMatches)].slice(0, 20));
+
+    const seriesMatches = html.match(/"(?:series|comics|manga|posts)"\s*:/gi) || [];
+    console.log('[silentquill] series-like keys:', seriesMatches.slice(0, 10));
+
+    console.log('[silentquill] HTML length:', html.length);
+    console.log('[silentquill] body sample (mid):', html.slice(50000, 52000)); // tengah HTML
+
+    const $ = cheerio.load(html);
+    const list = this.parseCards($);
+    console.log(`[silentquill] latest page=${p} → ${list.length} items`);
+    return list;
+  } catch (e) {
+    console.error('[silentquill] getLatestManga', e);
+    return [];
+  }
+}
 
 	async searchManga(
 		query: string,
@@ -207,10 +236,12 @@ export class AthreaScansSource extends BaseSource {
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
 			const list = this.parseCards($);
-			console.log(`[athreascans] search "${q}" page=${page} → ${list.length} items`);
+			console.log(
+				`[silentquill] search "${q}" page=${page} → ${list.length} items`
+			);
 			return list;
 		} catch (e) {
-			console.error('[athreascans] searchManga', e);
+			console.error('[silentquill] searchManga', e);
 			return [];
 		}
 	}
@@ -231,7 +262,10 @@ export class AthreaScansSource extends BaseSource {
 		);
 
 		let cover =
-			$('.thumb img, .seriestuimg img, .infomanga img, img.wp-post-image')
+			$('.thumb img, .seriestuimg img, .infomanga img, img.wp-post-image, .summary_image img')
+				.first()
+				.attr('data-src') ||
+			$('.thumb img, .seriestuimg img, .infomanga img, img.wp-post-image, .summary_image img')
 				.first()
 				.attr('src') ||
 			$('meta[property="og:image"]').attr('content') ||
@@ -239,7 +273,7 @@ export class AthreaScansSource extends BaseSource {
 		cover = this.preferFullCover(this.absUrl(cover));
 
 		const description = this.decodeHtml(
-			$('.entry-content, .desc, .seriestucontent .entry-content')
+			$('.entry-content, .desc, .seriestucontent .entry-content, .description-summary .summary__content, .summary__content')
 				.first()
 				.text()
 				.replace(/\s+/g, ' ')
@@ -247,13 +281,13 @@ export class AthreaScansSource extends BaseSource {
 		);
 
 		const genres: string[] = [];
-		$('a[href*="/genres/"]').each((_, el) => {
+		$('a[href*="/genres/"], .genres-content a, .mgen a').each((_, el) => {
 			const t = $(el).text().replace(/\s+/g, ' ').trim();
-			if (t && !genres.includes(t)) genres.push(t);
+			if (t && t.length < 40 && !genres.includes(t)) genres.push(t);
 		});
 
 		let status = 'Ongoing';
-		$('.imptdt, .infotable tr, .fmed').each((_, el) => {
+		$('.imptdt, .infotable tr, .fmed, .post-status').each((_, el) => {
 			const text = $(el).text().replace(/\s+/g, ' ').trim();
 			if (/status/i.test(text)) {
 				if (/complet/i.test(text)) status = 'Completed';
@@ -263,72 +297,82 @@ export class AthreaScansSource extends BaseSource {
 		});
 
 		const authors: string[] = [];
-		$('.fmed, .imptdt, .infotable tr').each((_, el) => {
-			const text = $(el).text().replace(/\s+/g, ' ').trim();
-			if (/author|artist/i.test(text)) {
-				const val = text
-					.replace(/author|artist/gi, '')
-					.replace(/\s+/g, ' ')
-					.trim();
-				if (val && val.length < 80) authors.push(val);
+		$('.fmed, .imptdt, .infotable tr, .author-content a, .artist-content a').each(
+			(_, el) => {
+				const text = $(el).text().replace(/\s+/g, ' ').trim();
+				if (/author|artist/i.test(text)) {
+					const val = text
+						.replace(/author|artist/gi, '')
+						.replace(/\s+/g, ' ')
+						.trim();
+					if (val && val.length < 80 && !authors.includes(val)) {
+						authors.push(val);
+					}
+				} else {
+					const t = $(el).text().replace(/\s+/g, ' ').trim();
+					if (t && t.length < 60 && !authors.includes(t)) authors.push(t);
+				}
 			}
-		});
+		);
 
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
-		$('#chapterlist li, .eplister li, #chapterlist ul li').each((_, li) => {
-			const $li = $(li);
-			const a = $li.find('a').first();
-			const href = (a.attr('href') || '').trim();
+		$('#chapterlist li, .eplister li, #chapterlist ul li, .wp-manga-chapter').each(
+			(_, li) => {
+				const $li = $(li);
+				const a = $li.find('a').first();
+				const href = (a.attr('href') || '').trim();
 
-			const dataNum = $li.attr('data-num') || '';
-			const numText =
-				$li.find('.chapternum').text() ||
-				a.attr('data-title') ||
-				a.text() ||
-				dataNum;
+				const dataNum = $li.attr('data-num') || '';
+				const numText =
+					$li.find('.chapternum').text() ||
+					a.attr('data-title') ||
+					a.text() ||
+					dataNum;
 
-			const isPaid =
-				$li.find('.fa-coins, .ath-lock, [class*="coin"]').length > 0 ||
-				!!a.attr('data-coin') ||
-				a.attr('data-bs-target') === '#lockedChapterModal' ||
-				/coin|premium|paid/i.test($li.text());
+				const isPaid =
+					$li.find('.fa-coins, .ath-lock, [class*="coin"]').length > 0 ||
+					!!a.attr('data-coin') ||
+					a.attr('data-bs-target') === '#lockedChapterModal' ||
+					/coin|premium|paid/i.test($li.text());
 
-			let chId: string;
-			if (href && !href.startsWith('#') && !/javascript:/i.test(href)) {
-				chId = this.cleanId(href);
-			} else if (slug && (dataNum || numText)) {
-				const n = dataNum || String(this.parseChapterNumber(numText));
-				const pathNum = String(n).replace(/\./g, '-');
-				chId = `/${slug}-chapter-${pathNum}`;
-			} else {
-				return;
+				let chId: string;
+				if (href && !href.startsWith('#') && !/javascript:/i.test(href)) {
+					chId = this.cleanId(href);
+				} else if (slug && (dataNum || numText)) {
+					const n = dataNum || String(this.parseChapterNumber(numText));
+					const pathNum = String(n).replace(/\./g, '-');
+					chId = `/${slug}-ch-${pathNum}`;
+				} else {
+					return;
+				}
+
+				if (seen.has(chId)) return;
+				seen.add(chId);
+
+				const number =
+					(dataNum ? parseFloat(dataNum) : 0) ||
+					this.parseChapterNumber(numText, chId);
+
+				const date = $li
+					.find('.chapterdate, .chapter-release-date')
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim();
+
+				const titleBase = (numText || `Chapter ${number}`)
+					.replace(/\s+/g, ' ')
+					.trim();
+
+				chapters.push({
+					id: chId,
+					title: isPaid ? `${titleBase} 🔒` : titleBase,
+					number: number || chapters.length + 1,
+					date: date || undefined
+				});
 			}
-
-			if (seen.has(chId)) return;
-			seen.add(chId);
-
-			const number =
-				(dataNum ? parseFloat(dataNum) : 0) ||
-				this.parseChapterNumber(numText, chId);
-
-			const date = $li
-				.find('.chapterdate')
-				.text()
-				.replace(/\s+/g, ' ')
-				.trim();
-
-			const titleBase =
-				(numText || `Chapter ${number}`).replace(/\s+/g, ' ').trim();
-
-			chapters.push({
-				id: chId,
-				title: isPaid ? `${titleBase} 🔒` : titleBase,
-				number: number || chapters.length + 1,
-				date: date || undefined
-			});
-		});
+		);
 
 		// newest first
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
@@ -336,12 +380,16 @@ export class AthreaScansSource extends BaseSource {
 		const latestChapter =
 			chapters.length > 0 ? String(chapters[0].number) : undefined;
 
+		console.log(
+			`[silentquill] details ${id} → ch=${chapters.length} status=${status}`
+		);
+
 		return {
 			id,
 			sourceId: this.id,
 			title: title || slug || id,
 			cover,
-			type: 'manhwa',
+			type: 'manga',
 			status,
 			latestChapter,
 			lang: this.DEFAULT_LANG,
@@ -366,25 +414,27 @@ export class AthreaScansSource extends BaseSource {
 			const push = (src?: string | null) => {
 				if (!src) return;
 				if (src.startsWith('data:')) return;
-				const url = this.absUrl(src.split('?')[0]);
+				const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
 				if (!url || seen.has(url)) return;
-				if (/logo|icon|avatar|emoji/i.test(url)) return;
+				if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
 				seen.add(url);
 				pages.push(url);
 			};
 
-			$('#readerarea img, .readerarea img, #reader img').each((_, img) => {
-				const $img = $(img);
-				push(
-					$img.attr('data-src') ||
-						$img.attr('data-lazy-src') ||
-						$img.attr('src')
-				);
-			});
+			$('#readerarea img, .readerarea img, #reader img, .reading-content img, .page-break img, .wp-manga-chapter-img').each(
+				(_, img) => {
+					const $img = $(img);
+					push(
+						$img.attr('data-src') ||
+							$img.attr('data-lazy-src') ||
+							$img.attr('src')
+					);
+				}
+			);
 
 			if (pages.length === 0) {
 				const re =
-					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/manga\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
+					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
 				let m: RegExpExecArray | null;
 				while ((m = re.exec(html)) !== null) {
 					push(m[1]);
@@ -392,11 +442,11 @@ export class AthreaScansSource extends BaseSource {
 			}
 
 			console.log(
-				`[athreascans] getChapterPages ${path} → ${pages.length} pages`
+				`[silentquill] getChapterPages ${path} → ${pages.length} pages`
 			);
 			return pages;
 		} catch (e) {
-			console.error('[athreascans] getChapterPages', e);
+			console.error('[silentquill] getChapterPages', e);
 			return [];
 		}
 	}
