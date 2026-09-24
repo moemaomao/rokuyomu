@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { saveReading } from '$lib/stores/history';
     import { browser } from '$app/environment';
     import { goto } from '$app/navigation';
     import {
@@ -40,7 +41,10 @@
         content = '',
         title = '',
         source = '',
+        chapterId = '',
         novelInfo = null,
+        chapters = [],
+        currentChapter = null,
         prevChapter = null,
         nextChapter = null
     } = $derived(data ?? {});
@@ -231,6 +235,38 @@
     onMount(() => {
         loadSettings();
         settingsReady = true;
+
+        // Save to reading history (same as comic reader)
+        try {
+            const nid = (novelInfo as { id?: string; title?: string; cover?: string } | null)?.id
+                || chapterId
+                || '';
+            const ntitle =
+                (novelInfo as { title?: string } | null)?.title || title || 'Novel';
+            const ncover = (novelInfo as { cover?: string } | null)?.cover || '';
+            if (nid && source) {
+                const mangaId = String(nid).startsWith('/') ? String(nid) : `/${String(nid).replace(/^\/+/, '')}`;
+                const chId = chapterId
+                    ? String(chapterId).startsWith('/')
+                        ? String(chapterId)
+                        : `/${String(chapterId).replace(/^\/+/, '')}`
+                    : '';
+                saveReading({
+                    mangaId,
+                    mangaSlug: '',
+                    mangaTitle: ntitle,
+                    cover: ncover,
+                    chapterId: chId,
+                    chapterTitle:
+                        (currentChapter as { title?: string } | null)?.title || title || 'Chapter',
+                    chapterNumber:
+                        Number((currentChapter as { number?: number } | null)?.number) || 0,
+                    sourceId: source
+                });
+            }
+        } catch (e) {
+            console.warn('[novel-reader] save history failed', e);
+        }
 
         if (browser) {
             isDark = document.documentElement.classList.contains('dark');

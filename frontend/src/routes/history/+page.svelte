@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import { History, Trash2, BookOpen, Clock } from 'lucide-svelte';
 	import { getHistory, clearHistory, removeFromHistory, type ReadingEntry } from '$lib/stores/history';
 
@@ -74,7 +75,7 @@
         <div class="grid grid-cols-3 gap-3 sm:gap-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
             {#each history as entry (entry.mangaId + entry.sourceId)}
                 {@const mangaHref = `/manga/${entry.sourceId}${entry.mangaId}`}
-                {@const readHref = `/reader/${entry.sourceId}${entry.chapterId}`}
+                {@const readHref = chapterHref(entry.sourceId, entry.chapterId)}
 
                 <div
                     class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
