@@ -1,7 +1,8 @@
 export const NOVEL_SOURCE_IDS = new Set<string>([
 	'sakuranovel',
 	'noveltoon',
-	'meionovel'
+	'meionovel',
+	'bacalightnovel'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

@@ -107,6 +107,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	setsuscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 	sakuranovel: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-amber-500' },
 	meionovel: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-amber-500' },
+	bacalightnovel: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-amber-500' },
 	noveltoon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 };
 
