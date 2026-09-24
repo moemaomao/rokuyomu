@@ -4,7 +4,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'meionovel',
 	'bacalightnovel',
 	'lovelyblossoms',
-	'botitranslation'
+	'botitranslation',
+	'goldennovel'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
