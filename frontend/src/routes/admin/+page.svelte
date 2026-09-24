@@ -3,7 +3,11 @@
 	import { goto } from '$app/navigation';
 	import { getUser, isLoading } from '$lib/stores/auth.svelte';
 	import { isAdmin } from '$lib/admin';
-	import { auth } from '$lib/firebase';
+	import { auth, db } from '$lib/firebase';
+	import { collection, onSnapshot, query } from 'firebase/firestore';
+	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
+	import { groupSourcesByLang, LANG_LABELS, getSourceMeta } from '$lib/utils/sourceMeta';
+	import { isNovelSource } from '$lib/utils/novelSources';
 	import {
 		Shield,
 		Eye,
@@ -12,10 +16,14 @@
 		Search,
 		RefreshCw,
 		CheckCircle2,
-		XCircle
+		XCircle,
+		AlertTriangle,
+		BookMarked,
+		BookOpen
 	} from 'lucide-svelte';
 
 	type SourceRow = { id: string; name: string; enabled: boolean };
+	type ContentKind = 'comic' | 'novel';
 
 	let {
 		data
@@ -29,10 +37,25 @@
 	let errorMsg = $state('');
 	let successMsg = $state('');
 	let search = $state('');
-	let filter = $state<'all' | 'enabled' | 'disabled'>('all');
+	let filter = $state<'all' | 'enabled' | 'disabled' | 'reported'>('all');
+	let selectedKind = $state<ContentKind>('comic');
 	let authChecked = $state(false);
+	let reportCountMap = $state<Record<string, number>>({});
 
-	// init from server data once
+	function norm(id: string): string {
+		return String(id || '')
+			.toLowerCase()
+			.replace(/[^a-z0-9]/g, '');
+	}
+
+	function reportCount(id: string): number {
+		return reportCountMap[norm(id)] ?? 0;
+	}
+
+	function hasReport(id: string): boolean {
+		return reportCount(id) > 0 || isBrokenSource(id);
+	}
+
 	$effect.pre(() => {
 		if (sources.length === 0 && data?.sources?.length) {
 			sources = [...data.sources];
@@ -42,18 +65,30 @@
 	const user = $derived(getUser());
 	const admin = $derived(isAdmin(user?.uid));
 
+	const kindFiltered = $derived.by(() => {
+		return sources.filter((s) => {
+			const novel = isNovelSource(s.id);
+			return selectedKind === 'novel' ? novel : !novel;
+		});
+	});
+
 	const filtered = $derived.by(() => {
 		const q = search.trim().toLowerCase();
-		return sources.filter((s) => {
+		return kindFiltered.filter((s) => {
 			if (filter === 'enabled' && !s.enabled) return false;
 			if (filter === 'disabled' && s.enabled) return false;
+			if (filter === 'reported' && !hasReport(s.id)) return false;
 			if (!q) return true;
 			return s.id.includes(q) || s.name.toLowerCase().includes(q);
 		});
 	});
 
-	const enabledCount = $derived(sources.filter((s) => s.enabled).length);
-	const disabledCount = $derived(sources.filter((s) => !s.enabled).length);
+	const grouped = $derived(groupSourcesByLang(filtered));
+
+	const enabledCount = $derived(kindFiltered.filter((s) => s.enabled).length);
+	const disabledCount = $derived(kindFiltered.filter((s) => !s.enabled).length);
+	const reportedCount = $derived(kindFiltered.filter((s) => hasReport(s.id)).length);
+	const kindTotal = $derived(kindFiltered.length);
 
 	onMount(() => {
 		if (data?.sources?.length && sources.length === 0) {
@@ -65,7 +100,43 @@
 				clearInterval(t);
 			}
 		}, 80);
-		return () => clearInterval(t);
+
+		let unsub: (() => void) | undefined;
+		if (db) {
+			try {
+				const qReports = query(collection(db, 'reports'));
+				unsub = onSnapshot(
+					qReports,
+					(snap) => {
+						const counts: Record<string, number> = {};
+						for (const d of snap.docs) {
+							const r = d.data() as {
+								type?: string;
+								status?: string;
+								sourceId?: string | null;
+							};
+							if (
+								(r.type === 'broken_source' || r.type === 'bug') &&
+								(r.status === 'open' || r.status === 'in_progress') &&
+								r.sourceId
+							) {
+								const key = norm(r.sourceId);
+								counts[key] = (counts[key] || 0) + 1;
+							}
+						}
+						reportCountMap = counts;
+					},
+					(err) => console.warn('[admin reports]', err)
+				);
+			} catch (e) {
+				console.warn('[admin reports] init failed', e);
+			}
+		}
+
+		return () => {
+			clearInterval(t);
+			unsub?.();
+		};
 	});
 
 	async function getIdToken(): Promise<string | null> {
@@ -88,8 +159,6 @@
 		ok?: boolean;
 		error?: string;
 		disabledIds?: string[];
-		sourceId?: string;
-		enabled?: boolean;
 	};
 
 	async function refresh() {
@@ -229,7 +298,7 @@
 					Source Management
 				</h1>
 				<p class="mt-1 text-xs text-zinc-500">
-					Hide / tampilkan source yang rusak. Perubahan langsung tersimpan di KV.
+					Hide / tampilkan source. Badge ERROR = report user aktif.
 				</p>
 			</div>
 			<button
@@ -243,14 +312,43 @@
 			</button>
 		</div>
 
-		<div class="mb-4 grid grid-cols-3 gap-3">
+		<!-- Comic | Novel switch (sama seperti Settings) -->
+		<div
+			class="mb-5 flex w-full max-w-xs overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-900"
+		>
+			<button
+				type="button"
+				onclick={() => (selectedKind = 'comic')}
+				class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition
+					{selectedKind === 'comic'
+					? 'bg-violet-600 text-white shadow'
+					: 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'}"
+			>
+				<BookMarked class="h-4 w-4" />
+				Comic
+			</button>
+			<button
+				type="button"
+				onclick={() => (selectedKind = 'novel')}
+				class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition
+					{selectedKind === 'novel'
+					? 'bg-amber-600 text-white shadow'
+					: 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'}"
+			>
+				<BookOpen class="h-4 w-4" />
+				Novel
+			</button>
+		</div>
+
+		<!-- Stats -->
+		<div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
 			<div
 				class="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
 			>
-				<div class="text-xs text-zinc-500">Total</div>
-				<div class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-					{sources.length}
+				<div class="text-xs text-zinc-500">
+					{selectedKind === 'novel' ? 'Novel' : 'Comic'}
 				</div>
+				<div class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{kindTotal}</div>
 			</div>
 			<div
 				class="rounded-lg border border-emerald-200/60 bg-emerald-50/50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/30"
@@ -266,6 +364,14 @@
 				<div class="text-xs text-red-600 dark:text-red-400">Hidden</div>
 				<div class="text-lg font-semibold text-red-700 dark:text-red-300">
 					{disabledCount}
+				</div>
+			</div>
+			<div
+				class="rounded-lg border border-amber-200/60 bg-amber-50/50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30"
+			>
+				<div class="text-xs text-amber-600 dark:text-amber-400">Reported</div>
+				<div class="text-lg font-semibold text-amber-700 dark:text-amber-300">
+					{reportedCount}
 				</div>
 			</div>
 		</div>
@@ -287,6 +393,7 @@
 			</div>
 		{/if}
 
+		<!-- Search + filters -->
 		<div class="mb-4 flex flex-wrap items-center gap-2">
 			<div class="relative min-w-[200px] flex-1">
 				<Search
@@ -300,18 +407,26 @@
 				/>
 			</div>
 			<div
-				class="flex items-center gap-1 rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
+				class="flex flex-wrap items-center gap-1 rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700"
 			>
-				{#each (['all', 'enabled', 'disabled'] as const) as f}
+				{#each (['all', 'enabled', 'disabled', 'reported'] as const) as f}
 					<button
 						type="button"
 						class="rounded-md px-2.5 py-1.5 text-xs font-medium transition
 							{filter === f
-							? 'bg-violet-600 text-white'
+							? f === 'reported'
+								? 'bg-amber-600 text-white'
+								: 'bg-violet-600 text-white'
 							: 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
 						onclick={() => (filter = f)}
 					>
-						{f === 'all' ? 'All' : f === 'enabled' ? 'Enabled' : 'Hidden'}
+						{f === 'all'
+							? 'All'
+							: f === 'enabled'
+								? 'Enabled'
+								: f === 'disabled'
+									? 'Hidden'
+									: 'Reported'}
 					</button>
 				{/each}
 			</div>
@@ -333,76 +448,111 @@
 			</button>
 		</div>
 
-		<div class="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
-			<table class="w-full text-left text-sm">
-				<thead
-					class="border-b border-zinc-200 bg-zinc-50 text-xs uppercase text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80"
-				>
-					<tr>
-						<th class="px-3 py-2.5 font-medium">Source</th>
-						<th class="px-3 py-2.5 font-medium">Status</th>
-						<th class="px-3 py-2.5 text-right font-medium">Action</th>
-					</tr>
-				</thead>
-				<tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-					{#each filtered as s (s.id)}
-						<tr
-							class="bg-white transition hover:bg-zinc-50 dark:bg-zinc-950/40 dark:hover:bg-zinc-900/60"
+		<!-- Grouped by language (seperti Settings) -->
+		{#if Object.keys(grouped).length === 0}
+			<div class="py-12 text-center text-sm text-zinc-500">Tidak ada source yang cocok.</div>
+		{:else}
+			<div class="space-y-5">
+				{#each Object.entries(grouped) as [langKey, items]}
+					<section>
+						<div
+							class="mb-2 flex items-center gap-2 border-b border-zinc-200 pb-1.5 dark:border-zinc-800"
 						>
-							<td class="px-3 py-2.5">
-								<div class="font-medium text-zinc-900 dark:text-zinc-100">{s.name}</div>
-								<div class="font-mono text-xs text-zinc-500">{s.id}</div>
-							</td>
-							<td class="px-3 py-2.5">
-								{#if s.enabled}
-									<span
-										class="inline-flex items-center gap-1 rounded-full border border-emerald-300/60 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
-									>
-										<Eye class="h-3 w-3" /> Visible
-									</span>
-								{:else}
-									<span
-										class="inline-flex items-center gap-1 rounded-full border border-red-300/60 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-300"
-									>
-										<EyeOff class="h-3 w-3" /> Hidden
-									</span>
-								{/if}
-							</td>
-							<td class="px-3 py-2.5 text-right">
-								<button
-									type="button"
-									class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50
-										{s.enabled
-										? 'border border-red-300/70 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40'
-										: 'border border-emerald-300/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40'}"
-									disabled={!!toggling[s.id] || loading}
-									onclick={() => toggle(s.id, !s.enabled)}
-								>
-									{#if toggling[s.id]}
-										<Loader2 class="h-3.5 w-3.5 animate-spin" />
-									{:else if s.enabled}
-										<EyeOff class="h-3.5 w-3.5" /> Hide
-									{:else}
-										<Eye class="h-3.5 w-3.5" /> Show
-									{/if}
-								</button>
-							</td>
-						</tr>
-					{:else}
-						<tr>
-							<td colspan="3" class="px-3 py-10 text-center text-sm text-zinc-500">
-								Tidak ada source yang cocok.
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+							<span class="text-xs font-bold uppercase tracking-wider text-zinc-500">
+								{LANG_LABELS[langKey] || langKey}
+							</span>
+							<span class="text-[10px] text-zinc-400">({items.length})</span>
+						</div>
+						<div
+							class="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800"
+						>
+							<table class="w-full text-left text-sm">
+								<tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+									{#each items as s (s.id)}
+										{@const reports = reportCount(s.id)}
+										{@const broken = hasReport(s.id)}
+										{@const meta = getSourceMeta(s.id)}
+										<tr
+											class="bg-white transition hover:bg-zinc-50 dark:bg-zinc-950/40 dark:hover:bg-zinc-900/60
+												{broken ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''}"
+										>
+											<td class="px-3 py-2.5">
+												<div class="flex flex-wrap items-center gap-2">
+													<span class="fi fi-{meta.flag} rounded-sm text-sm"></span>
+													<span class="font-medium text-zinc-900 dark:text-zinc-100"
+														>{s.name}</span
+													>
+													{#if meta.isR18}
+														<span
+															class="rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
+															>R18</span
+														>
+													{/if}
+													{#if broken}
+														<span
+															class="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:border-amber-500/40 dark:text-amber-400"
+														>
+															<AlertTriangle class="h-3 w-3" />
+															Error
+															{#if reports > 0}
+																<span
+																	class="ml-0.5 rounded-full bg-amber-600 px-1.5 text-[9px] font-bold text-white dark:bg-amber-500"
+																>
+																	{reports}
+																</span>
+															{/if}
+														</span>
+													{/if}
+												</div>
+												<div class="font-mono text-xs text-zinc-500">{s.id}</div>
+											</td>
+											<td class="w-28 px-3 py-2.5">
+												{#if s.enabled}
+													<span
+														class="inline-flex items-center gap-1 rounded-full border border-emerald-300/60 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+													>
+														<Eye class="h-3 w-3" /> Visible
+													</span>
+												{:else}
+													<span
+														class="inline-flex items-center gap-1 rounded-full border border-red-300/60 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-300"
+													>
+														<EyeOff class="h-3 w-3" /> Hidden
+													</span>
+												{/if}
+											</td>
+											<td class="w-24 px-3 py-2.5 text-right">
+												<button
+													type="button"
+													class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50
+														{s.enabled
+														? 'border border-red-300/70 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40'
+														: 'border border-emerald-300/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40'}"
+													disabled={!!toggling[s.id] || loading}
+													onclick={() => toggle(s.id, !s.enabled)}
+												>
+													{#if toggling[s.id]}
+														<Loader2 class="h-3.5 w-3.5 animate-spin" />
+													{:else if s.enabled}
+														<EyeOff class="h-3.5 w-3.5" /> Hide
+													{:else}
+														<Eye class="h-3.5 w-3.5" /> Show
+													{/if}
+												</button>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</section>
+				{/each}
+			</div>
+		{/if}
 
 		<p class="mt-4 text-xs text-zinc-500">
-			Source yang di-hide tidak muncul di dropdown / multi-source homepage. Data disimpan di
-			Workers KV key
-			<code class="rounded bg-zinc-100 px-1 dark:bg-zinc-800">config:disabled_sources</code>.
+			Switch <strong>Comic / Novel</strong> seperti Settings. Source dikelompokkan per bahasa
+			(Indonesian, English, dll). Badge ERROR dari report user (open / in progress).
 		</p>
 	{/if}
 </div>
