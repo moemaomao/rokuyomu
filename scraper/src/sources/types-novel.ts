@@ -4,7 +4,7 @@ export interface Novel {
 	title: string;
 	cover: string;
 	sourceId: string;
-	type?: string; // novel, lightnovel, webnovel
+	type?: string;
 	status?: string;
 	latestChapter?: string | number;
 	lang?: string;

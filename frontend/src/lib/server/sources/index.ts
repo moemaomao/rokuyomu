@@ -107,6 +107,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'setsuscans', name: 'Setsu Scans' },
 	{ id: 'noveltoon', name: 'Noveltoon' },
 	{ id: 'sakuranovel', name: 'Sakuranovel' },
+	{ id: 'meionovel', name: 'Meionovel' }
 ];
 
 export function getSourceList(): SourceMeta[] {
