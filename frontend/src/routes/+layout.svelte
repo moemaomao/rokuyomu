@@ -194,9 +194,16 @@
 		if (isBookmarkOpen) loadBookmarks();
 	}
 
-	function handleRemoveBookmark(mangaId: string) {
-		removeBookmark(mangaId);
-		loadBookmarks();
+	async function handleRemoveBookmark(mangaId: string, e?: MouseEvent) {
+		e?.preventDefault();
+		e?.stopPropagation();
+		// Optimistic UI — hilang di klik pertama
+		bookmarks = bookmarks.filter((b) => b.mangaId !== mangaId);
+		try {
+			await removeBookmark(mangaId);
+		} finally {
+			loadBookmarks();
+		}
 	}
 
 	function toggleAuth() {
@@ -699,7 +706,7 @@ $effect(() => {
 							<p class="px-4 py-8 text-center text-xs text-zinc-500">Belum ada bookmark.</p>
 						{:else}
 							<div class="max-h-[50vh] overflow-y-auto p-2">
-								{#each bookmarks as bm}
+								{#each bookmarks as bm (bm.mangaId + bm.sourceId)}
 									{@const mangaHref = formatMangaHref(bm.sourceId, bm.mangaId)}
 									<div
 										class="group flex items-center gap-3 rounded-lg p-2 transition
@@ -729,7 +736,8 @@ $effect(() => {
 											</div>
 										</a>
 										<button
-											onclick={() => handleRemoveBookmark(bm.mangaId)}
+											type="button"
+											onclick={(e) => handleRemoveBookmark(bm.mangaId, e)}
 											class="shrink-0 rounded-md p-1.5 text-zinc-500 opacity-0 transition
 												group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400"
 										>

@@ -9,9 +9,13 @@
 		bookmarks = getBookmarks();
 	}
 
-	function handleRemove(mangaId: string) {
-		removeBookmark(mangaId);
-		loadBookmarks();
+	async function handleRemove(mangaId: string) {
+		bookmarks = bookmarks.filter((b) => b.mangaId !== mangaId);
+		try {
+			await removeBookmark(mangaId);
+		} finally {
+			loadBookmarks();
+		}
 	}
 
 	function formatMangaHref(sourceId: string, mangaId: string): string {

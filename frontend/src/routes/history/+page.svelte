@@ -7,20 +7,33 @@
 
 	let history = $state<ReadingEntry[]>([]);
 
-	onMount(() => {
+	function loadHistory() {
 		history = getHistory();
+	}
+
+	onMount(() => {
+		loadHistory();
+		window.addEventListener('history-changed', loadHistory);
+		return () => window.removeEventListener('history-changed', loadHistory);
 	});
 
-	function handleClear() {
-		if (confirm('Clear all reading history?')) {
-			clearHistory();
-			history = [];
+	async function handleClear() {
+		if (!confirm('Clear all reading history?')) return;
+		history = [];
+		try {
+			await clearHistory();
+		} finally {
+			loadHistory();
 		}
 	}
 
-	function handleRemove(mangaId: string) {
-		removeFromHistory(mangaId);
-		history = getHistory();
+	async function handleRemove(mangaId: string) {
+		history = history.filter((h) => h.mangaId !== mangaId);
+		try {
+			await removeFromHistory(mangaId);
+		} finally {
+			loadHistory();
+		}
 	}
 
 	function handleNavigate(e: MouseEvent, href: string) {
