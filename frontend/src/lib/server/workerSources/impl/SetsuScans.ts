@@ -19,8 +19,8 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa default: English
  *
- * Catatan: situs di belakang Cloudflare managed challenge —
- * fetch dari IP Vercel sering gagal. Pertimbangkan register di WORKER_SOURCE_IDS.
+ * Catatan: situs di belakang Cloudflare Turnstile.
+ * Hybrid Worker membantu, tapi challenge interaktif tetap bisa 403.
  */
 export class SetsuScansSource extends BaseSource {
 	id = 'setsuscans';
@@ -29,6 +29,69 @@ export class SetsuScansSource extends BaseSource {
 
 	private readonly PER_PAGE = 24;
 	private readonly DEFAULT_LANG = 'en';
+
+	/** Override header biar lebih mirip browser modern */
+	protected headers: Record<string, string> = {
+		'User-Agent':
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+		Accept:
+			'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+		'Accept-Language': 'en-US,en;q=0.9',
+		'Accept-Encoding': 'gzip, deflate, br',
+		'Cache-Control': 'no-cache',
+		Pragma: 'no-cache',
+		'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+		'Sec-Ch-Ua-Mobile': '?0',
+		'Sec-Ch-Ua-Platform': '"Windows"',
+		'Sec-Fetch-Dest': 'document',
+		'Sec-Fetch-Mode': 'navigate',
+		'Sec-Fetch-Site': 'none',
+		'Sec-Fetch-User': '?1',
+		'Upgrade-Insecure-Requests': '1'
+	};
+
+	// ── Fetch dengan deteksi Cloudflare ─────────────────────────────────────
+
+	protected async fetchHtml(path: string): Promise<string> {
+		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+		const response = await fetch(url, {
+			headers: {
+				...this.headers,
+				Referer: this.baseUrl + '/'
+			},
+			redirect: 'follow'
+		});
+
+		const html = await response.text();
+		const lower = html.toLowerCase();
+
+		const isChallenge =
+			response.status === 403 ||
+			response.status === 503 ||
+			/just a moment|verify you are human|cf-browser-verification|challenge-platform|cf-turnstile|checking your browser/i.test(
+				lower
+			);
+
+		if (isChallenge || !response.ok) {
+			const title =
+				html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim() ||
+				'';
+			console.error('[setsuscans] Cloudflare / blocked', {
+				url,
+				status: response.status,
+				title,
+				cfRay: response.headers.get('cf-ray'),
+				server: response.headers.get('server'),
+				preview: html.slice(0, 300).replace(/\s+/g, ' ')
+			});
+			throw new Error(
+				`Failed to fetch ${url}: ${response.status} ${response.statusText}` +
+					(isChallenge ? ' (Cloudflare challenge)' : '')
+			);
+		}
+
+		return html;
+	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -227,7 +290,6 @@ export class SetsuScansSource extends BaseSource {
 			const $ = cheerio.load(html);
 			let list = this.parseCards($);
 
-			// Fallback homepage
 			if (list.length === 0 && p === 1) {
 				const home = await this.fetchHtml('/');
 				list = this.parseCards(cheerio.load(home));
@@ -392,7 +454,6 @@ export class SetsuScansSource extends BaseSource {
 			}
 		);
 
-		// newest first
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 
 		const latestChapter =
@@ -460,16 +521,16 @@ export class SetsuScansSource extends BaseSource {
 			}
 
 			if (pages.length === 0) {
-				$('#readerarea img, .readerarea img, #reader img, .reading-content img').each(
-					(_, img) => {
-						const $img = $(img);
-						push(
-							$img.attr('data-src') ||
-								$img.attr('data-lazy-src') ||
-								$img.attr('src')
-						);
-					}
-				);
+				$(
+					'#readerarea img, .readerarea img, #reader img, .reading-content img'
+				).each((_, img) => {
+					const $img = $(img);
+					push(
+						$img.attr('data-src') ||
+							$img.attr('data-lazy-src') ||
+							$img.attr('src')
+					);
+				});
 			}
 
 			if (pages.length === 0) {
