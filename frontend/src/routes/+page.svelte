@@ -7,6 +7,8 @@
 	import BrowseHeader from '$lib/components/BrowseHeader.svelte';
 	import { getSourceMeta } from '$lib/utils/sourceMeta';
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
+	import { getImpl, isMultiMode } from '$lib/stores/impl';
+	import { isNovelSource } from '$lib/utils/novelSources';
 
 	const { data }: { data: PageData } = $props();
 
@@ -75,6 +77,38 @@
 			attributes: true,
 			attributeFilter: ['class']
 		});
+
+		// Restore last selected source (localStorage) when opening bare /
+		try {
+			const url = new URL(window.location.href);
+			const hasSource = !!url.searchParams.get('source');
+			const hasQuery = !!url.searchParams.get('q')?.trim();
+			// Only restore on clean homepage (no source, no search)
+			if (!hasSource && !hasQuery && !isMultiMode()) {
+				const last = getImpl();
+				if (last) {
+					const ok = (sources ?? []).some(
+						(s) => s.id.toLowerCase() === last.toLowerCase()
+					);
+					if (ok) {
+						const p = new URLSearchParams();
+						p.set('source', last);
+						if (isNovelSource(last) || url.searchParams.get('kind') === 'novel') {
+							p.set('kind', 'novel');
+						}
+						// Keep other params if any (except empty)
+						goto(`/?${p.toString()}`, {
+							replaceState: true,
+							invalidateAll: true,
+							noScroll: true
+						});
+					}
+				}
+			}
+		} catch (e) {
+			console.warn('[restore source]', e);
+		}
+
 		return () => observer.disconnect();
 	});
 
