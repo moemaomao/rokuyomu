@@ -142,41 +142,55 @@ export class LovelyBlossomsSource extends BaseSource {
 			});
 		}
 
-		// Fallback: latest update list (title + chapter links)
-		if (list.length < 8) {
-			$('a[href*="/novel/"]').each((_, el) => {
-				const href = $(el).attr('href') || '';
-				// Hanya link novel (bukan chapter)
-				if (!href || !/\/novel\/[^/]+\/?$/.test(href.replace(this.baseUrl, ''))) return;
-				const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
-				if (!title || title.length < 2) return;
-				const parent = $(el).closest('div, article, li, .col-6, .col-md-3, .page-item-detail');
-				const cover =
-					parent.find('img').attr('data-src') ||
-					parent.find('img').attr('data-lazy-src') ||
-					parent.find('img').attr('src') ||
-					$(el).find('img').attr('src') ||
-					'';
-				const id = pathOnly(href);
-				if (list.some((x) => x.id === id)) return;
+		// Fallback / supplement: Madara "Latest Updates" (judul + Chapter N di sibling)
+		$('a[href*="/novel/"]').each((_, el) => {
+			const href = $(el).attr('href') || '';
+			if (!href || !/\/novel\/[^/]+\/?$/.test(href.replace(this.baseUrl, ''))) return;
+			const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+			if (!title || title.length < 2) return;
 
-				const chText =
-					parent.find('a[href*="chapter"]').first().text() ||
-					parent.find('.chapter, .list-chapter, .chapter-item').first().text() ||
-					'';
-				const latestChapter = extractChapterNum(chText);
+			const parent = $(el).closest(
+				'.page-item-detail, .c-tabs-item__content, .page-listing-item, div, article, li'
+			);
+			const id = pathOnly(href);
+			const existing = list.find((x) => x.id === id);
 
-				list.push({
-					id,
-					title,
-					cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en',
-					...(latestChapter != null ? { latestChapter } : {})
-				});
+			// Chapter badge — beberapa layout: .chapter a, list di bawah judul, teks "Chapter 71"
+			const chText =
+				parent.find('.list-chapter a, .chapter-item a, .chapter a').first().text() ||
+				parent.find('a[href*="chapter"]').first().text() ||
+				parent.find('.chapter, .list-chapter, .chapter-item, .btn-link').first().text() ||
+				// sibling setelah judul (Latest Updates list)
+				$(el).parent().next().text() ||
+				$(el).closest('div').find('a[href*="chapter"]').first().text() ||
+				'';
+			const latestChapter = extractChapterNum(chText);
+
+			if (existing) {
+				// Lengkapi badge kalau kartu sudah ada tanpa chapter
+				if (existing.latestChapter == null && latestChapter != null) {
+					existing.latestChapter = latestChapter;
+				}
+				return;
+			}
+
+			const cover =
+				parent.find('img').attr('data-src') ||
+				parent.find('img').attr('data-lazy-src') ||
+				parent.find('img').attr('src') ||
+				$(el).find('img').attr('src') ||
+				'';
+
+			list.push({
+				id,
+				title,
+				cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				...(latestChapter != null ? { latestChapter } : {})
 			});
-		}
+		});
 
 		return list;
 	}
@@ -214,10 +228,21 @@ export class LovelyBlossomsSource extends BaseSource {
 			$(el).find('.manga-status, .status').first().text().trim() || undefined;
 
 		const chText =
-			$(el).find('.list-chapter a, .chapter-item a, .chapter a, a[href*="chapter"]').first().text() ||
-			$(el).find('.list-chapter, .chapter-item, .chapter').first().text() ||
+			$(el).find('.list-chapter a, .chapter-item a, .chapter a').first().text() ||
+			$(el).find('a[href*="chapter"]').first().text() ||
+			$(el).find('.list-chapter, .chapter-item, .chapter, .btn-link').first().text() ||
+			$(el).find('.chapter-release-date').parent().text() ||
 			'';
-		const latestChapter = extractChapterNum(chText);
+		let latestChapter = extractChapterNum(chText);
+		// Fallback: scan short text nodes containing Chapter/Ch
+		if (latestChapter == null) {
+			const hit = $(el)
+				.find('span, a, div, small')
+				.filter((_, s) => /(?:chapter|ch\.?)\s*\d/i.test($(s).text()) && $(s).text().trim().length < 40)
+				.first()
+				.text();
+			latestChapter = extractChapterNum(hit);
+		}
 
 		return {
 			id: pathOnly(href),
@@ -348,8 +373,10 @@ export class LovelyBlossomsSource extends BaseSource {
 					const t = g.trim();
 					if (t && !genres.includes(t)) genres.push(t);
 				}
-			} else if (/release|year/i.test(label)) {
-				published = valueText;
+			} else if (/^year$|released year|tahun/i.test(label)) {
+				// Hanya tahun (bukan full date chapter — biar Latest Update tidak dobel)
+				const year = valueText.match(/\b(19|20)\d{2}\b/);
+				published = year ? year[0] : valueText.slice(0, 12);
 			}
 		});
 
@@ -361,13 +388,26 @@ export class LovelyBlossomsSource extends BaseSource {
 		if (!authors.length && artists.length) authors.push(...artists);
 
 		let rating: string | undefined;
-		const ratingText = $('.post-total-rating .score, #averagerate, .rating .score')
-			.first()
-			.text()
-			.trim();
+		const ratingText =
+			$('.post-total-rating .score').first().text().trim() ||
+			$('#averagerate').first().text().trim() ||
+			$('.rating .score').first().text().trim() ||
+			$('[itemprop="ratingValue"]').attr('content') ||
+			'';
 		if (ratingText) {
 			const m = ratingText.match(/(\d+(?:\.\d+)?)/);
-			if (m) rating = m[1];
+			// Abaikan 0 / kosong
+			if (m && parseFloat(m[1]) > 0) rating = m[1];
+		}
+
+		// Status dari badge di header
+		const statusBadge = $('.post-status .summary-content, .manga-status, span.status')
+			.first()
+			.text()
+			.replace(/\s+/g, ' ')
+			.trim();
+		if (statusBadge && /ongoing|completed|hiatus|dropped|complete/i.test(statusBadge)) {
+			status = statusBadge.split(/\s+/).slice(0, 2).join(' ');
 		}
 
 		// Chapters via AJAX
