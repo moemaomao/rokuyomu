@@ -1,5 +1,6 @@
 import { getSourceList, filterEnabledSources } from '$lib/server/sources';
 import { getDisabledSourceIds } from '$lib/server/sourceConfig';
+import { parseLastSourceFromCookie } from '$lib/stores/impl';
 import { remoteLatest } from '$lib/server/scraperClient';
 import { parsePreferredFromCookie } from '$lib/stores/preferredSources';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
@@ -97,7 +98,12 @@ async function fetchSourceList(
 }
 
 export const load: PageServerLoad = async ({ url, request, setHeaders, depends, locals }) => {
-	const sourceParam = url.searchParams.get('source');
+	let sourceParam = url.searchParams.get('source');
+	// Restore last source from cookie when opening bare /
+	if (!sourceParam && !url.searchParams.get('q')?.trim()) {
+		const last = parseLastSourceFromCookie(request.headers.get('cookie'));
+		if (last) sourceParam = last;
+	}
 	const pageNum = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
 	const query = (url.searchParams.get('q') || '').trim();
 	const lang = (url.searchParams.get('lang') || 'all').toLowerCase();

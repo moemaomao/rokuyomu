@@ -304,6 +304,30 @@ onMount(() => {
 		sessionStorage.removeItem(RETRY_KEY);
 	}
 
+	// Restore last source (same behavior as clicking logo)
+	try {
+		const path = window.location.pathname;
+		if (path === '/' || path === '') {
+			const url = new URL(window.location.href);
+			if (!url.searchParams.get('source') && !url.searchParams.get('q')?.trim()) {
+				if (!isMultiMode()) {
+					const last = getImpl();
+					if (last) {
+						const p = new URLSearchParams(url.searchParams);
+						p.set('source', last);
+						goto(`/?${p.toString()}`, {
+							replaceState: true,
+							invalidateAll: true,
+							noScroll: true
+						});
+					}
+				}
+			}
+		}
+	} catch (e) {
+		console.warn('[layout restore source]', e);
+	}
+
 	const applyMq = () => {
 		isDesktop = mq.matches;
 
