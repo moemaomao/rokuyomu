@@ -105,9 +105,11 @@ import Noveltoon from './impl/Noveltoon';
 import SakuranovelSource from './impl/Sakuranovel';
 import { MeionovelSource } from './impl/Meionovel';
 import { BacaLightNovelSource } from './impl/BacaLightNovel';
+import { LovelyBlossomsSource } from './impl/LovelyBlossoms';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    lovelyblossoms: new LovelyBlossomsSource(),
     bacalightnovel: new BacaLightNovelSource(),
     meionovel: new MeionovelSource(),
     sakuranovel: new SakuranovelSource(),

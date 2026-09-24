@@ -109,6 +109,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	meionovel: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-amber-500' },
 	bacalightnovel: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-amber-500' },
 	noveltoon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	lovelyblossoms: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
