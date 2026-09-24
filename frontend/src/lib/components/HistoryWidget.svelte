@@ -29,11 +29,16 @@
 		if (browser) localStorage.setItem('history_widget_open', 'false');
 	}
 
-	function handleRemove(mangaId: string, e: MouseEvent) {
+	async function handleRemove(mangaId: string, e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
-		removeFromHistory(mangaId);
-		loadHistory();
+
+		history = history.filter((h) => h.mangaId !== mangaId);
+		try {
+			await removeFromHistory(mangaId);
+		} finally {
+			loadHistory();
+		}
 	}
 
 	function handleNavigate(e: MouseEvent, href: string) {
@@ -128,7 +133,6 @@
 		</div>
 	</div>
 
-	<!-- List: min-h-0 + touch-pan-y = kunci scroll mobile -->
 	<div
 		class="history-list min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"
 		style="touch-action: pan-y; -webkit-overflow-scrolling: touch;"

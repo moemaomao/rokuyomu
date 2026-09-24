@@ -21,6 +21,7 @@ export type { ReadingEntry };
 
 const MAX_HISTORY = 30;
 const TOMBSTONE_KEY = 'mikoroku_history_tombstones';
+const FIRESTORE_BATCH_LIMIT = 450;
 
 function normalizeMangaId(id: string): string {
 	let s = String(id || '').trim();
@@ -240,6 +241,36 @@ export async function removeFromHistory(mangaId: string) {
 	}
 }
 
+async function deleteCloudHistoryDocs(
+	userId: string,
+	mangaIds: string[]
+): Promise<boolean> {
+	if (!db || mangaIds.length === 0) return true;
+
+	const uniqueIds = [
+		...new Set(
+			mangaIds
+				.map((id) => normalizeMangaId(id))
+				.filter(Boolean)
+		)
+	];
+
+	try {
+		for (let i = 0; i < uniqueIds.length; i += FIRESTORE_BATCH_LIMIT) {
+			const chunk = uniqueIds.slice(i, i + FIRESTORE_BATCH_LIMIT);
+			const batch = writeBatch(db);
+			for (const id of chunk) {
+				batch.delete(doc(db, 'users', userId, 'history', historyDocId(id)));
+			}
+			await batch.commit();
+		}
+		return true;
+	} catch (e) {
+		console.error('Failed to clear cloud history', e);
+		return false;
+	}
+}
+
 export async function clearHistory() {
 	if (!browser) return;
 
@@ -252,15 +283,17 @@ export async function clearHistory() {
 
 	const user = getUser();
 	if (user && db && list.length) {
-		try {
-			const batch = writeBatch(db);
-			for (const h of list) {
-				batch.delete(doc(db, 'users', user.uid, 'history', historyDocId(h.mangaId)));
-			}
-			await batch.commit();
-		} catch (e) {
-			console.error('Failed to clear cloud history', e);
+		const ok = await deleteCloudHistoryDocs(
+			user.uid,
+			list.map((h) => h.mangaId)
+		);
+		
+		if (ok) {
+			writeTombstones(new Set());
 		}
+	} else if (!user) {
+	
+		writeTombstones(new Set());
 	}
 }
 
@@ -300,11 +333,16 @@ export async function syncHistoryOnLogin() {
 		historyCache = merged;
 		window.dispatchEvent(new CustomEvent('history-changed'));
 
+		const tombstoneList = [...tombstones];
+		if (tombstoneList.length > 0) {
+			await deleteCloudHistoryDocs(user.uid, tombstoneList);
+		}
+
 		const batch = writeBatch(firestore);
 		merged.forEach((h) => {
 			batch.set(doc(firestore, 'users', user.uid, 'history', historyDocId(h.mangaId)), h);
 		});
-		for (const id of tombstones) {
+		for (const id of tombstoneList) {
 			batch.delete(doc(firestore, 'users', user.uid, 'history', historyDocId(id)));
 		}
 		await batch.commit();
@@ -312,5 +350,6 @@ export async function syncHistoryOnLogin() {
 		writeTombstones(new Set());
 	} catch (e) {
 		console.error('Failed to sync history on login', e);
+		
 	}
 }
