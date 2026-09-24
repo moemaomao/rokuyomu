@@ -65,21 +65,31 @@ function lightCover(url: string | undefined | null): string {
 	if (!u) return '';
 	if (u.startsWith('//')) u = 'https:' + u;
 
+	// Reject clearly broken hosts (e.g. truncated "sakuranov.wp-content")
+	if (/^https?:\/\/[^/]*wp-content/i.test(u) && !/\.[a-z]{2,}\//i.test(u.split('/').slice(0, 3).join('/'))) {
+		return '';
+	}
+
 	const keepQuery =
 		/cvr\.voratoon\.id|X-Amz-Signature|X-Amz-Algorithm/i.test(u);
 
 	try {
 		const parsed = new URL(u);
+		// Must have a real hostname with a dot (not "sakuranov.wp-content" alone as path-like host)
+		if (!parsed.hostname || !parsed.hostname.includes('.')) {
+			return '';
+		}
 		if (!keepQuery) {
 			parsed.search = '';
 			parsed.hash = '';
 		}
 		u = parsed.toString();
 	} catch {
-		// ignore
+		return '';
 	}
 
-	const max = keepQuery ? 600 : 180;
+	// Cover URLs can be long — do NOT truncate to 180 (that broke sakuranovel covers)
+	const max = keepQuery ? 1200 : 800;
 	return u.length > max ? u.slice(0, max) : u;
 }
 

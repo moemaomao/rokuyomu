@@ -89,6 +89,7 @@
                         {#if entry.cover}
                             <img
                                 src="/api/proxy?url={encodeURIComponent(entry.cover)}&source={entry.sourceId}"
+								onerror={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0'; }}
                                 alt={entry.mangaTitle}
                                 class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                             />

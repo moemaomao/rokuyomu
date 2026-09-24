@@ -5,23 +5,48 @@ import { isValidSource } from '$lib/server/sources';
 import { isNovelSource } from '$lib/utils/novelSources';
 
 function novelIdFromChapter(chapterId: string): string {
-	const parts = chapterId
-		.replace(/\/+$/, '')
-		.split('/')
-		.filter(Boolean);
-	if (parts.length < 2) {
-		return chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+	let path = chapterId.replace(/\/+$/, '');
+	if (!path.startsWith('/')) path = '/' + path;
+	const parts = path.split('/').filter(Boolean);
+	if (parts.length >= 2) {
+		const last = parts[parts.length - 1];
+		if (
+			/^(chapter|ch|episode|ep|bab)[-_.]?\d?/i.test(last) ||
+			/^\d+(\.\d+)?$/.test(last) ||
+			/[-_]chapter[-_]?\d+/i.test(last)
+		) {
+			return '/' + parts.slice(0, -1).join('/');
+		}
+		
+		if (parts.length === 1 && /[-_]chapter[-_]?\d+/i.test(parts[0])) {
+			const slug = parts[0].replace(/[-_]chapter[-_]?\d+.*$/i, '');
+			if (slug) return '/' + slug;
+		}
 	}
-	const last = parts[parts.length - 1];
+	if (parts.length === 1 && /[-_]chapter[-_]?\d+/i.test(parts[0])) {
+		const slug = parts[0].replace(/[-_]chapter[-_]?\d+.*$/i, '');
+		if (slug) return '/' + slug;
+	}
+	if (parts.length >= 2) return '/' + parts.slice(0, -1).join('/');
+	return path;
+}
+
+function normalizeCover(cover: string | undefined, sourceId: string): string {
+	if (!cover) return '';
+	let u = cover.trim();
+	if (!u) return '';
+	if (u.startsWith('//')) u = 'https:' + u;
+	if (/^https?:\/\//i.test(u)) {
+		try {
+			const parsed = new URL(u);
+			if (parsed.hostname && parsed.hostname.includes('.')) return parsed.toString();
+		} catch {
+			return '';
+		}
+	}
 	
-	if (/^(chapter|ch|episode|ep|bab)[-_]?\d?/i.test(last) || /[-_]\d+$/.test(last)) {
-		return '/' + parts.slice(0, -1).join('/');
-	}
-	
-	if (/^\d+(\.\d+)?$/.test(last)) {
-		return '/' + parts.slice(0, -1).join('/');
-	}
-	return '/' + parts.slice(0, -1).join('/');
+	if (u.startsWith('/')) return '';
+	return '';
 }
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -51,15 +76,12 @@ export const load: PageServerLoad = async ({ params }) => {
 		}
 
 		const novelPath = novelIdFromChapter(chapterId);
-		let novelInfo: {
-			title?: string;
-			id?: string;
-			cover?: string;
-		} = {
+		let novelInfo: { title?: string; id?: string; cover?: string } = {
 			...(data.novelInfo ?? {}),
 			id: data.novelInfo?.id || novelPath,
 			title: data.novelInfo?.title
 		};
+		novelInfo.cover = normalizeCover(novelInfo.cover, source);
 
 		if (!novelInfo.cover && novelPath && novelPath !== '/') {
 			try {
@@ -68,7 +90,7 @@ export const load: PageServerLoad = async ({ params }) => {
 					novelInfo = {
 						id: details.id || novelInfo.id || novelPath,
 						title: details.title || novelInfo.title,
-						cover: details.cover || ''
+						cover: normalizeCover(details.cover, source)
 					};
 				}
 			} catch (e) {
