@@ -166,10 +166,18 @@ Contoh Render Web Service:
 
 Jangan andalkan scraper Vercel untuk source itu. Di frontend:
 
-1. Copy file adapter ke `frontend/src/lib/server/workerSources/impl/`
-2. Register di `workerSources/index.ts`
+1. Pastikan adapter sudah ada di sini (`src/sources/impl/`) dan punya `id = 'namasource'`.
+2. Tambah ID ke `frontend/scripts/worker-sources.json`.
+3. Jalankan di folder frontend:
 
-Lihat `frontend/README.md` (hybrid).
+```bash
+cd ../frontend
+pnpm sync-worker-sources
+```
+
+Script akan otomatis copy file + generate `workerSources/index.ts`.
+
+Lihat `frontend/README.md` (hybrid) untuk detail lengkap.
 
 Contoh source yang sudah di hybrid: banyak Indo (`bacakomik`, `komikindo`, `kiryuu`, …) + `athreascans`, `rawkuma`, `flamecomics`, dll.
 

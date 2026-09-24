@@ -30,10 +30,10 @@ Browser
             └─ else                        → GET {SCRAPER_BASE_URL}/...
 ```
 
-Source yang diblokir outbound IP **Vercel** didaftarkan di `src/lib/server/workerSources/`.  
+Source yang diblokir outbound IP **Vercel** didaftarkan di `scripts/worker-sources.json`.  
 Source lain selalu ke microservice `scraper/` (biasanya Vercel).
 
-Saat ini ada **~30 source** di Worker (banyak Indo + beberapa internasional). Bundle membesar — pantau CPU time.
+Saat ini ada **~29 source** di Worker (banyak Indo + beberapa internasional). Bundle membesar — pantau CPU time.
 
 ---
 
@@ -58,10 +58,10 @@ frontend/
 │   │   ├── server/
 │   │   │   ├── sources/           # Light registry (id + name only)
 │   │   │   ├── workerSources/     # Hybrid adapters (blocked-on-Vercel)
-│   │   │   │   ├── index.ts       # WORKER_SOURCE_IDS + registry
+│   │   │   │   ├── index.ts       # GENERATED — jangan edit manual
 │   │   │   │   ├── BaseSource.ts
 │   │   │   │   ├── types.ts
-│   │   │   │   └── impl/          # ~30 adapter (copy dari scraper)
+│   │   │   │   └── impl/          # GENERATED dari scraper
 │   │   │   ├── scraperClient.ts   # Hybrid routing
 │   │   │   ├── cache.ts
 │   │   │   ├── warmCache.ts
@@ -77,6 +77,10 @@ frontend/
 │   │   ├── about/ privacy/
 │   │   └── api/pages | proxy | warm | cron
 │   └── hooks.server.ts
+├── scripts/
+│   ├── worker-sources.json        # Daftar ID source yang dijalankan di Worker
+│   ├── sync-worker-sources.mjs    # Auto-copy + generate index.ts
+│   └── append-cron.js
 ├── wrangler.jsonc
 ├── package.json
 └── svelte.config.js
@@ -135,35 +139,43 @@ pnpm dev
 | `pnpm preview` | Build + `wrangler dev` |
 | `pnpm check` | Type / svelte-check |
 | `pnpm lint` / `pnpm format` | Lint / format |
-| `pnpm deploy` | Build + deploy Cloudflare Worker |
+| `pnpm sync-worker-sources` | Sync adapter dari scraper → workerSources |
+| `pnpm deploy` | Sync + build + deploy Cloudflare Worker |
 | `pnpm cf-typegen` | Generate Worker types |
 
 ---
 
 ## Hybrid: tambah source diblokir Vercel
 
-1. Copy adapter dari scraper:
-   ```bash
-   cp ../scraper/src/sources/impl/Xxx.ts \
-      src/lib/server/workerSources/impl/Xxx.ts
-   ```
-2. Register di `src/lib/server/workerSources/index.ts`:
-   ```ts
-   import { XxxSource } from './impl/Xxx';
-   // ...
-   const workerSources: Record<string, IMangaSource> = {
-     xxx: new XxxSource(),
-     // ...
-   };
-   ```
-3. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
-4. `pnpm deploy`.
+Cara baru (otomatis):
 
-**Penting:** Jaga jumlah Worker source tetap wajar. Saat ini sudah ~30 — bundle membesar dan cold-start CPU naik. Hanya copy yang benar-benar gagal di Vercel.
+1. Pastikan adapter sudah ada di `../scraper/src/sources/impl/` dan punya baris `id = 'namasource'`.
+2. Tambah ID ke `scripts/worker-sources.json`.
+3. Jalankan:
 
-### Daftar Worker sources (saat ini)
+```bash
+pnpm sync-worker-sources
+```
 
-`klz9`, `zonatmo`, `lectortmo`, `rawkuma`, `athreascans`, `flamecomics`, `hentairead`, `kingcomix`, `manhuarmtl`, `onemanga`, `simplyhentai`, `weebcentral`, `ainzscans`, `bacakomik`, `bacami`, `crotpedia`, `doujinku`, `holodek`, `ikiru`, `kiryuu`, `komikindo`, `komikstation`, `lumos`, `luvyaa`, `manhwadesu`, `manhwaindo`, `ngomik`, `pixhentai`, `sasangeyou`, `siikomik`, …
+Script akan:
+- Copy file dari scraper → `src/lib/server/workerSources/impl/`
+- Generate ulang `src/lib/server/workerSources/index.ts`
+- Hapus file yang sudah tidak ada di daftar
+
+4. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
+5. `pnpm deploy` (sudah otomatis menjalankan sync).
+
+> **Jangan edit manual** `workerSources/index.ts` atau file di `impl/`. Semua digenerate.
+
+**Penting:** Jaga jumlah Worker source tetap wajar. Saat ini sudah ~29 — bundle membesar dan cold-start CPU naik. Hanya daftarkan yang benar-benar gagal di Vercel.
+
+### Daftar Worker sources
+
+Lihat isi file:
+
+```
+scripts/worker-sources.json
+```
 
 ---
 
@@ -191,6 +203,6 @@ Pastikan KV namespace id di `wrangler.jsonc` cocok dengan akun Cloudflare kamu.
 
 - `sources/index.ts` = metadata saja (tanpa Cheerio).
 - `scraperClient.ts` = satu pintu data untuk page server & API (hybrid-aware).
-- `getWorkerSource()` mengembalikan instance langsung (sync). Kode pemanggil boleh `await` (harmless).
-- Bundle Worker membesar jika terlalu banyak file di `workerSources/impl` — hanya copy yang perlu.
+- `workerSources/index.ts` dan `impl/` digenerate oleh `pnpm sync-worker-sources`.
+- Bundle Worker membesar jika terlalu banyak file di `workerSources/impl` — hanya daftarkan yang perlu.
 - Parent README: `../README.md`

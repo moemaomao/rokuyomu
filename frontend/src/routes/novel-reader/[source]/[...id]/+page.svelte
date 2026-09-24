@@ -43,12 +43,20 @@
 	let scrollInterval: ReturnType<typeof setInterval> | null = null;
 	let voices = $state<SpeechSynthesisVoice[]>([]);
 
+	// Kunci: jangan hide controls seketika setelah user interaksi
+	let controlsLockedUntil = 0;
+
 	const FONTS: Record<string, string> = {
 		serif: 'Georgia, "Times New Roman", serif',
 		sans: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
 		mono: '"JetBrains Mono", "Fira Code", monospace',
 		dyslexic: '"OpenDyslexic", "Comic Sans MS", sans-serif'
 	};
+
+	function lockControls(ms = 800) {
+		controlsLockedUntil = Date.now() + ms;
+		showControls = true;
+	}
 
 	function loadSettings() {
 		if (!browser) return;
@@ -84,7 +92,6 @@
 		);
 	}
 
-	// Track semua setting; save hanya setelah load selesai
 	$effect(() => {
 		fontFamily;
 		fontSize;
@@ -118,6 +125,7 @@
 	}
 
 	function toggleAutoScroll() {
+		lockControls();
 		if (autoScroll) stopAutoScroll();
 		else startAutoScroll();
 	}
@@ -140,6 +148,7 @@
 
 	function speak() {
 		if (!browser || !window.speechSynthesis) return;
+		lockControls();
 		window.speechSynthesis.cancel();
 		const text = getPlainText();
 		if (!text.trim()) return;
@@ -162,6 +171,7 @@
 
 	function pauseTTS() {
 		if (!browser || !window.speechSynthesis) return;
+		lockControls();
 		if (isPaused) {
 			window.speechSynthesis.resume();
 			isPaused = false;
@@ -173,6 +183,7 @@
 
 	function stopTTS() {
 		if (!browser || !window.speechSynthesis) return;
+		lockControls();
 		window.speechSynthesis.cancel();
 		isSpeaking = false;
 		isPaused = false;
@@ -180,6 +191,7 @@
 
 	async function goChapter(ch: { id?: string } | null | undefined) {
 		if (!ch?.id || !source) return;
+		lockControls();
 		stopTTS();
 		stopAutoScroll();
 		const cleanId = String(ch.id).replace(/^\/+/, '');
@@ -191,13 +203,16 @@
 	}
 
 	function scrollToTop() {
+		lockControls();
 		window.scrollTo({ top: 0, behavior: 'smooth' });
 	}
 
-	function toggleTap(e: MouseEvent) {
+	function toggleTap(e: MouseEvent | TouchEvent) {
 		const t = e.target as HTMLElement;
-		if (t.closest('button, a, input, select, label, [role="dialog"]')) return;
+		// Jangan toggle kalau klik di kontrol / dialog
+		if (t.closest('button, a, input, select, label, [role="dialog"], [data-controls]')) return;
 		showControls = !showControls;
+		if (showControls) lockControls(1200);
 	}
 
 	onMount(() => {
@@ -217,12 +232,29 @@
 		};
 		window.addEventListener('keydown', onKey);
 
-		let lastY = 0;
+		let lastY = window.scrollY;
+		let ticking = false;
+
 		const onScroll = () => {
-			const y = window.scrollY;
-			if (y > lastY + 12 && y > 80) showControls = false;
-			else if (y < lastY - 8) showControls = true;
-			lastY = y;
+			if (ticking) return;
+			ticking = true;
+			requestAnimationFrame(() => {
+				const y = window.scrollY;
+				// Jangan hide kalau baru saja user interaksi
+				if (Date.now() < controlsLockedUntil) {
+					lastY = y;
+					ticking = false;
+					return;
+				}
+				// Threshold lebih besar biar tidak sensitif di mobile
+				if (y > lastY + 40 && y > 100) {
+					showControls = false;
+				} else if (y < lastY - 20) {
+					showControls = true;
+				}
+				lastY = y;
+				ticking = false;
+			});
 		};
 		window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -249,8 +281,10 @@
 		: 'bg-amber-50 text-zinc-900'}"
 	onclick={toggleTap}
 >
+	<!-- HEADER -->
 	<header
-		class="fixed top-0 inset-x-0 z-[100] px-4 py-3 text-center backdrop-blur-md transition-transform duration-300 {showControls
+		data-controls
+		class="fixed top-0 inset-x-0 z-[100] px-4 py-3 text-center backdrop-blur-md transition-transform duration-300 pointer-events-auto {showControls
 			? 'translate-y-0'
 			: '-translate-y-full'} {isDark
 			? 'bg-zinc-900/85 border-b border-white/5'
@@ -276,8 +310,10 @@
 		{@html content || '<p>No content</p>'}
 	</article>
 
+	<!-- BOTTOM NAV (prev / next) -->
 	<div
-		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3 transition-transform duration-300 {showControls
+		data-controls
+		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3 transition-transform duration-300 pointer-events-auto {showControls
 			? 'translate-y-0'
 			: 'translate-y-full'} {isDark
 			? 'border-white/5 bg-zinc-950/80 backdrop-blur-md'
@@ -285,17 +321,16 @@
 	>
 		<button
 			type="button"
+			class="touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
+				{isDark
+					? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70'
+					: 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
+			disabled={!prevChapter}
+			aria-label="Previous chapter"
 			onclick={(e) => {
 				e.stopPropagation();
 				goChapter(prevChapter);
 			}}
-			disabled={!prevChapter}
-			aria-label="Previous chapter"
-			title="Previous chapter"
-			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
-				{isDark
-					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
-					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
 		>
 			<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<path d="M13 5l-7 7 7 7" />
@@ -305,17 +340,16 @@
 
 		<button
 			type="button"
+			class="touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
+				{isDark
+					? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70'
+					: 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
+			disabled={!nextChapter}
+			aria-label="Next chapter"
 			onclick={(e) => {
 				e.stopPropagation();
 				goChapter(nextChapter);
 			}}
-			disabled={!nextChapter}
-			aria-label="Next chapter"
-			title="Next chapter"
-			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
-				{isDark
-					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
-					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
 		>
 			<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<path d="M11 5l7 7-7 7" />
@@ -324,31 +358,33 @@
 		</button>
 	</div>
 
+	<!-- SIDE FLOATING BUTTONS -->
 	<div
-		class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5 transition-opacity duration-300 {showControls
+		data-controls
+		class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5 transition-opacity duration-200 pointer-events-auto {showControls
 			? 'opacity-100'
 			: 'opacity-0 pointer-events-none'}"
 	>
 		<button
 			type="button"
+			class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(0,150,255,0.2)] text-[#4da6ff] backdrop-blur-md active:scale-95"
+			title="Scroll to top"
 			onclick={(e) => {
 				e.stopPropagation();
 				scrollToTop();
 			}}
-			class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,150,255,0.15)] text-[#4da6ff] backdrop-blur-md transition hover:scale-105 hover:bg-[rgba(0,150,255,0.25)]"
-			title="Scroll to top"
 		>
 			<ChevronsUp class="h-5 w-5" />
 		</button>
 
 		<button
 			type="button"
+			class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.2)] text-[#35d98a] backdrop-blur-md active:scale-95"
+			title="Text to Speech"
 			onclick={(e) => {
 				e.stopPropagation();
 				isSpeaking ? stopTTS() : speak();
 			}}
-			class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.15)] text-[#35d98a] backdrop-blur-md transition hover:scale-105"
-			title="Text to Speech"
 		>
 			{#if isSpeaking}
 				<Square class="h-5 w-5" />
@@ -360,12 +396,12 @@
 		{#if isSpeaking}
 			<button
 				type="button"
+				class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(255,180,0,0.2)] text-amber-400 backdrop-blur-md active:scale-95"
+				title={isPaused ? 'Resume' : 'Pause'}
 				onclick={(e) => {
 					e.stopPropagation();
 					pauseTTS();
 				}}
-				class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(255,180,0,0.15)] text-amber-400 backdrop-blur-md transition hover:scale-105"
-				title={isPaused ? 'Resume' : 'Pause'}
 			>
 				{#if isPaused}
 					<Play class="h-5 w-5" />
@@ -377,14 +413,14 @@
 
 		<button
 			type="button"
+			class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 backdrop-blur-md active:scale-95 {autoScroll
+				? 'bg-emerald-600/40 text-emerald-300'
+				: 'bg-[rgba(120,80,255,0.2)] text-purple-400'}"
+			title="Auto scroll"
 			onclick={(e) => {
 				e.stopPropagation();
 				toggleAutoScroll();
 			}}
-			class="flex h-10 w-10 items-center justify-center rounded-full border-0 backdrop-blur-md transition hover:scale-105 {autoScroll
-				? 'bg-emerald-600/40 text-emerald-300'
-				: 'bg-[rgba(120,80,255,0.15)] text-purple-400'}"
-			title="Auto scroll"
 		>
 			{#if autoScroll}
 				<Pause class="h-5 w-5" />
@@ -395,12 +431,13 @@
 
 		<button
 			type="button"
+			class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-transparent text-purple-500 active:scale-95"
+			title="Settings"
 			onclick={(e) => {
 				e.stopPropagation();
+				lockControls();
 				showSettings = !showSettings;
 			}}
-			class="flex h-[42px] w-[42px] items-center justify-center rounded-full border-0 bg-transparent text-purple-500 transition hover:rotate-90"
-			title="Settings"
 		>
 			<Settings class="h-6 w-6" strokeWidth={2} />
 		</button>
@@ -437,12 +474,12 @@
 					{#each Object.keys(FONTS) as f (f)}
 						<button
 							type="button"
-							class="py-2 px-3 rounded-lg border text-sm capitalize transition
+							class="touch-manipulation py-2 px-3 rounded-lg border text-sm capitalize transition
 								{fontFamily === f
 								? 'border-emerald-500 bg-emerald-500/20'
 								: isDark
-									? 'border-white/15 hover:bg-white/5'
-									: 'border-zinc-300 hover:bg-zinc-50'}"
+									? 'border-white/15 active:bg-white/5'
+									: 'border-zinc-300 active:bg-zinc-50'}"
 							style:font-family={FONTS[f]}
 							onclick={() => (fontFamily = f)}
 						>
@@ -531,7 +568,7 @@
 
 				<button
 					type="button"
-					class="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-500 transition"
+					class="touch-manipulation w-full py-2.5 rounded-xl bg-emerald-600 text-white font-medium active:bg-emerald-500 transition"
 					onclick={() => (showSettings = false)}
 				>
 					Done
@@ -549,5 +586,11 @@
 		max-width: 100%;
 		height: auto;
 		border-radius: 0.5rem;
+	}
+
+	/* Hilangkan delay 300ms di mobile */
+	:global(.touch-manipulation) {
+		touch-action: manipulation;
+		-webkit-tap-highlight-color: transparent;
 	}
 </style>

@@ -41,7 +41,7 @@ UI
 
 Worker free tier tetap aman selama mayoritas request hanya `fetch()` JSON. Cheerio di Worker **hanya** untuk source yang gagal dari IP Vercel.
 
-> **Catatan:** Saat ini ada ~30 source di `WORKER_SOURCE_IDS` (banyak Indo + beberapa internasional yang diblokir). Bundle Worker membesar — pantau CPU time di dashboard Cloudflare.
+> **Catatan:** Saat ini ada ~29 source di `WORKER_SOURCE_IDS` (banyak Indo + beberapa internasional yang diblokir). Bundle Worker membesar — pantau CPU time di dashboard Cloudflare.
 
 ---
 
@@ -67,10 +67,10 @@ rokuyomu/
 │   │   │   ├── server/
 │   │   │   │   ├── sources/          # Metadata source saja (light registry)
 │   │   │   │   ├── workerSources/    # Adapter hybrid (source diblokir Vercel)
-│   │   │   │   │   ├── index.ts      # WORKER_SOURCE_IDS + registry
+│   │   │   │   │   ├── index.ts      # GENERATED — jangan edit manual
 │   │   │   │   │   ├── BaseSource.ts
 │   │   │   │   │   ├── types.ts
-│   │   │   │   │   └── impl/         # Copy adapter dari scraper (~30 file)
+│   │   │   │   │   └── impl/         # GENERATED dari scraper (via sync script)
 │   │   │   │   ├── scraperClient.ts  # Hybrid routing
 │   │   │   │   ├── cache.ts
 │   │   │   │   ├── warmCache.ts
@@ -85,6 +85,10 @@ rokuyomu/
 │   │       ├── bookmark/ history/ settings/ report/
 │   │       ├── about/ privacy/
 │   │       └── api/
+│   ├── scripts/
+│   │   ├── worker-sources.json       # Daftar ID source yang dijalankan di Worker
+│   │   ├── sync-worker-sources.mjs   # Script auto-copy + generate index.ts
+│   │   └── append-cron.js
 │   ├── wrangler.jsonc                # SCRAPER_BASE_URL, KV, cron
 │   └── package.json
 │
@@ -163,7 +167,8 @@ pnpm dev
 | `pnpm preview` | Build + `wrangler dev` |
 | `pnpm check` | svelte-check |
 | `pnpm lint` / `pnpm format` | ESLint / Prettier |
-| `pnpm deploy` | Deploy ke Cloudflare Workers |
+| `pnpm sync-worker-sources` | Sync adapter blocked sources dari scraper |
+| `pnpm deploy` | Sync + build + deploy ke Cloudflare Workers |
 | `pnpm cf-typegen` | Generate Worker types |
 
 ---
@@ -197,9 +202,7 @@ Opsional: `SCRAPER_API_KEY` (sama di scraper & frontend).
 
 ## Hybrid sources (diblokir Vercel)
 
-Beberapa situs memblokir outbound IP Vercel. Source tersebut di-register di:
-
-`frontend/src/lib/server/workerSources/`
+Beberapa situs memblokir outbound IP Vercel. Source tersebut dijalankan langsung di Cloudflare Worker (Cheerio).
 
 ### Alur
 
@@ -208,22 +211,32 @@ source ∈ WORKER_SOURCE_IDS  → Cheerio di CF Worker
 source lainnya              → scraper Vercel
 ```
 
-Saat ini (~30 source), termasuk:
+Daftar ID disimpan di:
 
-- Indo: `bacakomik`, `bacami`, `crotpedia`, `doujinku`, `holodek`, `ikiru`, `kiryuu`, `komikindo`, `komikstation`, `lumos`, `luvyaa`, `manhwadesu`, `manhwaindo`, `ngomik`, `sasangeyou`, `siikomik`, …
-- Internasional / lainnya: `klz9`, `rawkuma`, `athreascans`, `flamecomics`, `hentairead`, `kingcomix`, `manhuarmtl`, `onemanga`, `simplyhentai`, `weebcentral`, `ainzscans`, `pixhentai`, `lectortmo`, `zonatmo`, …
+```
+frontend/scripts/worker-sources.json
+```
 
-### Menambah source blocked
+### Menambah source blocked (otomatis)
 
-1. Copy adapter:
-   ```bash
-   cp scraper/src/sources/impl/Xxx.ts \
-      frontend/src/lib/server/workerSources/impl/Xxx.ts
-   ```
-2. Register di `workerSources/index.ts` (import + entry di `workerSources`).
-3. Pastikan `cheerio` ada di `frontend/package.json`.
+1. Pastikan adapter sudah ada di `scraper/src/sources/impl/` dan punya `id = 'namasource'`.
+2. Tambah ID ke `frontend/scripts/worker-sources.json`.
+3. Jalankan:
+
+```bash
+cd frontend
+pnpm sync-worker-sources
+```
+
+Script akan:
+- Copy file adapter dari scraper → `workerSources/impl/`
+- Generate ulang `workerSources/index.ts` (WORKER_SOURCE_IDS + loaders)
+- Hapus file orphan yang sudah tidak ada di daftar
+
 4. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
-5. `pnpm deploy`.
+5. `pnpm deploy` (sudah otomatis menjalankan sync dulu).
+
+> **Jangan edit manual** `workerSources/index.ts` atau file di `impl/`. Semua digenerate oleh script.
 
 Jaga jumlah Worker source tetap wajar. Bundle membesar + cold start CPU naik jika terlalu banyak.
 

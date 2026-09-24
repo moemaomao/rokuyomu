@@ -3,8 +3,8 @@
  * Path: frontend/src/lib/server/workerSources/impl/Sakuranovel.ts
  *
  * Fixes:
- * - Homepage: ambil lebih banyak judul (target ~24)
- * - Chapter list: chapter terbaru di atas
+ * - Homepage: ambil lebih banyak judul (target ~24) + badge chapter (Ch. XX)
+ * - Chapter list: judul dipendekkan jadi "Chapter XX" saja
  * - Metadata: status, type, authors, genres, alt title, rating lebih lengkap
  */
 import * as cheerio from 'cheerio';
@@ -48,12 +48,25 @@ function parseChapterNumber(title: string, fallback: number): number {
 	const m =
 		title.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
 		title.match(/\bch\.?\s*(\d+(?:\.\d+)?)/i) ||
+		title.match(/\bbab\s*(\d+(?:\.\d+)?)/i) ||
 		title.match(/\b(\d+(?:\.\d+)?)\s*[-–—]/);
 	if (m) {
 		const n = parseFloat(m[1]);
 		if (!Number.isNaN(n)) return n;
 	}
 	return fallback;
+}
+
+/** Ambil nomor chapter murni dari teks apapun → number | undefined */
+function extractChapterNum(text: string): number | undefined {
+	const t = (text || '').replace(/\s+/g, ' ').trim();
+	if (!t) return undefined;
+	const m =
+		t.match(/(?:chapter|ch\.?|bab)\s*(\d+(?:\.\d+)?)/i) ||
+		t.match(/(\d+(?:\.\d+)?)/);
+	if (!m) return undefined;
+	const n = parseFloat(m[1]);
+	return Number.isNaN(n) ? undefined : n;
 }
 
 export class SakuranovelSource extends BaseSource {
@@ -92,7 +105,6 @@ export class SakuranovelSource extends BaseSource {
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 
-		// Beberapa layout: latest update / listupd / flexbox
 		const selectors = [
 			'.listupd .bs',
 			'.listupd .bsx',
@@ -100,7 +112,9 @@ export class SakuranovelSource extends BaseSource {
 			'.flexbox2 .flexbox2-item',
 			'.serieslist .serieslist-item',
 			'article.series',
-			'.post-item'
+			'.post-item',
+			'.bs',
+			'.bsx'
 		];
 
 		for (const sel of selectors) {
@@ -108,28 +122,30 @@ export class SakuranovelSource extends BaseSource {
 				const a = $(el).find('a[href*="/series/"]').first();
 				const href = a.attr('href') || $(el).find('a').first().attr('href') || '';
 				if (!href || !/\/series\//.test(href)) return;
+
 				const title =
 					a.attr('title') ||
 					$(el).find('.tt, .title, h2, h3, .series-title, .entry-title').first().text().trim() ||
 					a.text().trim();
+				if (!title || title.length < 2) return;
+
 				const cover =
 					$(el).find('img').attr('data-src') ||
 					$(el).find('img').attr('data-lazy-src') ||
 					$(el).find('img').attr('src') ||
 					'';
+
 				const status =
 					$(el).find('.status, .status-series, .hot').text().trim() || undefined;
 				const typeText =
 					$(el).find('.type, .series-type, span.type').first().text().trim() || 'novel';
-				if (!title || title.length < 2) return;
+
 				const id = pathOnly(href);
 				if (list.some((x) => x.id === id)) return;
-				const latestRaw =
-					$(el).find('.epx, .chapter, .latest, .latest-chapter, .lchapter').first().text().trim() ||
-					'';
-				const chMatch =
-					latestRaw.match(/(?:chapter|ch\.?|bab)\s*(\d+(?:\.\d+)?)/i) ||
-					latestRaw.match(/(\d+(?:\.\d+)?)/);
+
+				// Badge chapter — ambil nomor saja
+				const latestChapter = this.extractLatestChapter($, el);
+
 				list.push({
 					id,
 					title,
@@ -138,7 +154,7 @@ export class SakuranovelSource extends BaseSource {
 					type: typeText || 'novel',
 					status,
 					lang: 'id',
-					latestChapter: chMatch ? chMatch[1] : latestRaw || undefined
+					...(latestChapter != null ? { latestChapter } : {})
 				});
 			});
 			if (list.length >= 16) break;
@@ -287,7 +303,6 @@ export class SakuranovelSource extends BaseSource {
 			}
 		});
 
-		// Gabung artist ke authors jika kosong
 		if (!authors.length && artists.length) authors.push(...artists);
 
 		const genres: string[] = [];
@@ -303,43 +318,43 @@ export class SakuranovelSource extends BaseSource {
 			if (cls.includes('status') || /ongoing|completed|tamat|hiatus|complete/i.test(t)) {
 				status = t || status;
 			}
-			// Type badge di infoz (China / Japan / Korea / Web Novel)
 			if (cls.includes('type') || /china|japan|korea|web\s*novel|light\s*novel/i.test(t)) {
 				if (t && typeLabel === 'novel') typeLabel = t;
 			}
 		});
 
-		// Rating
 		let rating: string | undefined;
 		const ratingEl = left.find('.series-infoz .rating, .rating, [class*="rating"]').first();
 		if (ratingEl.length) {
 			rating = ratingEl.text().trim() || ratingEl.attr('data-rating') || undefined;
 		}
 
-		// ── Chapters: site biasanya newest-first; pastikan newest di atas ──
+		// ── Chapters: judul dipendekkan jadi "Chapter XX" ──
 		const rawChapters: Chapter[] = [];
 		right.find('ul.series-chapterlists li').each((i, el) => {
 			const a = $(el).find('a').first();
 			const href = a.attr('href') || '';
-			const ctitle = (a.attr('title') || a.text().trim()).replace(/\s+/g, ' ').trim();
+			const rawTitle = (a.attr('title') || a.text().trim()).replace(/\s+/g, ' ').trim();
 			const date = $(el).find('span.date').text().trim() || undefined;
-			if (href && ctitle) {
-				rawChapters.push({
-					id: pathOnly(href),
-					title: ctitle,
-					number: parseChapterNumber(ctitle, i + 1),
-					date
-				});
-			}
+			if (!href || !rawTitle) return;
+
+			const num = parseChapterNumber(rawTitle, i + 1);
+			// Hanya "Chapter 123" — hemat tempat di UI
+			const shortTitle = `Chapter ${num}`;
+
+			rawChapters.push({
+				id: pathOnly(href),
+				title: shortTitle,
+				number: num,
+				date
+			});
 		});
 
-		// Sort: chapter number descending (newest / highest first)
+		// Newest first
 		rawChapters.sort((a, b) => {
-			const na = typeof a.number === 'number' ? a.number : parseChapterNumber(a.title, 0);
-			const nb = typeof b.number === 'number' ? b.number : parseChapterNumber(b.title, 0);
-			if (nb !== na) return nb - na;
-			// fallback: jika number sama, jaga urutan DOM (asumsi newest first di HTML)
-			return 0;
+			const na = typeof a.number === 'number' ? a.number : 0;
+			const nb = typeof b.number === 'number' ? b.number : 0;
+			return nb - na;
 		});
 
 		const chapters = rawChapters;
@@ -358,7 +373,6 @@ export class SakuranovelSource extends BaseSource {
 			lang: 'id'
 		};
 
-		// Field ekstra jika tipe mendukung (hindari break type)
 		const extra = details as MangaDetails & {
 			artists?: string[];
 			altTitles?: string[];
@@ -477,28 +491,48 @@ export class SakuranovelSource extends BaseSource {
 		};
 	}
 
-	/** Ambil teks chapter terbaru dari kartu (untuk badge Ch. di homepage) */
-	private extractLatestChapter($: cheerio.CheerioAPI, el: any): string | undefined {
+	/**
+	 * Ambil nomor chapter terbaru dari kartu (untuk badge Ch. di homepage).
+	 * Return number agar UI bisa render "Ch. 123".
+	 */
+	private extractLatestChapter($: cheerio.CheerioAPI, el: any): number | undefined {
 		const root = $(el);
-		const candidates = [
-			root.find('.epx').first().text(),
-			root.find('.chapter').first().text(),
-			root.find('.latest').first().text(),
-			root.find('.latest-chapter').first().text(),
-			root.find('.lchapter').first().text(),
-			root.find('.bigor .epxs').first().text(),
-			root.find('[class*="chapter"]').first().text(),
-			root.find('span').filter((_, s) => /chapter|ch\.?\s*\d|bab\s*\d/i.test($(s).text())).first().text()
+
+		// Prioritas selector yang biasa dipakai tema sakuranovel / themesia
+		const selectors = [
+			'.epx',
+			'.epxs',
+			'.chapter',
+			'.latest',
+			'.latest-chapter',
+			'.lchapter',
+			'.bigor .epxs',
+			'.bigor .epx',
+			'[class*="chapter"]',
+			'.adds .epx',
+			'.adds .chapter'
 		];
-		for (const raw of candidates) {
-			const t = (raw || '').replace(/\s+/g, ' ').trim();
-			if (!t) continue;
-			// Ambil nomor jika ada, biar badge "Ch. 123"
-			const m = t.match(/(?:chapter|ch\.?|bab)\s*(\d+(?:\.\d+)?)/i) || t.match(/(\d+(?:\.\d+)?)/);
-			if (m) return m[1];
-			if (t.length < 40) return t;
+
+		for (const sel of selectors) {
+			const t = root.find(sel).first().text();
+			const n = extractChapterNum(t);
+			if (n != null) return n;
 		}
-		return undefined;
+
+		// Fallback: cari span/div yang mengandung "chapter" / "ch." / "bab"
+		const hit = root
+			.find('span, div, a, small')
+			.filter((_, s) => {
+				const tx = $(s).text();
+				return /(?:chapter|ch\.?|bab)\s*\d/i.test(tx);
+			})
+			.first()
+			.text();
+		const n2 = extractChapterNum(hit);
+		if (n2 != null) return n2;
+
+		// Last resort: seluruh teks kartu
+		return extractChapterNum(root.text());
 	}
 
 	private parseSeriesCards(html: string): Manga[] {
@@ -543,6 +577,7 @@ export class SakuranovelSource extends BaseSource {
 				const typeText =
 					$(el).find('.type, span.type, .series-type').first().text().trim() || 'novel';
 				const latestChapter = this.extractLatestChapter($, el);
+
 				if (href && title && /\/series\//.test(href)) {
 					const id = pathOnly(href);
 					if (list.some((x) => x.id === id)) return;
@@ -554,7 +589,7 @@ export class SakuranovelSource extends BaseSource {
 						type: typeText || 'novel',
 						status,
 						lang: 'id',
-						latestChapter
+						...(latestChapter != null ? { latestChapter } : {})
 					});
 				}
 			});
@@ -579,7 +614,7 @@ export class SakuranovelSource extends BaseSource {
 					sourceId: this.id,
 					type: 'novel',
 					lang: 'id',
-					latestChapter
+					...(latestChapter != null ? { latestChapter } : {})
 				});
 			});
 		}
