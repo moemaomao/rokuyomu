@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import {
 		collection,
@@ -93,6 +94,19 @@
 
 	let isDarkMode = $state(true);
 	let reports = $state<Report[]>([]);
+	/** Filter from /report?source=xxx (from admin ERROR badge) */
+	let urlSourceFilter = $derived(
+		($page.url.searchParams.get('source') || '').toLowerCase().trim()
+	);
+	let displayedReports = $derived(
+		urlSourceFilter
+			? reports.filter(
+					(r) =>
+						(r.sourceId || '').toLowerCase() === urlSourceFilter ||
+						(r.sourceId || '').toLowerCase().includes(urlSourceFilter)
+			  )
+			: reports
+	);
 	let loading = $state(true);
 	let submitting = $state(false);
 	let errorMsg = $state('');
@@ -652,7 +666,7 @@
 				? 'text-zinc-400'
 				: 'text-zinc-500'}"
 		>
-			Latest reports
+			{urlSourceFilter ? `Reports for: ${urlSourceFilter}` : 'Latest reports'}
 		</h2>
 		<span class="text-xs {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
 			{reports.length} report{reports.length === 1 ? '' : 's'}
@@ -668,13 +682,13 @@
 			<Loader2 class="h-5 w-5 animate-spin" />
 			Loading...
 		</div>
-	{:else if reports.length === 0}
+	{:else if displayedReports.length === 0}
 		<p class="py-12 text-center text-sm {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
 			No reports yet. Be the first!
 		</p>
 	{:else}
 		<div class="space-y-3">
-			{#each reports as r (r.id)}
+			{#each displayedReports as r (r.id)}
 				{@const statusMeta = STATUS_META[r.status]}
 				{@const StatusIcon = statusMeta.icon}
 				<article

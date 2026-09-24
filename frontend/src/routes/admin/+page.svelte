@@ -19,16 +19,26 @@
 		XCircle,
 		AlertTriangle,
 		BookMarked,
-		BookOpen
+		BookOpen,
+		StickyNote,
+		Activity,
+		LayoutDashboard,
+		ExternalLink
 	} from 'lucide-svelte';
 
-	type SourceRow = { id: string; name: string; enabled: boolean };
+	type SourceRow = { id: string; name: string; enabled: boolean; note?: string };
 	type ContentKind = 'comic' | 'novel';
+	type HealthStatus = 'idle' | 'loading' | 'healthy' | 'empty' | 'timeout' | 'error';
+	type HealthInfo = { status: HealthStatus; ms?: number; message?: string; count?: number };
 
 	let {
 		data
 	}: {
-		data: { sources: SourceRow[]; disabledIds: string[] };
+		data: {
+			sources: SourceRow[];
+			disabledIds: string[];
+			notes?: Record<string, string>;
+		};
 	} = $props();
 
 	let sources = $state<SourceRow[]>([]);
@@ -41,6 +51,16 @@
 	let selectedKind = $state<ContentKind>('comic');
 	let authChecked = $state(false);
 	let reportCountMap = $state<Record<string, number>>({});
+	let openReportTotal = $state(0);
+
+	/** notes draft while editing */
+	let editingNoteId = $state<string | null>(null);
+	let noteDraft = $state('');
+	let savingNote = $state(false);
+
+	/** health check results */
+	let healthMap = $state<Record<string, HealthInfo>>({});
+	let healthRunning = $state(false);
 
 	function norm(id: string): string {
 		return String(id || '')
@@ -58,7 +78,10 @@
 
 	$effect.pre(() => {
 		if (sources.length === 0 && data?.sources?.length) {
-			sources = [...data.sources];
+			sources = data.sources.map((s) => ({
+				...s,
+				note: s.note ?? data.notes?.[s.id.toLowerCase()] ?? ''
+			}));
 		}
 	});
 
@@ -79,7 +102,8 @@
 			if (filter === 'disabled' && s.enabled) return false;
 			if (filter === 'reported' && !hasReport(s.id)) return false;
 			if (!q) return true;
-			return s.id.includes(q) || s.name.toLowerCase().includes(q);
+			const note = (s.note || '').toLowerCase();
+			return s.id.includes(q) || s.name.toLowerCase().includes(q) || note.includes(q);
 		});
 	});
 
@@ -89,10 +113,16 @@
 	const disabledCount = $derived(kindFiltered.filter((s) => !s.enabled).length);
 	const reportedCount = $derived(kindFiltered.filter((s) => hasReport(s.id)).length);
 	const kindTotal = $derived(kindFiltered.length);
+	const notesCount = $derived(sources.filter((s) => (s.note || '').trim()).length);
+	const allDisabledCount = $derived(sources.filter((s) => !s.enabled).length);
+	const allReportedCount = $derived(sources.filter((s) => hasReport(s.id)).length);
 
 	onMount(() => {
 		if (data?.sources?.length && sources.length === 0) {
-			sources = [...data.sources];
+			sources = data.sources.map((s) => ({
+				...s,
+				note: s.note ?? data.notes?.[s.id.toLowerCase()] ?? ''
+			}));
 		}
 		const t = setInterval(() => {
 			if (!isLoading()) {
@@ -109,22 +139,26 @@
 					qReports,
 					(snap) => {
 						const counts: Record<string, number> = {};
+						let openTotal = 0;
 						for (const d of snap.docs) {
 							const r = d.data() as {
 								type?: string;
 								status?: string;
 								sourceId?: string | null;
 							};
-							if (
+							const isOpen =
 								(r.type === 'broken_source' || r.type === 'bug') &&
-								(r.status === 'open' || r.status === 'in_progress') &&
-								r.sourceId
-							) {
-								const key = norm(r.sourceId);
-								counts[key] = (counts[key] || 0) + 1;
+								(r.status === 'open' || r.status === 'in_progress');
+							if (isOpen) {
+								openTotal += 1;
+								if (r.sourceId) {
+									const key = norm(r.sourceId);
+									counts[key] = (counts[key] || 0) + 1;
+								}
 							}
 						}
 						reportCountMap = counts;
+						openReportTotal = openTotal;
 					},
 					(err) => console.warn('[admin reports]', err)
 				);
@@ -153,12 +187,15 @@
 		sources?: SourceRow[];
 		error?: string;
 		disabledIds?: string[];
+		notes?: Record<string, string>;
 	};
 
 	type ApiToggleResponse = {
 		ok?: boolean;
 		error?: string;
 		disabledIds?: string[];
+		note?: string;
+		notes?: Record<string, string>;
 	};
 
 	async function refresh() {
@@ -172,7 +209,10 @@
 			});
 			const body = (await res.json()) as ApiListResponse;
 			if (!res.ok) throw new Error(body.error || res.statusText);
-			sources = body.sources ?? [];
+			sources = (body.sources ?? []).map((s) => ({
+				...s,
+				note: s.note ?? body.notes?.[s.id.toLowerCase()] ?? ''
+			}));
 			successMsg = 'Refreshed';
 			setTimeout(() => (successMsg = ''), 2000);
 		} catch (e: unknown) {
@@ -257,6 +297,113 @@
 			loading = false;
 		}
 	}
+
+	function openNoteEditor(s: SourceRow) {
+		editingNoteId = s.id;
+		noteDraft = s.note || '';
+	}
+
+	function cancelNote() {
+		editingNoteId = null;
+		noteDraft = '';
+	}
+
+	async function saveNote(sourceId: string) {
+		savingNote = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/sources', {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ action: 'note', sourceId, note: noteDraft })
+			});
+			const body = (await res.json()) as ApiToggleResponse;
+			if (!res.ok) throw new Error(body.error || res.statusText);
+
+			const saved = body.note || '';
+			sources = sources.map((s) => (s.id === sourceId ? { ...s, note: saved } : s));
+			editingNoteId = null;
+			noteDraft = '';
+			successMsg = `Note saved for ${sourceId}`;
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Save note failed';
+		} finally {
+			savingNote = false;
+		}
+	}
+
+	async function runHealth(sourceId: string) {
+		healthMap[sourceId] = { status: 'loading' };
+		healthMap = { ...healthMap };
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/health', {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ sourceId })
+			});
+			const body = (await res.json()) as {
+				ok?: boolean;
+				status?: HealthStatus;
+				ms?: number;
+				message?: string;
+				count?: number;
+				error?: string;
+			};
+			if (!res.ok && !body.status) {
+				healthMap[sourceId] = {
+					status: 'error',
+					message: body.error || res.statusText
+				};
+			} else {
+				healthMap[sourceId] = {
+					status: (body.status as HealthStatus) || (body.ok ? 'healthy' : 'error'),
+					ms: body.ms,
+					message: body.message,
+					count: body.count
+				};
+			}
+			healthMap = { ...healthMap };
+		} catch (e: unknown) {
+			healthMap[sourceId] = {
+				status: 'error',
+				message: e instanceof Error ? e.message : 'Health check failed'
+			};
+			healthMap = { ...healthMap };
+		}
+	}
+
+	async function runHealthFiltered() {
+		const targets = filtered.slice(0, 15);
+		if (targets.length === 0) return;
+		if (!confirm(`Health-check ${targets.length} source (max 15, ~8s timeout each)?`)) return;
+		healthRunning = true;
+		for (const s of targets) {
+			await runHealth(s.id);
+		}
+		healthRunning = false;
+		successMsg = `Health check selesai (${targets.length} source)`;
+		setTimeout(() => (successMsg = ''), 2500);
+	}
+
+	function goToReports(sourceId: string) {
+		goto(`/report?source=${encodeURIComponent(sourceId)}`);
+	}
+
+	function healthBadge(h: HealthInfo | undefined) {
+		if (!h || h.status === 'idle') return null;
+		return h;
+	}
 </script>
 
 <svelte:head>
@@ -298,7 +445,7 @@
 					Source Management
 				</h1>
 				<p class="mt-1 text-xs text-zinc-500">
-					Hide / tampilkan source. Badge ERROR = report user aktif.
+					Hide source, notes, health check, dan link ke report user.
 				</p>
 			</div>
 			<button
@@ -312,7 +459,51 @@
 			</button>
 		</div>
 
-		<!-- Comic | Novel switch (sama seperti Settings) -->
+		<!-- Dashboard -->
+		<div
+			class="mb-5 rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+		>
+			<div class="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+				<LayoutDashboard class="h-4 w-4 text-violet-500" />
+				Dashboard
+			</div>
+			<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+				<div
+					class="rounded-lg border border-amber-200/60 bg-amber-50/80 p-3 dark:border-amber-900/40 dark:bg-amber-950/30"
+				>
+					<div class="text-xs text-amber-600 dark:text-amber-400">Report open</div>
+					<div class="text-xl font-bold text-amber-700 dark:text-amber-300">
+						{openReportTotal}
+					</div>
+				</div>
+				<div
+					class="rounded-lg border border-orange-200/60 bg-orange-50/80 p-3 dark:border-orange-900/40 dark:bg-orange-950/30"
+				>
+					<div class="text-xs text-orange-600 dark:text-orange-400">Source broken</div>
+					<div class="text-xl font-bold text-orange-700 dark:text-orange-300">
+						{allReportedCount}
+					</div>
+				</div>
+				<div
+					class="rounded-lg border border-red-200/60 bg-red-50/80 p-3 dark:border-red-900/40 dark:bg-red-950/30"
+				>
+					<div class="text-xs text-red-600 dark:text-red-400">Source hidden</div>
+					<div class="text-xl font-bold text-red-700 dark:text-red-300">
+						{allDisabledCount}
+					</div>
+				</div>
+				<div
+					class="rounded-lg border border-sky-200/60 bg-sky-50/80 p-3 dark:border-sky-900/40 dark:bg-sky-950/30"
+				>
+					<div class="text-xs text-sky-600 dark:text-sky-400">With notes</div>
+					<div class="text-xl font-bold text-sky-700 dark:text-sky-300">
+						{notesCount}
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Comic | Novel -->
 		<div
 			class="mb-5 flex w-full max-w-xs overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-900"
 		>
@@ -340,7 +531,7 @@
 			</button>
 		</div>
 
-		<!-- Stats -->
+		<!-- Kind stats -->
 		<div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
 			<div
 				class="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
@@ -401,7 +592,7 @@
 				/>
 				<input
 					type="search"
-					placeholder="Cari id / nama…"
+					placeholder="Cari id / nama / note…"
 					bind:value={search}
 					class="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-violet-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
 				/>
@@ -446,9 +637,17 @@
 			>
 				Hide filtered
 			</button>
+			<button
+				type="button"
+				class="inline-flex items-center gap-1 rounded-lg border border-sky-300/70 px-2.5 py-1.5 text-xs text-sky-700 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-950/40"
+				onclick={runHealthFiltered}
+				disabled={loading || healthRunning}
+			>
+				<Activity class="h-3.5 w-3.5 {healthRunning ? 'animate-pulse' : ''}" />
+				Health filtered
+			</button>
 		</div>
 
-		<!-- Grouped by language (seperti Settings) -->
 		{#if Object.keys(grouped).length === 0}
 			<div class="py-12 text-center text-sm text-zinc-500">Tidak ada source yang cocok.</div>
 		{:else}
@@ -472,6 +671,7 @@
 										{@const reports = reportCount(s.id)}
 										{@const broken = hasReport(s.id)}
 										{@const meta = getSourceMeta(s.id)}
+										{@const h = healthBadge(healthMap[s.id])}
 										<tr
 											class="bg-white transition hover:bg-zinc-50 dark:bg-zinc-950/40 dark:hover:bg-zinc-900/60
 												{broken ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''}"
@@ -489,8 +689,11 @@
 														>
 													{/if}
 													{#if broken}
-														<span
-															class="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:border-amber-500/40 dark:text-amber-400"
+														<button
+															type="button"
+															class="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-600 transition hover:bg-amber-500/25 dark:border-amber-500/40 dark:text-amber-400"
+															title="Lihat report di /report"
+															onclick={() => goToReports(s.id)}
 														>
 															<AlertTriangle class="h-3 w-3" />
 															Error
@@ -501,12 +704,73 @@
 																	{reports}
 																</span>
 															{/if}
+															<ExternalLink class="h-2.5 w-2.5 opacity-70" />
+														</button>
+													{/if}
+													{#if h}
+														<span
+															class="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium
+																{h.status === 'healthy'
+																? 'border-emerald-400/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+																: h.status === 'loading'
+																	? 'border-zinc-400/40 text-zinc-500'
+																	: h.status === 'empty'
+																		? 'border-amber-400/50 bg-amber-500/10 text-amber-600'
+																		: 'border-red-400/50 bg-red-500/10 text-red-600 dark:text-red-400'}"
+															title={h.message}
+														>
+															{#if h.status === 'loading'}
+																<Loader2 class="h-3 w-3 animate-spin" />
+															{:else}
+																<Activity class="h-3 w-3" />
+															{/if}
+															{h.status === 'loading'
+																? '…'
+																: h.status === 'healthy'
+																	? `${h.ms}ms`
+																	: h.status}
 														</span>
 													{/if}
 												</div>
 												<div class="font-mono text-xs text-zinc-500">{s.id}</div>
+												{#if s.note}
+													<div
+														class="mt-1 flex items-start gap-1 text-xs text-sky-700 dark:text-sky-300"
+													>
+														<StickyNote class="mt-0.5 h-3 w-3 shrink-0" />
+														<span class="line-clamp-2">{s.note}</span>
+													</div>
+												{/if}
+												{#if editingNoteId === s.id}
+													<div class="mt-2 space-y-2">
+														<textarea
+															bind:value={noteDraft}
+															rows="2"
+															maxlength="500"
+															placeholder="Catatan admin (domain ganti, butuh cookie, dll.)"
+															class="w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-violet-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+														></textarea>
+														<div class="flex gap-2">
+															<button
+																type="button"
+																class="rounded-md bg-violet-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+																disabled={savingNote}
+																onclick={() => saveNote(s.id)}
+															>
+																{savingNote ? 'Saving…' : 'Save note'}
+															</button>
+															<button
+																type="button"
+																class="rounded-md border border-zinc-300 px-2.5 py-1 text-xs dark:border-zinc-600"
+																onclick={cancelNote}
+															>
+																Cancel
+															</button>
+														</div>
+													</div>
+												{/if}
 											</td>
-											<td class="w-28 px-3 py-2.5">
+											<td class="w-28 px-3 py-2.5 align-top">
 												{#if s.enabled}
 													<span
 														class="inline-flex items-center gap-1 rounded-full border border-emerald-300/60 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
@@ -521,24 +785,50 @@
 													</span>
 												{/if}
 											</td>
-											<td class="w-24 px-3 py-2.5 text-right">
-												<button
-													type="button"
-													class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50
-														{s.enabled
-														? 'border border-red-300/70 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40'
-														: 'border border-emerald-300/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40'}"
-													disabled={!!toggling[s.id] || loading}
-													onclick={() => toggle(s.id, !s.enabled)}
-												>
-													{#if toggling[s.id]}
-														<Loader2 class="h-3.5 w-3.5 animate-spin" />
-													{:else if s.enabled}
-														<EyeOff class="h-3.5 w-3.5" /> Hide
-													{:else}
-														<Eye class="h-3.5 w-3.5" /> Show
-													{/if}
-												</button>
+											<td class="w-36 px-3 py-2.5 text-right align-top">
+												<div class="flex flex-col items-end gap-1">
+													<button
+														type="button"
+														class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50
+															{s.enabled
+															? 'border border-red-300/70 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40'
+															: 'border border-emerald-300/70 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40'}"
+														disabled={!!toggling[s.id] || loading}
+														onclick={() => toggle(s.id, !s.enabled)}
+													>
+														{#if toggling[s.id]}
+															<Loader2 class="h-3.5 w-3.5 animate-spin" />
+														{:else if s.enabled}
+															<EyeOff class="h-3.5 w-3.5" /> Hide
+														{:else}
+															<Eye class="h-3.5 w-3.5" /> Show
+														{/if}
+													</button>
+													<div class="flex gap-1">
+														<button
+															type="button"
+															class="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-[10px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+															title="Edit note"
+															onclick={() => openNoteEditor(s)}
+														>
+															<StickyNote class="h-3 w-3" /> Note
+														</button>
+														<button
+															type="button"
+															class="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-[10px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+															title="Health check"
+															disabled={healthMap[s.id]?.status === 'loading'}
+															onclick={() => runHealth(s.id)}
+														>
+															{#if healthMap[s.id]?.status === 'loading'}
+																<Loader2 class="h-3 w-3 animate-spin" />
+															{:else}
+																<Activity class="h-3 w-3" />
+															{/if}
+															Ping
+														</button>
+													</div>
+												</div>
 											</td>
 										</tr>
 									{/each}
@@ -550,9 +840,19 @@
 			</div>
 		{/if}
 
-		<p class="mt-4 text-xs text-zinc-500">
-			Switch <strong>Comic / Novel</strong> seperti Settings. Source dikelompokkan per bahasa
-			(Indonesian, English, dll). Badge ERROR dari report user (open / in progress).
+		<p class="mt-4 space-y-1 text-xs text-zinc-500">
+			<span class="block">
+				<strong class="text-amber-600 dark:text-amber-400">ERROR</strong> = klik untuk buka
+				<code class="rounded bg-zinc-100 px-1 dark:bg-zinc-800">/report?source=…</code>
+			</span>
+			<span class="block">
+				<strong class="text-sky-600 dark:text-sky-400">Note</strong> tersimpan di KV —
+				contoh: “domain ganti”, “butuh cookie”.
+			</span>
+			<span class="block">
+				<strong class="text-emerald-600 dark:text-emerald-400">Ping</strong> = health check
+				scraper (timeout 8s).
+			</span>
 		</p>
 	{/if}
 </div>

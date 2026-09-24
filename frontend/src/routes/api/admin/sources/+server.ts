@@ -4,48 +4,49 @@ import { getSourceList } from '$lib/server/sources';
 import {
 	getDisabledSourceIds,
 	setSourceEnabled,
-	setDisabledSourceIds
+	setDisabledSourceIds,
+	getSourceNotes,
+	setSourceNote
 } from '$lib/server/sourceConfig';
 import { verifyAdminFromRequest } from '$lib/server/verifyAdmin';
 
-/** GET — list all sources + enabled/disabled state (admin only) */
-export const GET: RequestHandler = async ({ request, locals }) => {
+export const GET: RequestHandler = async ({ request, locals, platform }) => {
 	const auth = await verifyAdminFromRequest(request);
 	if (!auth.ok) {
 		return json({ error: auth.message }, { status: auth.status });
 	}
 
+	const kv = locals.kv ?? (platform as App.Platform | undefined)?.env?.MIKOROKU_CACHE ?? null;
 	const all = getSourceList();
-	const disabled = await getDisabledSourceIds(locals.kv);
-	const disabledSet = new Set(disabled);
+	const disabled = await getDisabledSourceIds(kv);
+	const notes = await getSourceNotes(kv);
+	const disabledSet = new Set(disabled.map((x) => x.toLowerCase()));
 
 	const sources = all.map((s) => ({
 		id: s.id,
 		name: s.name,
-		enabled: !disabledSet.has(s.id.toLowerCase())
+		enabled: !disabledSet.has(s.id.toLowerCase()),
+		note: notes[s.id.toLowerCase()] || ''
 	}));
 
 	return json({
 		sources,
 		disabledIds: disabled,
+		notes,
 		total: sources.length,
 		enabledCount: sources.filter((s) => s.enabled).length,
 		disabledCount: sources.filter((s) => !s.enabled).length
 	});
 };
 
-/**
- * POST body:
- *   { sourceId: string, enabled: boolean }  — toggle one source
- *   { disabledIds: string[] }               — replace full disabled list
- */
-export const POST: RequestHandler = async ({ request, locals }) => {
+export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const auth = await verifyAdminFromRequest(request);
 	if (!auth.ok) {
 		return json({ error: auth.message }, { status: auth.status });
 	}
 
-	if (!locals.kv) {
+	const kv = locals.kv ?? (platform as App.Platform | undefined)?.env?.MIKOROKU_CACHE ?? null;
+	if (!kv) {
 		return json({ error: 'KV not available' }, { status: 503 });
 	}
 
@@ -53,6 +54,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		sourceId?: string;
 		enabled?: boolean;
 		disabledIds?: string[];
+		note?: string;
+		action?: string;
 	};
 
 	try {
@@ -63,11 +66,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const allIds = new Set(getSourceList().map((s) => s.id.toLowerCase()));
 
+	// Save note
+	if (body.action === 'note' && body.sourceId != null) {
+		const id = String(body.sourceId).toLowerCase().trim();
+		if (!allIds.has(id)) {
+			return json({ error: `Unknown source: ${body.sourceId}` }, { status: 400 });
+		}
+		const notes = await setSourceNote(id, String(body.note ?? ''), kv);
+		return json({ ok: true, sourceId: id, note: notes[id] || '', notes });
+	}
+
 	if (Array.isArray(body.disabledIds)) {
 		const next = body.disabledIds
 			.map((id) => String(id).toLowerCase().trim())
 			.filter((id) => allIds.has(id));
-		await setDisabledSourceIds(next, locals.kv);
+		await setDisabledSourceIds(next, kv);
 		return json({ ok: true, disabledIds: next });
 	}
 
@@ -76,7 +89,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (!allIds.has(id)) {
 			return json({ error: `Unknown source: ${body.sourceId}` }, { status: 400 });
 		}
-		const disabledIds = await setSourceEnabled(id, body.enabled, locals.kv);
+		const disabledIds = await setSourceEnabled(id, body.enabled, kv);
 		return json({
 			ok: true,
 			sourceId: id,
@@ -86,7 +99,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	return json(
-		{ error: 'Provide { sourceId, enabled } or { disabledIds }' },
+		{ error: 'Provide { sourceId, enabled }, { disabledIds }, or { action: "note", sourceId, note }' },
 		{ status: 400 }
 	);
 };
