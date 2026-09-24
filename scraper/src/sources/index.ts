@@ -106,9 +106,11 @@ import SakuranovelSource from './impl/Sakuranovel';
 import { MeionovelSource } from './impl/Meionovel';
 import { BacaLightNovelSource } from './impl/BacaLightNovel';
 import { LovelyBlossomsSource } from './impl/LovelyBlossoms';
+import { BotiTranslationSource } from './impl/BotiTranslation';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    botitranslation: new BotiTranslationSource(),
     lovelyblossoms: new LovelyBlossomsSource(),
     bacalightnovel: new BacaLightNovelSource(),
     meionovel: new MeionovelSource(),
