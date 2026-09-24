@@ -20,9 +20,50 @@ import {
 export type { BookmarkEntry };
 
 const MAX = 60;
+const TOMBSTONE_KEY = 'mikoroku_bookmark_tombstones';
+
+export function normalizeMangaId(id: string): string {
+	let s = String(id || '').trim();
+	if (!s) return '';
+	if (!s.startsWith('/')) s = '/' + s;
+	s = s.replace(/\/+$/, '');
+	return s || '/';
+}
 
 function bookmarkDocId(mangaId: string): string {
-	return encodeURIComponent(String(mangaId || '')).replace(/%/g, '_');
+	return encodeURIComponent(normalizeMangaId(mangaId)).replace(/%/g, '_');
+}
+
+function readTombstones(): Set<string> {
+	if (!browser) return new Set();
+	try {
+		const raw = localStorage.getItem(TOMBSTONE_KEY);
+		if (!raw) return new Set();
+		const arr = JSON.parse(raw) as string[];
+		return new Set((arr || []).map(normalizeMangaId).filter(Boolean));
+	} catch {
+		return new Set();
+	}
+}
+
+function writeTombstones(set: Set<string>) {
+	if (!browser) return;
+	localStorage.setItem(TOMBSTONE_KEY, JSON.stringify([...set]));
+}
+
+function addTombstone(mangaId: string) {
+	const n = normalizeMangaId(mangaId);
+	if (!n) return;
+	const set = readTombstones();
+	set.add(n);
+	writeTombstones(set);
+}
+
+function removeTombstone(mangaId: string) {
+	const n = normalizeMangaId(mangaId);
+	const set = readTombstones();
+	set.delete(n);
+	writeTombstones(set);
 }
 
 let bookmarks = $state<BookmarkEntry[]>([]);
@@ -31,7 +72,6 @@ let ready = $state(false);
 if (browser) {
 	(async () => {
 		try {
-	
 			const old = localStorage.getItem('mikoroku_bookmarks');
 			if (old) {
 				try {
@@ -64,7 +104,6 @@ function lightCover(url: string | undefined | null): string {
 	if (!url) return '';
 	let u = String(url).trim();
 	if (!u) return '';
-
 	if (u.startsWith('//')) u = 'https:' + u;
 
 	const keepQuery =
@@ -72,22 +111,23 @@ function lightCover(url: string | undefined | null): string {
 
 	try {
 		const parsed = new URL(u);
+		if (!parsed.hostname || !parsed.hostname.includes('.')) return '';
 		if (!keepQuery) {
 			parsed.search = '';
 			parsed.hash = '';
 		}
 		u = parsed.toString();
 	} catch {
-		// ignore
+		return '';
 	}
 
-	const max = keepQuery ? 600 : 180;
+	const max = keepQuery ? 1200 : 800;
 	return u.length > max ? u.slice(0, max) : u;
 }
 
 function lightEntry(entry: BookmarkEntry): BookmarkEntry {
 	return {
-		mangaId: entry.mangaId,
+		mangaId: normalizeMangaId(entry.mangaId) || entry.mangaId,
 		mangaSlug: entry.mangaSlug || '',
 		mangaTitle: (entry.mangaTitle || '').slice(0, 120),
 		cover: lightCover(entry.cover),
@@ -105,8 +145,11 @@ export function isBookmarksReady(): boolean {
 }
 
 export function isBookmarked(mangaId: string, sourceId?: string): boolean {
+	const n = normalizeMangaId(mangaId);
 	return bookmarks.some(
-		(b) => b.mangaId === mangaId && (!sourceId || b.sourceId === sourceId)
+		(b) =>
+			normalizeMangaId(b.mangaId) === n &&
+			(!sourceId || b.sourceId === sourceId)
 	);
 }
 
@@ -115,10 +158,15 @@ export async function addBookmark(entry: Omit<BookmarkEntry, 'timestamp'>) {
 
 	const full = lightEntry({
 		...entry,
+		mangaId: normalizeMangaId(entry.mangaId) || entry.mangaId,
 		timestamp: Date.now()
 	});
 
-	const list = (await idbGetBookmarks()).filter((b) => b.mangaId !== entry.mangaId);
+	removeTombstone(full.mangaId);
+
+	const list = (await idbGetBookmarks()).filter(
+		(b) => normalizeMangaId(b.mangaId) !== normalizeMangaId(full.mangaId)
+	);
 	list.unshift(full);
 	const trimmed = list.slice(0, MAX);
 	await idbSetAllBookmarks(trimmed);
@@ -129,7 +177,10 @@ export async function addBookmark(entry: Omit<BookmarkEntry, 'timestamp'>) {
 	const user = getUser();
 	if (user && db) {
 		try {
-			await setDoc(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(entry.mangaId)), full);
+			await setDoc(
+				doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(full.mangaId)),
+				full
+			);
 		} catch (e) {
 			console.error('Failed to sync bookmark to cloud', e);
 		}
@@ -139,15 +190,43 @@ export async function addBookmark(entry: Omit<BookmarkEntry, 'timestamp'>) {
 export async function removeBookmark(mangaId: string) {
 	if (!browser) return;
 
-	await idbDeleteBookmark(mangaId);
+	const n = normalizeMangaId(mangaId);
+	addTombstone(n || mangaId);
 
-	bookmarks = await idbGetBookmarks();
+	const list = await idbGetBookmarks();
+	const next = list.filter((b) => normalizeMangaId(b.mangaId) !== n);
+	await idbSetAllBookmarks(next);
+	
+	try {
+		await idbDeleteBookmark(mangaId);
+		if (n && n !== mangaId) await idbDeleteBookmark(n);
+	} catch {
+		// ignore
+	}
+
+	bookmarks = next;
 	window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 
 	const user = getUser();
 	if (user && db) {
 		try {
-			await deleteDoc(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(mangaId)));
+			await deleteDoc(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(n || mangaId)));
+		
+			if (mangaId !== n) {
+				try {
+					await deleteDoc(
+						doc(
+							db,
+							'users',
+							user.uid,
+							'bookmarks',
+							encodeURIComponent(String(mangaId || '')).replace(/%/g, '_')
+						)
+					);
+				} catch {
+					// ignore
+				}
+			}
 		} catch (e) {
 			console.error('Failed to remove bookmark from cloud', e);
 		}
@@ -166,9 +245,25 @@ export async function toggleBookmark(entry: Omit<BookmarkEntry, 'timestamp'>): P
 export async function clearBookmarks() {
 	if (!browser) return;
 
+	const list = await idbGetBookmarks();
+	for (const b of list) addTombstone(b.mangaId);
+
 	await idbClearBookmarks();
 	bookmarks = [];
 	window.dispatchEvent(new CustomEvent('bookmarks-changed'));
+
+	const user = getUser();
+	if (user && db && list.length) {
+		try {
+			const batch = writeBatch(db);
+			for (const b of list) {
+				batch.delete(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(b.mangaId)));
+			}
+			await batch.commit();
+		} catch (e) {
+			console.error('Failed to clear cloud bookmarks', e);
+		}
+	}
 }
 
 export async function syncBookmarksOnLogin() {
@@ -185,14 +280,19 @@ export async function syncBookmarksOnLogin() {
 		const cloud: BookmarkEntry[] = [];
 		snap.forEach((d) => cloud.push(d.data() as BookmarkEntry));
 
+		const tombstones = readTombstones();
+
 		const map = new Map<string, BookmarkEntry>();
-		[...cloud, ...local].forEach((b) => {
+		for (const b of [...cloud, ...local]) {
 			const light = lightEntry(b);
-			const existing = map.get(light.mangaId);
+			const key = normalizeMangaId(light.mangaId);
+			if (!key) continue;
+			if (tombstones.has(key)) continue;
+			const existing = map.get(key);
 			if (!existing || light.timestamp > existing.timestamp) {
-				map.set(light.mangaId, light);
+				map.set(key, { ...light, mangaId: key });
 			}
-		});
+		}
 
 		const merged = Array.from(map.values())
 			.sort((a, b) => b.timestamp - a.timestamp)
@@ -203,10 +303,17 @@ export async function syncBookmarksOnLogin() {
 		window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 
 		const batch = writeBatch(firestore);
+	
 		merged.forEach((b) => {
 			batch.set(doc(firestore, 'users', user.uid, 'bookmarks', bookmarkDocId(b.mangaId)), b);
 		});
+
+		for (const id of tombstones) {
+			batch.delete(doc(firestore, 'users', user.uid, 'bookmarks', bookmarkDocId(id)));
+		}
 		await batch.commit();
+
+		writeTombstones(new Set());
 	} catch (e) {
 		console.error('Failed to sync bookmarks on login', e);
 	}
