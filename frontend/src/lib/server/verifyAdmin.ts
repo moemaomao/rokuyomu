@@ -1,7 +1,3 @@
-/**
- * Verify Firebase ID token via JWT payload decode + ADMIN_UIDS.
- * (Tidak pakai Google tokeninfo — sering gagal dari CF Workers)
- */
 import { isAdmin } from '$lib/admin';
 
 function base64UrlToJson(segment: string): Record<string, unknown> | null {

@@ -1,4 +1,5 @@
-import { getSourceList } from '$lib/server/sources';
+import { getSourceList, filterEnabledSources } from '$lib/server/sources';
+import { getDisabledSourceIds } from '$lib/server/sourceConfig';
 import { remoteLatest } from '$lib/server/scraperClient';
 import { parsePreferredFromCookie } from '$lib/stores/preferredSources';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
@@ -102,7 +103,8 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 	const lang = (url.searchParams.get('lang') || 'all').toLowerCase();
 	const type = (url.searchParams.get('type') || 'all').toLowerCase();
 
-	const sources = getSourceList();
+	const disabledIds = await getDisabledSourceIds(locals.kv);
+	const sources = filterEnabledSources(getSourceList(), disabledIds);
 	let mangas: Manga[] = [];
 	let currentSource: string | null = sourceParam;
 	let isMulti = false;

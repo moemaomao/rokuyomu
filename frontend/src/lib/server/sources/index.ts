@@ -129,3 +129,11 @@ export function getSourceName(sourceId: string): string {
 export function getAllSourceIds(): string[] {
 	return SOURCES.map((s) => s.id);
 }
+export function filterEnabledSources(
+	sources: SourceMeta[],
+	disabledIds: string[]
+): SourceMeta[] {
+	if (!disabledIds.length) return sources;
+	const set = new Set(disabledIds.map((id) => id.toLowerCase()));
+	return sources.filter((s) => !set.has(s.id.toLowerCase()));
+}
