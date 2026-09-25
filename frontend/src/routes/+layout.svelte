@@ -521,7 +521,7 @@ $effect(() => {
 				onclick={(e) => handleNavigate(e, '/notification')}
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
 			>
-				<Bell class="h-5 w-5 shrink-0" /> Notifikasi
+				<Bell class="h-5 w-5 shrink-0" /> Notification
 				{#if notifUnread > 0}
 					<span
 						class="ml-auto rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white"
