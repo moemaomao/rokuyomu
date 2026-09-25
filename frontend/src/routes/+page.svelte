@@ -9,6 +9,7 @@
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 	import { getImpl, isMultiMode } from '$lib/stores/impl';
 	import { isNovelSource } from '$lib/utils/novelSources';
+	import coverNotFound from '$lib/assets/cover not found.jpg';
 
 	const { data }: { data: PageData } = $props();
 
@@ -126,17 +127,19 @@
 	}
 
 	function onCoverError(e: Event) {
-		const img = e.currentTarget as HTMLImageElement;
-		const original = img.dataset.original;
-		const src = img.dataset.source || currentSource;
-		if (!original || !src) return;
-		if (img.dataset.fallback === '1') {
-			img.style.opacity = '0';
-			return;
-		}
-		img.dataset.fallback = '1';
-		img.src = `/api/proxy?url=${encodeURIComponent(original)}&source=${src}`;
+	const img = e.currentTarget as HTMLImageElement;
+	const original = img.dataset.original;
+	const src = img.dataset.source || currentSource;
+
+	if (!original || !src || img.dataset.fallback === '1') {
+		img.src = coverNotFound;
+		img.onerror = null;
+		return;
 	}
+
+	img.dataset.fallback = '1';
+	img.src = `/api/proxy?url=${encodeURIComponent(original)}&source=${src}`;
+}
 
 	async function navigate(params: URLSearchParams) {
 		loading = true;
@@ -434,12 +437,12 @@
 										class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
 									/>
 								{:else}
-									<div
-										class="flex h-full w-full items-center justify-center bg-zinc-800 text-xl text-zinc-600"
-									>
-										📚
-									</div>
-								{/if}
+	                               <img
+		                               src={coverNotFound}
+		                               alt="Cover not found"
+		                               class="h-full w-full object-cover"
+	                                />
+                                 {/if}
 
 								<!-- STATUS -->
 								<span
