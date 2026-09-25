@@ -79,12 +79,11 @@
 			attributeFilter: ['class']
 		});
 
-		// Restore last selected source (localStorage) when opening bare /
 		try {
 			const url = new URL(window.location.href);
 			const hasSource = !!url.searchParams.get('source');
 			const hasQuery = !!url.searchParams.get('q')?.trim();
-			// Only restore on clean homepage (no source, no search)
+		
 			if (!hasSource && !hasQuery && !isMultiMode()) {
 				const last = getImpl();
 				if (last) {
@@ -97,7 +96,7 @@
 						if (isNovelSource(last) || url.searchParams.get('kind') === 'novel') {
 							p.set('kind', 'novel');
 						}
-						// Keep other params if any (except empty)
+
 						goto(`/?${p.toString()}`, {
 							replaceState: true,
 							invalidateAll: true,
@@ -303,7 +302,6 @@
 		bind:selectedType
 	/>
 
-	<!-- Age Gate Modal (direct URL R18) -->
 	{#if showAgeGate}
 		<div
 			class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"

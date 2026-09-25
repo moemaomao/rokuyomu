@@ -6,6 +6,7 @@
 	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
 	import { Bell, BellOff } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
+	import coverNotFound from '$lib/assets/cover not found.jpg';
 
 	const { data }: { data: PageData } = $props();
 
@@ -257,16 +258,16 @@
 	}
 
 	function onCoverError(e: Event) {
-		const img = e.currentTarget as HTMLImageElement;
-		const original = img.dataset.original;
-		if (!original) return;
-		if (img.dataset.fallback === '1') {
-			img.style.opacity = '0';
-			return;
-		}
-		img.dataset.fallback = '1';
-		img.src = `/api/proxy?url=${encodeURIComponent(original)}&source=${source}`;
+	const img = e.currentTarget as HTMLImageElement;
+	const original = img.dataset.original;
+	if (!original || img.dataset.fallback === '1') {
+		img.src = coverNotFound;
+		img.onerror = null; // cegah infinite loop
+		return;
 	}
+	img.dataset.fallback = '1';
+	img.src = `/api/proxy?url=${encodeURIComponent(original)}&source=${source}`;
+}
 
 	function formatDateOnly(raw: string | undefined | null): string {
 		if (!raw) return '';
@@ -487,16 +488,20 @@
 							class="detail-cover relative h-[150px] w-[100px] overflow-hidden rounded-xl shadow-2xl ring-1 md:h-[280px] md:w-[200px] lg:h-[340px] lg:w-[240px]"
 						>
 							{#if manga.cover}
-								<img
-									src={proxyImage(manga.cover, 200, 300)}
-									data-original={manga.cover}
-									alt="{manga.title} cover"
-									class="h-full w-full object-cover"
-									onerror={onCoverError}
-								/>
-							{:else}
-								<div class="detail-muted flex h-full items-center justify-center">📚</div>
-							{/if}
+	                           <img
+		                          src={proxyImage(manga.cover, 200, 300)}
+		                          data-original={manga.cover}
+		                          alt="{manga.title} cover"
+		                          class="h-full w-full object-cover"
+		                          onerror={onCoverError}
+	                            />
+                            {:else}
+	                            <img
+		                          src={coverNotFound}
+		                          alt="Cover not found"
+		                          class="h-full w-full object-cover"
+	                            />
+                            {/if}
 							{#if volume}
 								<span
 									class="absolute right-2 bottom-2 flex h-7 w-7 items-center justify-center rounded-md bg-black/75 text-xs font-bold text-white ring-1 ring-white/20"
