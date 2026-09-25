@@ -10,7 +10,7 @@
 	import 'nprogress/nprogress.css';
 	import { isMultiMode } from '$lib/stores/impl';
 	import { untrack } from 'svelte';
-	import { collection, query, onSnapshot } from 'firebase/firestore';
+	import { collection, query, where, getDocs, limit } from 'firebase/firestore';
     import { db } from '$lib/firebase';
     import { syncBrokenFromReports } from '$lib/stores/brokenSources.svelte';
 
@@ -204,13 +204,36 @@
 		isBookmarkOpen = false;
 	}
 
+	const SYNC_DONE_KEY = 'rokuyomu_cloud_synced';
+
+	async function runCloudSyncOnce() {
+		if (!browser) return;
+		const user = getUser();
+		if (!user) return;
+
+		const doneKey = `${SYNC_DONE_KEY}:${user.uid}`;
+		if (sessionStorage.getItem(doneKey) === '1') return;
+
+		sessionStorage.setItem(doneKey, '1');
+		try {
+			await Promise.all([syncBookmarksOnLogin(), syncHistoryOnLogin()]);
+			loadBookmarks();
+		} catch (e) {
+			sessionStorage.removeItem(doneKey);
+			console.warn('[cloud sync]', e);
+		}
+	}
+
 	async function handleAuthSuccess() {
 		isAuthOpen = false;
-		await Promise.all([syncBookmarksOnLogin(), syncHistoryOnLogin()]);
-		loadBookmarks();
+		await runCloudSyncOnce();
 	}
 
 	async function handleLogout() {
+		const user = getUser();
+		if (user && browser) {
+			sessionStorage.removeItem(`${SYNC_DONE_KEY}:${user.uid}`);
+		}
 		await logout();
 		isAuthOpen = false;
 	}
@@ -304,7 +327,6 @@ onMount(() => {
 		sessionStorage.removeItem(RETRY_KEY);
 	}
 
-	// Restore last source (same behavior as clicking logo)
 	try {
 		const path = window.location.pathname;
 		if (path === '/' || path === '') {
@@ -390,30 +412,68 @@ onMount(() => {
 	};
 
 	window.addEventListener('scroll', handleScroll, { passive: true });
-// ── Broken sources (ERROR badge) ───────────────────────────────────────
-let unsubBroken: (() => void) | undefined;
-if (db) {
+const BROKEN_CACHE_KEY = 'rokuyomu_broken_sources_v1';
+const BROKEN_CACHE_TTL = 30 * 60 * 1000; // 30 menit
+
+async function loadBrokenSourcesOnce() {
+	if (!db) return;
+
 	try {
-		const qBroken = query(collection(db, 'reports'));
-		unsubBroken = onSnapshot(
-			qBroken,
-			(snap) => {
-				const list = snap.docs.map(
-					(d) =>
-						d.data() as {
-							type?: string;
-							status?: string;
-							sourceId?: string;
-						}
-				);
-				syncBrokenFromReports(list);
-			},
-			(err) => console.warn('[brokenSources]', err)
+		const raw = sessionStorage.getItem(BROKEN_CACHE_KEY);
+		if (raw) {
+			const cached = JSON.parse(raw) as { ts: number; list: any[] };
+			if (cached?.ts && Date.now() - cached.ts < BROKEN_CACHE_TTL && Array.isArray(cached.list)) {
+				syncBrokenFromReports(cached.list);
+				return;
+			}
+		}
+	} catch {
+	}
+
+	try {
+		const qBroken = query(
+			collection(db, 'reports'),
+			where('status', 'in', ['open', 'in_progress']),
+			limit(100)
 		);
+		const snap = await getDocs(qBroken);
+		const list = snap.docs.map(
+			(d) =>
+				d.data() as {
+					type?: string;
+					status?: string;
+					sourceId?: string;
+				}
+		);
+		syncBrokenFromReports(list);
+		try {
+			sessionStorage.setItem(BROKEN_CACHE_KEY, JSON.stringify({ ts: Date.now(), list }));
+		} catch {
+		}
 	} catch (e) {
-		console.warn('[brokenSources] init failed', e);
+		console.warn('[brokenSources] one-shot failed', e);
+		try {
+			const snap = await getDocs(query(collection(db, 'reports'), limit(100)));
+			const list = snap.docs.map(
+				(d) =>
+					d.data() as {
+						type?: string;
+						status?: string;
+						sourceId?: string;
+					}
+			);
+			syncBrokenFromReports(list);
+		} catch (e2) {
+			console.warn('[brokenSources] fallback failed', e2);
+		}
 	}
 }
+
+loadBrokenSourcesOnce();
+
+	setTimeout(() => {
+		runCloudSyncOnce();
+	}, 800);
 
 	return () => {
 		mq.removeEventListener('change', applyMq);
@@ -421,19 +481,7 @@ if (db) {
 		window.removeEventListener('notifications-changed', loadNotifBadge);
 		document.removeEventListener('click', onDocClick);
 		window.removeEventListener('scroll', handleScroll);
-		unsubBroken?.();
 	};
-});
-
-$effect(() => {
-	const user = getUser();
-	if (user && browser) {
-		const t = setTimeout(() => {
-			syncBookmarksOnLogin();
-			syncHistoryOnLogin();
-		}, 600);
-		return () => clearTimeout(t);
-	}
 });
 </script>
 

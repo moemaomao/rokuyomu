@@ -16,7 +16,6 @@
 		refreshing = true;
 		try {
 			loadHistory();
-			// small delay so spinner visible
 			await new Promise((r) => setTimeout(r, 200));
 		} finally {
 			refreshing = false;
@@ -48,7 +47,7 @@
 			await removeFromHistory(mangaId);
 		} catch (e) {
 			console.error(e);
-			loadHistory(); // rollback from store if failed
+			loadHistory();
 		}
 	}
 
