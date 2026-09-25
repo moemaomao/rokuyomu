@@ -113,7 +113,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	botitranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	goldennovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	shanghaifantasy: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
-	yumeneijiworks: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' }
+	yumeneijiworks: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	brightnovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
