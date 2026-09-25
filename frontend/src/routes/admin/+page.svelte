@@ -4,7 +4,7 @@
 	import { getUser, isLoading } from '$lib/stores/auth.svelte';
 	import { isAdmin } from '$lib/admin';
 	import { auth, db } from '$lib/firebase';
-	import { collection, onSnapshot, query } from 'firebase/firestore';
+	import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
 	import { groupSourcesByLang, LANG_LABELS, getSourceMeta } from '$lib/utils/sourceMeta';
 	import { isNovelSource } from '$lib/utils/novelSources';
@@ -52,12 +52,10 @@
 	let reportCountMap = $state<Record<string, number>>({});
 	let openReportTotal = $state(0);
 
-	/** notes draft while editing */
 	let editingNoteId = $state<string | null>(null);
 	let noteDraft = $state('');
 	let savingNote = $state(false);
 
-	/** health check results */
 	let healthMap = $state<Record<string, HealthInfo>>({});
 	let healthRunning = $state(false);
 
@@ -130,47 +128,47 @@
 			}
 		}, 80);
 
-		let unsub: (() => void) | undefined;
-		if (db) {
-			try {
-				const qReports = query(collection(db, 'reports'));
-				unsub = onSnapshot(
-					qReports,
-					(snap) => {
-						const counts: Record<string, number> = {};
-						let openTotal = 0;
-						for (const d of snap.docs) {
-							const r = d.data() as {
-								type?: string;
-								status?: string;
-								sourceId?: string | null;
-							};
-							const isOpen =
-								(r.type === 'broken_source' || r.type === 'bug') &&
-								(r.status === 'open' || r.status === 'in_progress');
-							if (isOpen) {
-								openTotal += 1;
-								if (r.sourceId) {
-									const key = norm(r.sourceId);
-									counts[key] = (counts[key] || 0) + 1;
-								}
-							}
-						}
-						reportCountMap = counts;
-						openReportTotal = openTotal;
-					},
-					(err) => console.warn('[admin reports]', err)
-				);
-			} catch (e) {
-				console.warn('[admin reports] init failed', e);
-			}
-		}
+		loadReportCounts();
 
 		return () => {
 			clearInterval(t);
-			unsub?.();
 		};
 	});
+
+	async function loadReportCounts() {
+		if (!db) return;
+		try {
+			const qReports = query(
+				collection(db, 'reports'),
+				orderBy('createdAt', 'desc'),
+				limit(100)
+			);
+			const snap = await getDocs(qReports);
+			const counts: Record<string, number> = {};
+			let openTotal = 0;
+			for (const d of snap.docs) {
+				const r = d.data() as {
+					type?: string;
+					status?: string;
+					sourceId?: string | null;
+				};
+				const isOpen =
+					(r.type === 'broken_source' || r.type === 'bug') &&
+					(r.status === 'open' || r.status === 'in_progress');
+				if (isOpen) {
+					openTotal += 1;
+					if (r.sourceId) {
+						const key = norm(r.sourceId);
+						counts[key] = (counts[key] || 0) + 1;
+					}
+				}
+			}
+			reportCountMap = counts;
+			openReportTotal = openTotal;
+		} catch (e) {
+			console.warn('[admin reports]', e);
+		}
+	}
 
 	async function getIdToken(): Promise<string | null> {
 		const u = getUser();
@@ -212,6 +210,7 @@
 				...s,
 				note: s.note ?? body.notes?.[s.id.toLowerCase()] ?? ''
 			}));
+			await loadReportCounts();
 			successMsg = 'Refreshed';
 			setTimeout(() => (successMsg = ''), 2000);
 		} catch (e: unknown) {

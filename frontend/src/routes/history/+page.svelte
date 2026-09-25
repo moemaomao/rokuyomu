@@ -2,13 +2,25 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
-	import { History, Trash2, BookOpen, Clock } from 'lucide-svelte';
+	import { History, Trash2, BookOpen, Clock, RefreshCw } from 'lucide-svelte';
 	import { getHistory, clearHistory, removeFromHistory, type ReadingEntry } from '$lib/stores/history';
 
 	let history = $state<ReadingEntry[]>([]);
+	let refreshing = $state(false);
 
 	function loadHistory() {
 		history = getHistory();
+	}
+
+	async function handleRefresh() {
+		refreshing = true;
+		try {
+			loadHistory();
+			// small delay so spinner visible
+			await new Promise((r) => setTimeout(r, 200));
+		} finally {
+			refreshing = false;
+		}
 	}
 
 	onMount(() => {
@@ -19,10 +31,13 @@
 
 	async function handleClear() {
 		if (!confirm('Clear all reading history?')) return;
+		const prev = history;
 		history = [];
 		try {
 			await clearHistory();
-		} finally {
+		} catch (e) {
+			console.error(e);
+			history = prev;
 			loadHistory();
 		}
 	}
@@ -31,8 +46,9 @@
 		history = history.filter((h) => h.mangaId !== mangaId);
 		try {
 			await removeFromHistory(mangaId);
-		} finally {
-			loadHistory();
+		} catch (e) {
+			console.error(e);
+			loadHistory(); // rollback from store if failed
 		}
 	}
 
@@ -67,15 +83,28 @@
             <p class="mt-1 text-sm text-zinc-500">{history.length} entries</p>
         </div>
 
-        {#if history.length > 0}
+        <div class="flex items-center gap-2">
             <button
-                onclick={handleClear}
-                class="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-red-400 hover:bg-red-400/10 hover:text-red-300 transition-colors"
+                type="button"
+                onclick={handleRefresh}
+                disabled={refreshing}
+                class="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-50"
+                title="Refresh"
             >
-                <Trash2 class="h-4 w-4" />
-                Clear All
+                <RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
+                Refresh
             </button>
-        {/if}
+            {#if history.length > 0}
+                <button
+                    type="button"
+                    onclick={handleClear}
+                    class="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-red-400 hover:bg-red-400/10 hover:text-red-300 transition-colors"
+                >
+                    <Trash2 class="h-4 w-4" />
+                    Clear All
+                </button>
+            {/if}
+        </div>
     </div>
 
     {#if history.length === 0}

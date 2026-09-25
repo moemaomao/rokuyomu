@@ -1,19 +1,31 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getBookmarks, removeBookmark, type BookmarkEntry } from '$lib/stores/bookmark.svelte';
-	import { Trash2, BookOpen } from 'lucide-svelte';
+	import { Trash2, BookOpen, RefreshCw } from 'lucide-svelte';
 
 	let bookmarks = $state<BookmarkEntry[]>([]);
+	let refreshing = $state(false);
 
 	function loadBookmarks() {
 		bookmarks = getBookmarks();
+	}
+
+	async function handleRefresh() {
+		refreshing = true;
+		try {
+			loadBookmarks();
+			await new Promise((r) => setTimeout(r, 200));
+		} finally {
+			refreshing = false;
+		}
 	}
 
 	async function handleRemove(mangaId: string) {
 		bookmarks = bookmarks.filter((b) => b.mangaId !== mangaId);
 		try {
 			await removeBookmark(mangaId);
-		} finally {
+		} catch (e) {
+			console.error(e);
 			loadBookmarks();
 		}
 	}
@@ -56,8 +68,20 @@
 
 <div class="mx-auto max-w-6xl p-4 md:p-6">
     <div class="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
-        <h1 class="text-xl font-bold md:text-2xl">Bookmark List</h1>
-        <span class="text-sm text-zinc-400">{bookmarks.length} saved manga</span>
+        <div>
+            <h1 class="text-xl font-bold md:text-2xl">Bookmark List</h1>
+            <p class="mt-1 text-sm text-zinc-400">{bookmarks.length} saved manga</p>
+        </div>
+        <button
+            type="button"
+            onclick={handleRefresh}
+            disabled={refreshing}
+            class="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-50"
+            title="Refresh"
+        >
+            <RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
+            Refresh
+        </button>
     </div>
 
     {#if bookmarks.length === 0}
