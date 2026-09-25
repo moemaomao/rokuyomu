@@ -4,7 +4,7 @@
  *
  * URL pattern:
  *   Series  : /series/{slug}/
- *   Chapter : /{slug}/{slug}-.../   (contoh: /kichiten/kichiten-1/)
+ *   Chapter : /{slug}/{slug}-v4c120/  atau /{slug}/{slug}-50/
  *   List    : /list-novels/
  *   Latest  : /latest-releases/  + /latest-releases/page/{n}
  *
@@ -72,9 +72,39 @@ function extractChapterNum(text: string): number | undefined {
 }
 
 function slugToTitle(slug: string): string {
-	return slug
-		.replace(/-/g, ' ')
-		.replace(/\b\w/g, (c) => c.toUpperCase());
+	return slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Parse nomor dari path: .../loveho-isekai-v4c120/ atau ...-v1c2-2/ atau ...-50/ */
+function parseFromPath(path: string): {
+	vol?: number;
+	ch?: number;
+	part?: number;
+	number: number;
+	label: string;
+} {
+	// v4c120, v1c2-2, v3c8-3
+	const m = path.match(/v(\d+)c(\d+)(?:-(\d+))?/i);
+	if (m) {
+		const vol = parseInt(m[1], 10);
+		const ch = parseInt(m[2], 10);
+		const part = m[3] ? parseInt(m[3], 10) : undefined;
+		const number = vol * 100000 + ch * 100 + (part ?? 0);
+		const label =
+			part != null ? `Vol ${vol} Ch ${ch}-${part}` : `Vol ${vol} Ch ${ch}`;
+		return { vol, ch, part, number, label };
+	}
+
+	// kichiten-183, shared-life-v1c1 sudah ketangkap di atas; fallback angka di ujung
+	const m2 = path.match(/-(\d+)(?:-\d+)?\/?$/);
+	if (m2) {
+		const ch = parseInt(m2[1], 10);
+		if (!Number.isNaN(ch) && ch > 0) {
+			return { ch, number: ch, label: `Chapter ${ch}` };
+		}
+	}
+
+	return { number: 0, label: 'Chapter' };
 }
 
 export class TinyTranslationSource extends BaseSource {
@@ -104,6 +134,7 @@ export class TinyTranslationSource extends BaseSource {
 		return out;
 	}
 
+	/** /list-novels/ — On-going / Completed / Dropped */
 	private async parseListNovels(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/list-novels/');
 		const $ = cheerio.load(html);
@@ -145,6 +176,10 @@ export class TinyTranslationSource extends BaseSource {
 		return list;
 	}
 
+	/**
+	 * /latest-releases/ (+ page/N)
+	 * Page 2+ TIDAK punya link /series/ — chapter URL: /{slug}/{slug}-xxx/
+	 */
 	private async parseLatestReleases(page: number): Promise<Manga[]> {
 		const path =
 			page <= 1 ? '/latest-releases/' : `/latest-releases/page/${page}/`;
@@ -173,13 +208,14 @@ export class TinyTranslationSource extends BaseSource {
 
 			const slug = parts[0];
 			const second = parts[1];
-
 			if (!second.startsWith(slug) && !/(?:chapter|c\d|v\d)/i.test(second)) return;
 			if (/\.(css|js|png|jpg|jpeg|webp|gif|svg|ico|xml|json)$/i.test(second)) return;
 
 			const seriesId = `/series/${slug}`;
 			const chText = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
-			const latestChapter = extractChapterNum(chText);
+			const fromPath = parseFromPath(p);
+			const latestChapter =
+				fromPath.ch ?? extractChapterNum(chText) ?? (fromPath.number || undefined);
 
 			const parent = $(el).closest('li, article, div, p, section');
 			const parentText = parent.text().replace(/\s+/g, ' ').trim();
@@ -217,10 +253,11 @@ export class TinyTranslationSource extends BaseSource {
 					typeof existing.latestChapter === 'number'
 						? existing.latestChapter
 						: extractChapterNum(String(existing.latestChapter ?? '')) ?? 0;
-				if (latestChapter > prev) existing.latestChapter = latestChapter;
+				if (Number(latestChapter) > prev) existing.latestChapter = latestChapter;
 			}
 		});
 
+		// Page 1: merge link /series/
 		$('a[href*="/series/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			if (!href || !/\/series\/[^/]+\/?$/.test(pathOnly(href))) return;
@@ -419,23 +456,34 @@ export class TinyTranslationSource extends BaseSource {
 			if (p === '/' || p === pathOnly(path)) return;
 
 			const rawTitle = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
-			if (!rawTitle || rawTitle.length < 2) return;
+			if (!rawTitle || rawTitle.length < 1) return;
 
-			const isChapter =
-				/(?:volume|vol\.?)\s*\d+|chapter\s*\d+|ch\.?\s*\d+|prologue|epilogue/i.test(
-					rawTitle
-				) || /\/[a-z0-9-]+\/[a-z0-9-]*(?:v\d+c\d+|c\d+|chapter|\d+)/i.test(p);
-			if (!isChapter) return;
+			const parts = p.split('/').filter(Boolean);
+			if (parts.length < 2) return;
 
-			const num = parseChapterNumber(rawTitle, chapters.length + 1);
+			const slug = parts[0];
+			const second = parts[1];
+			const looksLikeChapter =
+				second.toLowerCase().startsWith(slug.toLowerCase().slice(0, 4)) ||
+				/v\d+c\d+/i.test(p) ||
+				/-\d+\/?$/.test(p);
+			if (!looksLikeChapter) return;
+
+			const parsed = parseFromPath(p);
+
+			if (parsed.number === 0 && !/chapter|part|prologue|epilogue|volume/i.test(rawTitle)) {
+				return;
+			}
+
 			if (seen.has(p)) return;
 			seen.add(p);
 
-			chapters.push({
-				id: p,
-				title: `Chapter ${num}`,
-				number: num
-			});
+			if (parsed.number === 0) {
+				const n = parseChapterNumber(rawTitle, chapters.length + 1);
+				chapters.push({ id: p, title: `Chapter ${n}`, number: n });
+			} else {
+				chapters.push({ id: p, title: parsed.label, number: parsed.number });
+			}
 		});
 
 		chapters.sort((a, b) => {
