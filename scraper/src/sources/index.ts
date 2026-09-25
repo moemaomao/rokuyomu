@@ -109,9 +109,11 @@ import { LovelyBlossomsSource } from './impl/LovelyBlossoms';
 import { BotiTranslationSource } from './impl/BotiTranslation';
 import { GoldenNovelSource } from './impl/GoldenNovel';
 import { ShanghaiFantasySource } from './impl/ShanghaiFantasy';
+import { YumeNeijiWorksSource } from './impl/YumeNeijiWorks';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    yumeneijiworks: new YumeNeijiWorksSource(),
     shanghaifantasy: new ShanghaiFantasySource(),
     goldennovel: new GoldenNovelSource(),
     botitranslation: new BotiTranslationSource(),
