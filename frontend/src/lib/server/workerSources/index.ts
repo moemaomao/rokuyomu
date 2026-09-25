@@ -53,6 +53,7 @@ export const WORKER_SOURCE_IDS = new Set([
 	'siikomik',
 	'silentquill',
 	'simplyhentai',
+	'tinytranslation',
 	'weebcentral',
 	'yumeneijiworks'
 ]);
@@ -96,6 +97,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	siikomik: async () => new (await import('./impl/Siikomik')).SiikomikSource(),
 	silentquill: async () => new (await import('./impl/SilentQuill')).SilentQuillSource(),
 	simplyhentai: async () => new (await import('./impl/Simplyhentai')).SimplyHentaiSource(),
+	tinytranslation: async () => new (await import('./impl/TinyTranslation')).TinyTranslationSource(),
 	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
 	yumeneijiworks: async () => new (await import('./impl/YumeNeijiWorks')).YumeNeijiWorksSource(),
 };
