@@ -116,7 +116,8 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'yumeneijiworks', name: 'Yume Neiji Works' },
 	{ id: 'brightnovels', name: 'Bright Novels' },
 	{ id: 'tinytranslation', name: 'TinyTranslation' },
-	{ id: 'dragonholic', name: 'Dragonholic' }
+	{ id: 'dragonholic', name: 'Dragonholic' },
+	{ id: 'flenser', name: 'Flenser' },
 ];
 
 export function getSourceList(): SourceMeta[] {
