@@ -221,13 +221,13 @@
 		}
 	}
 
-	async function toggle(sourceId: string, enabled: boolean) {
-		toggling[sourceId] = true;
+		async function toggle(sourceId: string, enabled: boolean) {
+		toggling = { ...toggling, [sourceId]: true };
 		errorMsg = '';
 		successMsg = '';
 		try {
 			const token = await getIdToken();
-			if (!token) throw new Error('Not authenticated');
+			if (!token) throw new Error('Not authenticated — login ulang');
 			const res = await fetch('/api/admin/sources', {
 				method: 'POST',
 				headers: {
@@ -237,15 +237,16 @@
 				body: JSON.stringify({ sourceId, enabled })
 			});
 			const body = (await res.json()) as ApiToggleResponse;
-			if (!res.ok) throw new Error(body.error || res.statusText);
+			if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`);
 
 			sources = sources.map((s) => (s.id === sourceId ? { ...s, enabled } : s));
 			successMsg = `${sourceId} → ${enabled ? 'ditampilkan' : 'disembunyikan'}`;
 			setTimeout(() => (successMsg = ''), 2500);
 		} catch (e: unknown) {
 			errorMsg = e instanceof Error ? e.message : 'Toggle failed';
+			console.error('[admin toggle]', sourceId, e);
 		} finally {
-			toggling[sourceId] = false;
+			toggling = { ...toggling, [sourceId]: false };
 		}
 	}
 

@@ -10,17 +10,16 @@ import {
 } from '$lib/server/sourceConfig';
 import { verifyAdminFromRequest } from '$lib/server/verifyAdmin';
 
-export const GET: RequestHandler = async ({ request, locals, platform }) => {
+export const GET: RequestHandler = async ({ request, locals }) => {
 	const auth = await verifyAdminFromRequest(request);
 	if (!auth.ok) {
 		return json({ error: auth.message }, { status: auth.status });
 	}
 
-	const kv = locals.kv ?? (platform as App.Platform | undefined)?.env?.MIKOROKU_CACHE ?? null;
 	const all = getSourceList();
-	const disabled = await getDisabledSourceIds(kv);
-	const notes = await getSourceNotes(kv);
-	const disabledSet = new Set(disabled.map((x) => x.toLowerCase()));
+	const disabled = await getDisabledSourceIds(locals.kv);
+	const notes = await getSourceNotes(locals.kv);
+	const disabledSet = new Set(disabled.map((id) => id.toLowerCase()));
 
 	const sources = all.map((s) => ({
 		id: s.id,
@@ -39,14 +38,13 @@ export const GET: RequestHandler = async ({ request, locals, platform }) => {
 	});
 };
 
-export const POST: RequestHandler = async ({ request, locals, platform }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
 	const auth = await verifyAdminFromRequest(request);
 	if (!auth.ok) {
 		return json({ error: auth.message }, { status: auth.status });
 	}
 
-	const kv = locals.kv ?? (platform as App.Platform | undefined)?.env?.MIKOROKU_CACHE ?? null;
-	if (!kv) {
+	if (!locals.kv) {
 		return json({ error: 'KV not available' }, { status: 503 });
 	}
 
@@ -54,8 +52,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		sourceId?: string;
 		enabled?: boolean;
 		disabledIds?: string[];
-		note?: string;
 		action?: string;
+		note?: string;
 	};
 
 	try {
@@ -66,21 +64,25 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const allIds = new Set(getSourceList().map((s) => s.id.toLowerCase()));
 
-	// Save note
 	if (body.action === 'note' && body.sourceId != null) {
 		const id = String(body.sourceId).toLowerCase().trim();
 		if (!allIds.has(id)) {
 			return json({ error: `Unknown source: ${body.sourceId}` }, { status: 400 });
 		}
-		const notes = await setSourceNote(id, String(body.note ?? ''), kv);
-		return json({ ok: true, sourceId: id, note: notes[id] || '', notes });
+		const notes = await setSourceNote(id, String(body.note ?? ''), locals.kv);
+		return json({
+			ok: true,
+			sourceId: id,
+			note: notes[id] || '',
+			notes
+		});
 	}
 
 	if (Array.isArray(body.disabledIds)) {
 		const next = body.disabledIds
 			.map((id) => String(id).toLowerCase().trim())
 			.filter((id) => allIds.has(id));
-		await setDisabledSourceIds(next, kv);
+		await setDisabledSourceIds(next, locals.kv);
 		return json({ ok: true, disabledIds: next });
 	}
 
@@ -89,7 +91,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		if (!allIds.has(id)) {
 			return json({ error: `Unknown source: ${body.sourceId}` }, { status: 400 });
 		}
-		const disabledIds = await setSourceEnabled(id, body.enabled, kv);
+		const disabledIds = await setSourceEnabled(id, body.enabled, locals.kv);
 		return json({
 			ok: true,
 			sourceId: id,
