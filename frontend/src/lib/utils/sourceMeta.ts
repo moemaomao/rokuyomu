@@ -115,6 +115,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	shanghaifantasy: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	yumeneijiworks: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	brightnovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	tinytranslation: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

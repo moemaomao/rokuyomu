@@ -8,7 +8,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'goldennovel',
 	'shanghaifantasy',
 	'yumeneijiworks',
-	'brightnovels'
+	'brightnovels',
+	'tinytranslation'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
