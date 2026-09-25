@@ -4,9 +4,10 @@
 	import {
 		collection,
 		addDoc,
+		getDocs,
 		query,
 		orderBy,
-		onSnapshot,
+		limit,
 		doc,
 		updateDoc,
 		deleteDoc,
@@ -27,7 +28,8 @@
 		Trash2,
 		Shield,
 		ChevronDown,
-		Check
+		Check,
+		RefreshCw
 	} from 'lucide-svelte';
 	import type { PageData } from './$types';
 	import { groupSourcesByLang, LANG_LABELS, getSourceMeta } from '$lib/utils/sourceMeta';
@@ -108,6 +110,7 @@
 			: reports
 	);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let submitting = $state(false);
 	let errorMsg = $state('');
 	let successMsg = $state('');
@@ -166,6 +169,58 @@
 		};
 	}
 
+	const REPORTS_LIMIT = 80;
+
+	function applyBrokenFromList(list: Report[]) {
+		const broken: string[] = [];
+		for (const r of list) {
+			if (
+				(r.type === 'fix_source' || r.type === 'bug') &&
+				(r.status === 'open' || r.status === 'in_progress') &&
+				r.sourceId
+			) {
+				broken.push(r.sourceId);
+			}
+		}
+		setBrokenIds(broken);
+	}
+
+	function formatQuotaError(err: unknown): string {
+		const e = err as { code?: string; message?: string };
+		if (e?.code === 'resource-exhausted' || /quota/i.test(e?.message || '')) {
+			return 'Firestore quota habis. Coba lagi nanti atau upgrade plan Firebase.';
+		}
+		return e?.message || 'Request failed.';
+	}
+
+	async function loadReports(opts?: { silent?: boolean }) {
+		if (!db) {
+			loading = false;
+			errorMsg = 'Firestore is not ready.';
+			return;
+		}
+		if (!opts?.silent) loading = true;
+		else refreshing = true;
+		errorMsg = '';
+		try {
+			const q = query(
+				collection(db, 'reports'),
+				orderBy('createdAt', 'desc'),
+				limit(REPORTS_LIMIT)
+			);
+			const snap = await getDocs(q);
+			const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Report);
+			reports = list;
+			applyBrokenFromList(list);
+		} catch (err) {
+			console.error(err);
+			errorMsg = formatQuotaError(err);
+		} finally {
+			loading = false;
+			refreshing = false;
+		}
+	}
+
 	onMount(() => {
 		isDarkMode = document.documentElement.classList.contains('dark');
 		const obs = new MutationObserver(() => {
@@ -173,13 +228,6 @@
 		});
 		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
-		if (!db) {
-			loading = false;
-			errorMsg = 'Firestore is not ready.';
-			return;
-		}
-
-		const q = query(collection(db, 'reports'), orderBy('createdAt', 'desc'));
 		try {
 			const current = getImpl();
 			if (current) formSourceId = current;
@@ -187,34 +235,10 @@
 			/* ignore */
 		}
 
-		const unsub = onSnapshot(
-			q,
-			(snap) => {
-				reports = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Report);
-				const broken: string[] = [];
-				for (const d of snap.docs) {
-					const r = d.data() as Report;
-					if (
-                      (r.type === 'fix_source' || r.type === 'bug') &&
-                      (r.status === 'open' || r.status === 'in_progress') &&
-                        r.sourceId
-                        ) {
-                     broken.push(r.sourceId);
-                  }
-				}
-				setBrokenIds(broken);
-				loading = false;
-			},
-			(err) => {
-				console.error(err);
-				errorMsg = 'Failed to load reports.';
-				loading = false;
-			}
-		);
+		loadReports();
 
 		return () => {
 			obs.disconnect();
-			unsub();
 		};
 	});
 
@@ -241,21 +265,36 @@
 		errorMsg = '';
 		successMsg = '';
 
+		const payload = {
+			type: formType,
+			title: formTitle.trim(),
+			message: formMessage.trim(),
+			sourceLink: link || null,
+			sourceId: formSourceId || null,
+			status: 'open' as ReportStatus,
+			userId: user?.uid ?? null,
+			userName: user?.displayName || user?.email || 'Anonymous',
+			userEmail: user?.email ?? null,
+			adminReply: null as string | null
+		};
+
 		try {
-			await addDoc(collection(db, 'reports'), {
-				type: formType,
-				title: formTitle.trim(),
-				message: formMessage.trim(),
-				sourceLink: link || null,
-				sourceId: formSourceId || null,
-				status: 'open',
-				userId: user?.uid ?? null,
-				userName: user?.displayName || user?.email || 'Anonymous',
-				userEmail: user?.email ?? null,
-				adminReply: null,
+			const ref = await addDoc(collection(db, 'reports'), {
+				...payload,
 				createdAt: serverTimestamp(),
 				updatedAt: serverTimestamp()
 			});
+
+			// Langsung muncul di list tanpa reload
+			const optimistic: Report = {
+				id: ref.id,
+				...payload,
+				createdAt: { toDate: () => new Date() } as Timestamp,
+				updatedAt: { toDate: () => new Date() } as Timestamp
+			};
+			reports = [optimistic, ...reports].slice(0, REPORTS_LIMIT);
+			applyBrokenFromList(reports);
+
 			formTitle = '';
 			formSourceLink = '';
 			formSourceId = '';
@@ -265,9 +304,9 @@
 			sourceDropdownOpen = false;
 			successMsg = 'Report submitted successfully. Thank you!';
 			setTimeout(() => (successMsg = ''), 4000);
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error(err);
-			errorMsg = err?.message || 'Failed to submit report.';
+			errorMsg = formatQuotaError(err);
 		} finally {
 			submitting = false;
 		}
@@ -285,52 +324,58 @@
 	}
 
 	async function saveEdit(id: string) {
-	if (!db || !admin) return;
-	try {
-		await updateDoc(doc(db, 'reports', id), {
-			status: editStatus,
-			adminReply: editReply.trim() || null,
-			updatedAt: serverTimestamp()
-		});
+		if (!db || !admin) return;
+		try {
+			await updateDoc(doc(db, 'reports', id), {
+				status: editStatus,
+				adminReply: editReply.trim() || null,
+				updatedAt: serverTimestamp()
+			});
 
-		reports = reports.map((r) =>
-			r.id === id
-				? {
-						...r,
-						status: editStatus,
-						adminReply: editReply.trim() || null
-					}
-				: r
-		);
-		syncBrokenFromReports(reports);
-
-		editingId = null;
-	} catch (err: any) {
-		console.error(err);
-		errorMsg = err?.code ? `${err.code}: ${err.message}` : 'Failed to save changes.';
+			reports = reports.map((r) =>
+				r.id === id
+					? {
+							...r,
+							status: editStatus,
+							adminReply: editReply.trim() || null
+						}
+					: r
+			);
+			syncBrokenFromReports(reports);
+			editingId = null;
+		} catch (err: unknown) {
+			console.error(err);
+			errorMsg = formatQuotaError(err);
+		}
 	}
-}
 
 	async function removeReport(id: string) {
 		if (!db || !admin) return;
 		if (!confirm('Delete this report?')) return;
 		try {
 			await deleteDoc(doc(db, 'reports', id));
-		} catch (err: any) {
+			reports = reports.filter((r) => r.id !== id);
+			applyBrokenFromList(reports);
+			if (editingId === id) editingId = null;
+		} catch (err: unknown) {
 			console.error(err);
-			errorMsg = err?.message || 'Failed to delete report.';
+			errorMsg = formatQuotaError(err);
 		}
 	}
 
-	function formatDate(ts: Timestamp | null) {
+		function formatDate(ts: Timestamp | null) {
 		if (!ts?.toDate) return '—';
-		return ts.toDate().toLocaleString('en-US', {
-			day: 'numeric',
-			month: 'short',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit'
-		});
+		try {
+			return ts.toDate().toLocaleString('en-US', {
+				day: 'numeric',
+				month: 'short',
+				year: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+		} catch {
+			return '—';
+		}
 	}
 
 	function btnClass(open = false) {
@@ -660,7 +705,7 @@
 		</div>
 	</form>
 
-	<div class="mb-3 flex items-center justify-between">
+	<div class="mb-3 flex items-center justify-between gap-2">
 		<h2
 			class="text-sm font-semibold uppercase tracking-wider {isDarkMode
 				? 'text-zinc-400'
@@ -668,9 +713,24 @@
 		>
 			{urlSourceFilter ? `Reports for: ${urlSourceFilter}` : 'Latest reports'}
 		</h2>
-		<span class="text-xs {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
-			{reports.length} report{reports.length === 1 ? '' : 's'}
-		</span>
+		<div class="flex items-center gap-2">
+			<span class="text-xs {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
+				{displayedReports.length} report{displayedReports.length === 1 ? '' : 's'}
+			</span>
+			<button
+				type="button"
+				onclick={() => loadReports({ silent: true })}
+				disabled={loading || refreshing}
+				class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50
+					{isDarkMode
+					? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+					: 'border-zinc-300 text-zinc-600 hover:bg-zinc-100'}"
+				title="Refresh reports"
+			>
+				<RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
+				Refresh
+			</button>
+		</div>
 	</div>
 
 	{#if loading}
