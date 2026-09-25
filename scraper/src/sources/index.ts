@@ -112,9 +112,11 @@ import { ShanghaiFantasySource } from './impl/ShanghaiFantasy';
 import { YumeNeijiWorksSource } from './impl/YumeNeijiWorks';
 import { BrightNovelsSource } from './impl/BrightNovels';
 import { TinyTranslationSource } from './impl/TinyTranslation';
+import { DragonholicSource } from './impl/Dragonholic';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    dragonholic: new DragonholicSource(),
     tinytranslation: new TinyTranslationSource(),
     brightnovels: new BrightNovelsSource(),
     yumeneijiworks: new YumeNeijiWorksSource(),
