@@ -124,7 +124,22 @@ export class DragonholicSource extends BaseSource {
 		return { data, totalPages, total };
 	}
 
-	private mapSeriesItem(item: any): Manga | null {
+	/** Latest chapter number for a series (1 request) */
+	private async fetchLatestChapterNum(seriesId: number): Promise<number | undefined> {
+		try {
+			const { data } = await this.apiGet<any[]>(
+				`/chapter?parent=${seriesId}&per_page=1&orderby=date&order=desc&status=publish`
+			);
+			if (!Array.isArray(data) || !data[0]) return undefined;
+			const title = decodeHtml(data[0].title?.rendered || data[0].title || '');
+			const n = parseChapterNumber(title, NaN);
+			return Number.isNaN(n) ? undefined : n;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private mapSeriesItem(item: any, latestChapter?: number | string): Manga | null {
 		const title = decodeHtml(item?.title?.rendered || item?.title || '');
 		if (!title || title.length < 2) return null;
 		const slug = item.slug || '';
@@ -145,7 +160,7 @@ export class DragonholicSource extends BaseSource {
 			}
 		}
 
-		return {
+		const manga: Manga = {
 			id,
 			title,
 			cover: absUrl(cover),
@@ -154,6 +169,10 @@ export class DragonholicSource extends BaseSource {
 			status,
 			lang: 'en'
 		};
+		if (latestChapter != null && latestChapter !== '') {
+			manga.latestChapter = latestChapter;
+		}
+		return manga;
 	}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
@@ -162,10 +181,20 @@ export class DragonholicSource extends BaseSource {
 			`/series?page=${p}&per_page=${PER_PAGE}&orderby=modified&order=desc&_embed=1&status=publish`
 		);
 		if (!Array.isArray(data)) return [];
+
+		// Enrich latestChapter in parallel (badge di card)
+		const enriched = await Promise.all(
+			data.map(async (item) => {
+				const latest = item?.id
+					? await this.fetchLatestChapterNum(item.id)
+					: undefined;
+				return this.mapSeriesItem(item, latest);
+			})
+		);
+
 		const out: Manga[] = [];
 		const seen = new Set<string>();
-		for (const item of data) {
-			const m = this.mapSeriesItem(item);
+		for (const m of enriched) {
 			if (!m || seen.has(m.id)) continue;
 			seen.add(m.id);
 			out.push(m);
@@ -182,10 +211,19 @@ export class DragonholicSource extends BaseSource {
 			`/series?search=${encodeURIComponent(q)}&page=${page}&per_page=${PER_PAGE}&orderby=relevance&_embed=1&status=publish`
 		);
 		if (!Array.isArray(data)) return [];
+
+		const enriched = await Promise.all(
+			data.map(async (item) => {
+				const latest = item?.id
+					? await this.fetchLatestChapterNum(item.id)
+					: undefined;
+				return this.mapSeriesItem(item, latest);
+			})
+		);
+
 		const out: Manga[] = [];
 		const seen = new Set<string>();
-		for (const item of data) {
-			const m = this.mapSeriesItem(item);
+		for (const m of enriched) {
 			if (!m || seen.has(m.id)) continue;
 			seen.add(m.id);
 			out.push(m);
@@ -193,14 +231,12 @@ export class DragonholicSource extends BaseSource {
 		return out;
 	}
 
-	/** Resolve numeric series ID from path /series/{slug} */
 	private async resolveSeriesId(mangaId: string): Promise<{ id: number; item: any }> {
 		let path = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
 		path = path.replace(/\/$/, '');
 		const slugMatch = path.match(/\/series\/([^/]+)/);
 		const slug = slugMatch ? slugMatch[1] : path.replace(/^\//, '');
 
-		// Try by slug
 		const { data } = await this.apiGet<any[]>(
 			`/series?slug=${encodeURIComponent(slug)}&_embed=1&status=publish`
 		);
@@ -208,7 +244,6 @@ export class DragonholicSource extends BaseSource {
 			return { id: data[0].id, item: data[0] };
 		}
 
-		// Numeric id
 		if (/^\d+$/.test(slug)) {
 			const { data: one } = await this.apiGet<any>(`/series/${slug}?_embed=1`);
 			if (one?.id) return { id: one.id, item: one };
@@ -289,13 +324,11 @@ export class DragonholicSource extends BaseSource {
 			}
 		}
 
-		// Fallback authors from taxonomy IDs if no embed names
-		if (!authors.length && Array.isArray(item['series-author'])) {
-			/* skip numeric ids without names */
-		}
-
 		const seriesPath = seriesPathFromLink(item.link || '', item.slug);
 		const chapters = await this.fetchAllChapters(seriesId, item.slug || '');
+
+		const latestChapter =
+			chapters.length > 0 ? chapters[0].number : undefined;
 
 		return {
 			id: seriesPath,
@@ -308,12 +341,100 @@ export class DragonholicSource extends BaseSource {
 			genres,
 			chapters,
 			type: 'novel',
-			lang: 'en'
+			lang: 'en',
+			...(latestChapter != null ? { latestChapter } : {})
 		};
 	}
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
+	}
+
+	/** Resolve chapter WP object by path */
+	private async resolveChapterItem(chapterId: string): Promise<any> {
+		let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+		path = path.replace(/\/$/, '');
+
+		const parts = path.split('/').filter(Boolean);
+		const chapterSlug = parts[parts.length - 1] || '';
+		const seriesSlug = parts.length >= 3 ? parts[1] : '';
+
+		if (chapterSlug) {
+			const { data } = await this.apiGet<any[]>(
+				`/chapter?slug=${encodeURIComponent(chapterSlug)}&per_page=20&status=publish`
+			);
+			if (Array.isArray(data) && data.length) {
+				const hit =
+					data.find((c) => pathOnly(c.link || '') === path) ||
+					data.find((c) => seriesSlug && (c.link || '').includes(seriesSlug)) ||
+					data[0];
+				if (hit?.id) {
+					if (!hit.content?.rendered) {
+						const { data: full } = await this.apiGet<any>(`/chapter/${hit.id}`);
+						return full;
+					}
+					return hit;
+				}
+			}
+		}
+
+		if (seriesSlug && chapterSlug) {
+			const { id: sid } = await this.resolveSeriesId(`/series/${seriesSlug}`);
+			const { data } = await this.apiGet<any[]>(
+				`/chapter?parent=${sid}&slug=${encodeURIComponent(chapterSlug)}&per_page=5&status=publish`
+			);
+			if (Array.isArray(data) && data[0]) {
+				const hit = data[0];
+				if (!hit.content?.rendered) {
+					const { data: full } = await this.apiGet<any>(`/chapter/${hit.id}`);
+					return full;
+				}
+				return hit;
+			}
+		}
+
+		throw new Error(`Chapter not found: ${chapterId}`);
+	}
+
+	/** Prev/next by chapter number within same series */
+	private async resolveNeighbors(
+		parentId: number,
+		currentPath: string,
+		currentNumber: number
+	): Promise<{ prev: string | null; next: string | null }> {
+		try {
+			// Ambil semua chapter id+title (tanpa content) — paginated
+			const list: { path: string; number: number }[] = [];
+			let page = 1;
+			let totalPages = 1;
+			while (page <= totalPages && page <= 50) {
+				const { data, totalPages: tp } = await this.apiGet<any[]>(
+					`/chapter?parent=${parentId}&page=${page}&per_page=${CH_PER_PAGE}&orderby=date&order=asc&status=publish`
+				);
+				totalPages = tp;
+				if (!Array.isArray(data) || !data.length) break;
+				for (const item of data) {
+					const p = pathOnly(item.link || '');
+					const title = decodeHtml(item.title?.rendered || '');
+					const num = parseChapterNumber(title, list.length + 1);
+					list.push({ path: p, number: num });
+				}
+				page++;
+			}
+
+			list.sort((a, b) => a.number - b.number);
+			let idx = list.findIndex((c) => c.path === currentPath);
+			if (idx < 0) {
+				idx = list.findIndex((c) => c.number === currentNumber);
+			}
+			if (idx < 0) return { prev: null, next: null };
+
+			const prev = idx > 0 ? list[idx - 1].path : null;
+			const next = idx < list.length - 1 ? list[idx + 1].path : null;
+			return { prev, next };
+		} catch {
+			return { prev: null, next: null };
+		}
 	}
 
 	async getChapterContent(chapterId: string): Promise<{
@@ -322,54 +443,11 @@ export class DragonholicSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-		let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
-		path = path.replace(/\/$/, '');
-
-		// Resolve chapter via slug path: /series/{seriesSlug}/{chapterSlug}
-		const parts = path.split('/').filter(Boolean);
-		// e.g. series / daily-... / chapter-82
-		let chapterSlug = parts[parts.length - 1] || '';
-		let seriesSlug = parts.length >= 3 ? parts[1] : '';
-
-		let item: any = null;
-
-		if (chapterSlug) {
-			const q = seriesSlug
-				? `/chapter?slug=${encodeURIComponent(chapterSlug)}&per_page=20`
-				: `/chapter?slug=${encodeURIComponent(chapterSlug)}&per_page=5`;
-			const { data } = await this.apiGet<any[]>(q);
-			if (Array.isArray(data) && data.length) {
-				item =
-					data.find((c) => pathOnly(c.link || '') === path) ||
-					data.find((c) => (c.link || '').includes(seriesSlug)) ||
-					data[0];
-			}
-		}
-
-		// Fallback: search by link path via series parent
-		if (!item && seriesSlug) {
-			try {
-				const { id: sid } = await this.resolveSeriesId(`/series/${seriesSlug}`);
-				const { data } = await this.apiGet<any[]>(
-					`/chapter?parent=${sid}&slug=${encodeURIComponent(chapterSlug)}&per_page=5`
-				);
-				if (Array.isArray(data) && data[0]) item = data[0];
-			} catch {
-				/* ignore */
-			}
-		}
-
-		if (!item?.id) {
-			throw new Error(`Chapter not found: ${chapterId}`);
-		}
-
-		// Full content may need single fetch
-		if (!item.content?.rendered) {
-			const { data: full } = await this.apiGet<any>(`/chapter/${item.id}`);
-			item = full;
-		}
-
+		const item = await this.resolveChapterItem(chapterId);
 		const title = decodeHtml(item.title?.rendered || item.title || 'Chapter');
+		const currentPath = pathOnly(item.link || chapterId);
+		const currentNumber = parseChapterNumber(title, 0);
+
 		const plain = stripHtmlKeepP(item.content?.rendered || '');
 		const paras = plain
 			.split(/\n\n+/)
@@ -386,11 +464,20 @@ export class DragonholicSource extends BaseSource {
 				? paras.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n')
 				: '<p><em>Konten kosong atau chapter terkunci.</em></p>';
 
+		let prevChapterId: string | null = null;
+		let nextChapterId: string | null = null;
+		const parentId = Number(item.parent);
+		if (parentId > 0) {
+			const nav = await this.resolveNeighbors(parentId, currentPath, currentNumber);
+			prevChapterId = nav.prev;
+			nextChapterId = nav.next;
+		}
+
 		return {
 			title,
 			content: contentHtml,
-			prevChapterId: null,
-			nextChapterId: null
+			prevChapterId,
+			nextChapterId
 		};
 	}
 }
