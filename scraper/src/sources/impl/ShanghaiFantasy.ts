@@ -4,8 +4,10 @@
  *
  * WAJIB hybrid Worker (Cloudflare sangat ketat).
  *
- * Fix: filter ketat path + title supaya nav/footer
- * (Discord, Login, Privacy, Terms, dll.) tidak masuk sebagai novel.
+ * - Filter ketat path/title → nav/footer (Discord, Login, Privacy) tidak masuk
+ * - Chapter title hanya "Chapter N"
+ * - Cover kosong dari latest-chapters diisi ulang dari card/library
+ * - Decode HTML entities (&#8217; → ')
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -45,9 +47,7 @@ function pathOnly(href: string): string {
 function isNovelPath(p: string): boolean {
 	if (!p || p === '/' || p.length < 8) return false;
 	if (BLOCKED_PATH.test(p)) return false;
-	// chapter URL — bukan novel detail
 	if (/-chapter[-_]?\d/i.test(p) || /\/chapter[-_]?\d/i.test(p)) return false;
-	// slug harus punya minimal 1 huruf + tidak terlalu generik
 	const slug = p.replace(/^\//, '');
 	if (!/[a-z]/i.test(slug)) return false;
 	if (/^(page|post|posts|novel|novels|series)\d*$/i.test(slug)) return false;
@@ -60,6 +60,18 @@ function isValidTitle(title: string): boolean {
 	if (BLOCKED_TITLE.test(t)) return false;
 	if (/^(ongoing|completed|hiatus|novel|manga|manhwa)$/i.test(t)) return false;
 	return true;
+}
+
+function decodeEntities(s: string): string {
+	return s
+		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+		.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&nbsp;/g, ' ');
 }
 
 function escapeHtml(s: string): string {
@@ -93,15 +105,22 @@ function extractChapterNum(text: string): number | undefined {
 	return Number.isNaN(n) ? undefined : n;
 }
 
+/** Judul chapter pendek: "Chapter 52" */
+function shortChapterTitle(raw: string, num: number): string {
+	const n = Number.isFinite(num) && num > 0 ? num : parseChapterNumber(raw, 0);
+	if (n > 0) return `Chapter ${n}`;
+	const m = raw.match(/chapter\s*(\d+(?:\.\d+)?)/i);
+	if (m) return `Chapter ${m[1]}`;
+	return decodeEntities(raw).slice(0, 40);
+}
+
 /** Dari URL chapter → path novel (buang -chapter-N...) */
 function novelPathFromChapter(href: string): string | null {
-	let p = pathOnly(href);
+	const p = pathOnly(href);
 	const m = p.match(/^(.+?)-chapter[-_]?\d/i);
 	if (m && m[1].length >= 8) return m[1];
-	// short style: /card-crafter-57/ → /card-crafter (approx)
 	const m2 = p.match(/^(.+?)[-_](\d+)(?:[-_].*)?$/);
 	if (m2 && m2[1].length >= 6 && !BLOCKED_PATH.test(m2[1])) {
-		// hanya jika terlihat chapter number di akhir
 		if (/^\d+$/.test(m2[2]) && parseInt(m2[2], 10) < 5000) {
 			return m2[1];
 		}
@@ -129,11 +148,25 @@ export class ShanghaiFantasySource extends BaseSource {
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		if (page <= 1) {
-			const [fromChapters, fromCards] = await Promise.all([
+			const [fromChapters, fromCards, fromLib] = await Promise.all([
 				this.parseLatestFromChapters().catch(() => [] as Manga[]),
-				this.parseHomeNovelCards().catch(() => [] as Manga[])
+				this.parseHomeNovelCards().catch(() => [] as Manga[]),
+				this.fetchLibrary(1).catch(() => [] as Manga[])
 			]);
-			return this.dedupeById([...fromChapters, ...fromCards]).slice(0, 24);
+
+			// Cover map dari sumber yang punya gambar
+			const coverMap = new Map<string, string>();
+			for (const m of [...fromCards, ...fromLib]) {
+				if (m.cover) coverMap.set(m.id, m.cover);
+			}
+
+			const merged = this.dedupeById([...fromChapters, ...fromCards, ...fromLib]);
+			for (const m of merged) {
+				if (!m.cover && coverMap.has(m.id)) {
+					m.cover = coverMap.get(m.id)!;
+				}
+			}
+			return merged.slice(0, 24);
 		}
 		return this.fetchLibrary(page);
 	}
@@ -149,7 +182,7 @@ export class ShanghaiFantasySource extends BaseSource {
 		return out;
 	}
 
-	/** Utama: ambil dari blok "Latest Chapters" di homepage */
+	/** Utama: blok "Latest Chapters" di homepage */
 	private async parseLatestFromChapters(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		this.assertNotCf(html);
@@ -161,7 +194,9 @@ export class ShanghaiFantasySource extends BaseSource {
 			const href = $(el).attr('href') || '';
 			if (!href || !/chapter/i.test(href)) return;
 
-			const fullTitle = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+			const fullTitle = decodeEntities(
+				($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim()
+			);
 			if (!fullTitle || fullTitle.length < 8) return;
 			if (!/chapter\s*\d/i.test(fullTitle) && !/-chapter-/i.test(href)) return;
 
@@ -169,11 +204,13 @@ export class ShanghaiFantasySource extends BaseSource {
 			if (!novelPath || !isNovelPath(novelPath) || seen.has(novelPath)) return;
 			seen.add(novelPath);
 
-			const novelTitle = fullTitle
-				.replace(/\s*[|–—-]\s*Chapter\s+\d+.*$/i, '')
-				.replace(/\s+Chapter\s+\d+.*$/i, '')
-				.replace(/\s+Ch\.?\s*\d+.*$/i, '')
-				.trim();
+			const novelTitle = decodeEntities(
+				fullTitle
+					.replace(/\s*[|–—-]\s*Chapter\s+\d+.*$/i, '')
+					.replace(/\s+Chapter\s+\d+.*$/i, '')
+					.replace(/\s+Ch\.?\s*\d+.*$/i, '')
+					.trim()
+			);
 			if (!isValidTitle(novelTitle)) return;
 
 			const latestChapter = extractChapterNum(fullTitle);
@@ -193,7 +230,7 @@ export class ShanghaiFantasySource extends BaseSource {
 		return list;
 	}
 
-	/** Secondary: card novel di homepage ("Our Novels") — hanya yang punya gambar cover */
+	/** Card novel di homepage — wajib ada cover image */
 	private async parseHomeNovelCards(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		this.assertNotCf(html);
@@ -214,7 +251,6 @@ export class ShanghaiFantasySource extends BaseSource {
 				$a.closest('article, .card, div').find('img').first().attr('src') ||
 				'';
 
-			// WAJIB ada cover image (nav link biasanya tanpa img)
 			if (!img || img.startsWith('data:') || /placeholder|avatar|logo|icon/i.test(img)) {
 				return;
 			}
@@ -224,7 +260,7 @@ export class ShanghaiFantasySource extends BaseSource {
 				$a.find('img').attr('alt') ||
 				$a.find('h2, h3, .title, span').first().text() ||
 				$a.text();
-			const cleanTitle = (title || '').replace(/\s+/g, ' ').trim();
+			const cleanTitle = decodeEntities((title || '').replace(/\s+/g, ' ').trim());
 			if (!isValidTitle(cleanTitle)) return;
 
 			seen.add(p);
@@ -269,7 +305,6 @@ export class ShanghaiFantasySource extends BaseSource {
 						$a.closest('article, .card, li, div').find('img').first().attr('src') ||
 						'';
 
-					// Library cards hampir selalu punya cover
 					if (!img || img.startsWith('data:') || /placeholder|avatar|logo|icon/i.test(img)) {
 						return;
 					}
@@ -279,7 +314,7 @@ export class ShanghaiFantasySource extends BaseSource {
 						$a.find('img').attr('alt') ||
 						$a.find('h2, h3, .title').first().text() ||
 						$a.text();
-					const cleanTitle = (title || '').replace(/\s+/g, ' ').trim();
+					const cleanTitle = decodeEntities((title || '').replace(/\s+/g, ' ').trim());
 					if (!isValidTitle(cleanTitle)) return;
 
 					const parentText = $a.closest('article, .card, li, div').text();
@@ -333,10 +368,9 @@ export class ShanghaiFantasySource extends BaseSource {
 						$a.find('img').attr('alt') ||
 						$a.find('h2, h3, .title').first().text() ||
 						$a.text();
-					const cleanTitle = (title || '').replace(/\s+/g, ' ').trim();
+					const cleanTitle = decodeEntities((title || '').replace(/\s+/g, ' ').trim());
 					if (!isValidTitle(cleanTitle)) return;
 
-					// Search result: prefer yang ada img, tapi izinkan tanpa (text result)
 					const img =
 						$a.find('img').attr('data-src') ||
 						$a.find('img').attr('src') ||
@@ -371,10 +405,12 @@ export class ShanghaiFantasySource extends BaseSource {
 		this.assertNotCf(html);
 		const $ = cheerio.load(html);
 
-		const title =
+		const title = decodeEntities(
 			$('h1').first().text().trim() ||
-			$('meta[property="og:title"]').attr('content')?.split(/[|\-–]/)[0].trim() ||
-			$('title').text().split(/[|\-–]/)[0].trim();
+				$('meta[property="og:title"]').attr('content')?.split(/[|\-–]/)[0].trim() ||
+				$('title').text().split(/[|\-–]/)[0].trim() ||
+				''
+		);
 
 		if (!title || title.length < 2) {
 			throw new Error('Novel not found (empty title)');
@@ -401,6 +437,7 @@ export class ShanghaiFantasySource extends BaseSource {
 				.trim() ||
 			$('meta[property="og:description"]').attr('content') ||
 			'';
+		description = decodeEntities(description);
 
 		const authors: string[] = [];
 		const genres: string[] = [];
@@ -410,7 +447,7 @@ export class ShanghaiFantasySource extends BaseSource {
 			const text = $(el).text().replace(/\s+/g, ' ').trim();
 			const low = text.toLowerCase();
 			if (/author/i.test(low)) {
-				const name = text.replace(/author[:\s]*/i, '').trim();
+				const name = decodeEntities(text.replace(/author[:\s]*/i, '').trim());
 				if (name && name.length < 80 && !authors.includes(name)) authors.push(name);
 			} else if (/status/i.test(low)) {
 				const s = text.replace(/status[:\s]*/i, '').trim();
@@ -489,9 +526,13 @@ export class ShanghaiFantasySource extends BaseSource {
 			const id = pathOnly(url);
 			if (seen.has(id)) continue;
 			seen.add(id);
-			const rawTitle = (ch.title || 'Chapter').replace(/\s+/g, ' ').trim();
+			const rawTitle = decodeEntities((ch.title || 'Chapter').replace(/\s+/g, ' ').trim());
 			const num = parseChapterNumber(rawTitle, out.length + 1);
-			out.push({ id, title: rawTitle, number: num });
+			out.push({
+				id,
+				title: shortChapterTitle(rawTitle, num),
+				number: num
+			});
 		}
 		return out;
 	}
@@ -507,10 +548,16 @@ export class ShanghaiFantasySource extends BaseSource {
 			if (seen.has(id) || BLOCKED_PATH.test(id)) return;
 			seen.add(id);
 
-			const rawTitle = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+			const rawTitle = decodeEntities(
+				($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim()
+			);
 			if (!rawTitle || rawTitle.length < 3) return;
 			const num = parseChapterNumber(rawTitle, out.length + 1);
-			out.push({ id, title: rawTitle, number: num });
+			out.push({
+				id,
+				title: shortChapterTitle(rawTitle, num),
+				number: num
+			});
 		});
 
 		return out;
@@ -531,11 +578,14 @@ export class ShanghaiFantasySource extends BaseSource {
 		this.assertNotCf(html);
 		const $ = cheerio.load(html);
 
-		const title =
+		const rawTitle =
 			$('h1').first().text().trim() ||
 			$('meta[property="og:title"]').attr('content')?.split(/[|\-–]/)[0].trim() ||
 			$('title').text().split(/[|\-–]/)[0].trim() ||
 			'Chapter';
+		const decoded = decodeEntities(rawTitle);
+		const num = parseChapterNumber(decoded, 0);
+		const title = num > 0 ? shortChapterTitle(decoded, num) : decoded;
 
 		let contentHtml = '';
 		const postId =
@@ -565,7 +615,7 @@ export class ShanghaiFantasySource extends BaseSource {
 					if (!contentHtml) contentHtml = $c('body').html()?.trim() || rendered;
 				}
 			} catch {
-				/* fallback */
+				/* fallback HTML */
 			}
 		}
 
