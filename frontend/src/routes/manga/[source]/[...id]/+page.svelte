@@ -882,6 +882,12 @@
 										<p
 											class="line-clamp-2 flex items-center justify-center gap-1 text-[11px] leading-snug font-bold text-white sm:text-xs"
 										>
+{#if chapter.isLocked}
+												<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
+													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											{/if}
 											{#if chapterFlag(chapter.lang)}
 												<span
 													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[12px]"
@@ -902,9 +908,15 @@
 								<div class="relative">
 									<a
 										href="/reader/{source}{chapter.id}"
-										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40"
+										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''}"
 									>
 										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
+{#if chapter.isLocked}
+												<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
+													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											{/if}
 											{#if chapterFlag(chapter.lang)}
 												<span
 													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[14px]"
@@ -960,6 +972,12 @@
 									</div>
 									<div class="min-w-0 flex-1 px-3 py-3">
 										<p class="detail-title flex items-center gap-2 truncate text-sm font-bold">
+{#if chapter.isLocked}
+												<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
+													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											{/if}
 											{#if chapterFlag(chapter.lang)}
 												<span
 													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[16px]"
