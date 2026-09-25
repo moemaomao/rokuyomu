@@ -4,12 +4,12 @@
  *
  * URL pattern:
  *   Series  : /series/{slug}/
- *   Chapter : /{series-slug}/{series-slug}-{n}/  (atau variasi serupa)
+ *   Chapter : /{slug}/{slug}-.../   (contoh: /kichiten/kichiten-1/)
  *   List    : /list-novels/
  *   Latest  : /latest-releases/  + /latest-releases/page/{n}
  *
- * Konten = text novel (bukan gambar). getChapterPages → []
- * Pakai getChapterContent untuk reader novel.
+ * CF memblokir IP Vercel → wajib hybrid Worker.
+ * Konten = text novel → getChapterPages() = []
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -71,6 +71,12 @@ function extractChapterNum(text: string): number | undefined {
 	return Number.isNaN(n) ? undefined : n;
 }
 
+function slugToTitle(slug: string): string {
+	return slug
+		.replace(/-/g, ' ')
+		.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export class TinyTranslationSource extends BaseSource {
 	id = 'tinytranslation';
 	name = 'TinyTranslation';
@@ -98,10 +104,11 @@ export class TinyTranslationSource extends BaseSource {
 		return out;
 	}
 
-	/** Parse /list-novels/ — daftar series On-going / Completed / Dropped */
 	private async parseListNovels(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/list-novels/');
 		const $ = cheerio.load(html);
+		$('script, style, noscript, iframe').remove();
+
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
@@ -117,8 +124,8 @@ export class TinyTranslationSource extends BaseSource {
 			const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
 			if (!title || title.length < 3) return;
 
-			// Status dari section parent (On-going / Completed / Dropped)
-			const parentText = $(el).closest('ul, ol, div, section').prev('h2, h3, h4').text() || '';
+			const parentText =
+				$(el).closest('ul, ol, div, section').prev('h2, h3, h4, h5').text() || '';
 			let status: string | undefined;
 			if (/on[- ]?going/i.test(parentText)) status = 'Ongoing';
 			else if (/completed|complete/i.test(parentText)) status = 'Completed';
@@ -138,96 +145,98 @@ export class TinyTranslationSource extends BaseSource {
 		return list;
 	}
 
-	/** Parse /latest-releases/ (+ pagination) → group by series */
 	private async parseLatestReleases(page: number): Promise<Manga[]> {
 		const path =
 			page <= 1 ? '/latest-releases/' : `/latest-releases/page/${page}/`;
 		const html = await this.fetchHtml(path);
 		const $ = cheerio.load(html);
+		$('script, style, noscript, iframe').remove();
+
 		const map = new Map<string, Manga>();
 
-		// Struktur umum: item berisi link chapter + link/nama series di kategori
-		$('article, .wp-block-post, .post, li, .entry').each((_, el) => {
-			const root = $(el);
+		$('a[href]').each((_, el) => {
+			const href = $(el).attr('href') || '';
+			if (!href) return;
 
-			// Link series
-			let seriesA =
-				root.find('a[href*="/series/"]').first().length > 0
-					? root.find('a[href*="/series/"]').first()
-					: null;
-
-			// Fallback: categories link
-			if (!seriesA || !seriesA.length) {
-				const cat = root.find('a[rel="category tag"], .cat-links a, .categories a').first();
-				if (cat.length && /\/series\//.test(cat.attr('href') || '')) {
-					seriesA = cat;
-				}
+			const p = pathOnly(href);
+			if (
+				p === '/' ||
+				/\/(series|latest-releases|list-novels|notice|donate|category|tag|author|page|feed|wp-)\//i.test(
+					p
+				)
+			) {
+				return;
 			}
 
-			const seriesHref = seriesA?.attr('href') || '';
-			if (!seriesHref || !/\/series\/[^/]+/.test(seriesHref)) return;
+			const parts = p.split('/').filter(Boolean);
+			if (parts.length < 2) return;
 
-			const id = pathOnly(seriesHref);
-			const title =
-				(seriesA?.attr('title') || seriesA?.text() || '')
-					.replace(/\s+/g, ' ')
-					.trim() ||
-				id.replace(/^\/series\//, '').replace(/-/g, ' ');
+			const slug = parts[0];
+			const second = parts[1];
 
-			if (!title || title.length < 3) return;
+			if (!second.startsWith(slug) && !/(?:chapter|c\d|v\d)/i.test(second)) return;
+			if (/\.(css|js|png|jpg|jpeg|webp|gif|svg|ico|xml|json)$/i.test(second)) return;
 
-			const chText =
-				root.find('a[href*="chapter"], h2 a, h3 a, .entry-title a').first().text() ||
-				root.find('h2, h3, .entry-title').first().text() ||
-				'';
+			const seriesId = `/series/${slug}`;
+			const chText = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
 			const latestChapter = extractChapterNum(chText);
 
-			const cover =
-				root.find('img').attr('data-src') ||
-				root.find('img').attr('src') ||
-				'';
+			const parent = $(el).closest('li, article, div, p, section');
+			const parentText = parent.text().replace(/\s+/g, ' ').trim();
 
-			if (!map.has(id)) {
-				map.set(id, {
-					id,
-					title: title.replace(/\s+/g, ' ').trim(),
-					cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
+			let seriesTitle = '';
+			const afterDate = parentText.match(
+				/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\s+(.+)$/i
+			);
+			if (afterDate) {
+				seriesTitle = afterDate[1]
+					.replace(/^\d+\s*/, '')
+					.replace(/\s+\d+\s+(?:Volume|Chapter).*$/i, '')
+					.trim();
+			}
+			if (!seriesTitle || seriesTitle.length < 3) {
+				seriesTitle = slugToTitle(slug);
+			}
+			if (seriesTitle.length > 120) {
+				seriesTitle = seriesTitle.slice(0, 120).replace(/\s+\S*$/, '');
+			}
+
+			const existing = map.get(seriesId);
+			if (!existing) {
+				map.set(seriesId, {
+					id: seriesId,
+					title: seriesTitle,
+					cover: '',
 					sourceId: this.id,
 					type: 'novel',
 					lang: 'en',
 					...(latestChapter != null ? { latestChapter } : {})
 				});
 			} else if (latestChapter != null) {
-				const existing = map.get(id)!;
 				const prev =
 					typeof existing.latestChapter === 'number'
 						? existing.latestChapter
 						: extractChapterNum(String(existing.latestChapter ?? '')) ?? 0;
-				if (latestChapter > prev) {
-					existing.latestChapter = latestChapter;
-				}
+				if (latestChapter > prev) existing.latestChapter = latestChapter;
 			}
 		});
 
-		// Fallback lebih longgar: semua link /series/
-		if (map.size < 5) {
-			$('a[href*="/series/"]').each((_, el) => {
-				const href = $(el).attr('href') || '';
-				if (!href || !/\/series\/[^/]+\/?$/.test(pathOnly(href))) return;
-				const id = pathOnly(href);
-				if (map.has(id)) return;
-				const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
-				if (!title || title.length < 3) return;
-				map.set(id, {
-					id,
-					title,
-					cover: '',
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en'
-				});
+		$('a[href*="/series/"]').each((_, el) => {
+			const href = $(el).attr('href') || '';
+			if (!href || !/\/series\/[^/]+\/?$/.test(pathOnly(href))) return;
+			const id = pathOnly(href);
+			if (map.has(id)) return;
+			const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+			if (!title || title.length < 3) return;
+			map.set(id, {
+				id,
+				title,
+				cover: '',
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en'
 			});
-		}
+		});
 
 		return Array.from(map.values());
 	}
@@ -244,50 +253,63 @@ export class TinyTranslationSource extends BaseSource {
 			try {
 				const html = await this.fetchHtml(path);
 				const $ = cheerio.load(html);
+				$('script, style, noscript, iframe').remove();
+
 				const list: Manga[] = [];
 				const seen = new Set<string>();
 
-				// Hasil search biasanya post chapter → ambil series-nya
-				$('article, .post, .wp-block-post, .entry').each((_, el) => {
-					const root = $(el);
-					const seriesA = root.find('a[href*="/series/"]').first();
-					const href = seriesA.attr('href') || '';
-					if (!href || !/\/series\/[^/]+/.test(href)) return;
-					const id = pathOnly(href);
-					if (seen.has(id)) return;
-					seen.add(id);
+				$('a[href]').each((_, el) => {
+					const href = $(el).attr('href') || '';
+					if (!href) return;
+					const p = pathOnly(href);
 
-					const title =
-						(seriesA.attr('title') || seriesA.text() || root.find('h2, h3').first().text())
+					if (/\/series\/[^/]+\/?$/.test(p)) {
+						if (seen.has(p)) return;
+						seen.add(p);
+						const title = ($(el).attr('title') || $(el).text())
 							.replace(/\s+/g, ' ')
 							.trim();
-					if (!title || title.length < 3) return;
+						if (!title || title.length < 3) return;
+						list.push({
+							id: p,
+							title,
+							cover: '',
+							sourceId: this.id,
+							type: 'novel',
+							lang: 'en'
+						});
+						return;
+					}
 
-					const cover =
-						root.find('img').attr('data-src') || root.find('img').attr('src') || '';
+					const parts = p.split('/').filter(Boolean);
+					if (parts.length < 2) return;
+					const slug = parts[0];
+					if (!parts[1].startsWith(slug) && !/(?:chapter|c\d|v\d)/i.test(parts[1]))
+						return;
+					if (/\/(latest|list-novels|notice|donate|category|tag|page|feed)\//i.test(p))
+						return;
+
+					const seriesId = `/series/${slug}`;
+					if (seen.has(seriesId)) return;
+					seen.add(seriesId);
+
+					const parent = $(el).closest('li, article, div, p');
+					const parentText = parent.text().replace(/\s+/g, ' ').trim();
+					let title = '';
+					const afterDate = parentText.match(
+						/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\s+(.+)$/i
+					);
+					if (afterDate) {
+						title = afterDate[1]
+							.replace(/^\d+\s*/, '')
+							.replace(/\s+\d+\s+(?:Volume|Chapter).*$/i, '')
+							.trim();
+					}
+					if (!title || title.length < 3) title = slugToTitle(slug);
 
 					list.push({
-						id,
-						title,
-						cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
-						sourceId: this.id,
-						type: 'novel',
-						lang: 'en'
-					});
-				});
-
-				// Langsung link series di hasil
-				$('a[href*="/series/"]').each((_, el) => {
-					const href = $(el).attr('href') || '';
-					if (!href || !/\/series\/[^/]+\/?$/.test(pathOnly(href))) return;
-					const id = pathOnly(href);
-					if (seen.has(id)) return;
-					seen.add(id);
-					const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
-					if (!title || title.length < 3) return;
-					list.push({
-						id,
-						title,
+						id: seriesId,
+						title: title.slice(0, 120),
 						cover: '',
 						sourceId: this.id,
 						type: 'novel',
@@ -297,7 +319,7 @@ export class TinyTranslationSource extends BaseSource {
 
 				if (list.length) return list;
 			} catch {
-				/* next */
+				/* next path */
 			}
 		}
 		return [];
@@ -312,6 +334,7 @@ export class TinyTranslationSource extends BaseSource {
 
 		const html = await this.fetchHtml(path);
 		const $ = cheerio.load(html);
+		$('script, style, noscript, iframe').remove();
 
 		const title =
 			$('h1.wp-block-post-title, h1.entry-title, h1').first().text().trim() ||
@@ -331,120 +354,89 @@ export class TinyTranslationSource extends BaseSource {
 			'';
 		cover = (cover || '').split('?')[0];
 
-		// Synopsis
-		let description = '';
-		const synBlock = $('h5, h4, h3, strong, b')
-			.filter((_, el) => /synopsis/i.test($(el).text()))
-			.first();
-		if (synBlock.length) {
-			const parts: string[] = [];
-			let node = synBlock.parent().next();
-			// kadang synopsis langsung di sibling p
-			if (!node.length) node = synBlock.next();
-			for (let i = 0; i < 15 && node.length; i++) {
-				const tag = (node.prop('tagName') || '').toLowerCase();
-				if (/^h[1-6]$/.test(tag) && /chapter|link|detail/i.test(node.text())) break;
-				const t = node.text().replace(/\s+/g, ' ').trim();
-				if (t.length > 30) parts.push(t);
-				node = node.next();
-			}
-			description = parts.join('\n\n');
-		}
-		if (!description) {
-			description =
-				$('meta[property="og:description"]').attr('content') ||
-				$('.entry-content p, .wp-block-post-content p')
-					.map((_, p) => $(p).text().trim())
-					.get()
-					.filter((t) => t.length > 40)
-					.slice(0, 8)
-					.join('\n\n') ||
-				'';
-		}
-
 		const authors: string[] = [];
 		const genres: string[] = [];
 		let status = 'Ongoing';
+		let description = '';
 
-		// Details block: Author: ... Genre: ...
-		$('h5, h4, strong, b, p, li').each((_, el) => {
-			const text = $(el).text().replace(/\s+/g, ' ').trim();
-			const low = text.toLowerCase();
-			if (/^author\s*:/i.test(text)) {
-				const name = text.replace(/^author\s*:\s*/i, '').trim();
-				if (name && name.length < 80 && !authors.includes(name)) authors.push(name);
-			} else if (/^genre\s*:/i.test(text)) {
-				const raw = text.replace(/^genre\s*:\s*/i, '');
-				for (const g of raw.split(/[,/|]/)) {
-					const t = g.trim();
-					if (t && t.length < 50 && !genres.includes(t)) genres.push(t);
-				}
-			} else if (/status\s*:/i.test(low)) {
-				const s = text.replace(/status\s*:\s*/i, '').trim();
-				if (s) status = s;
+		const bodyText = $('.entry-content, .wp-block-post-content, article')
+			.first()
+			.text()
+			.replace(/\s+/g, ' ');
+
+		const authorM = bodyText.match(/Author\s*:\s*([^G]+?)(?:\s*Genre\s*:|$)/i);
+		if (authorM) {
+			const name = authorM[1].replace(/\s+/g, ' ').trim();
+			if (name && name.length < 80) authors.push(name);
+		}
+
+		const genreM = bodyText.match(
+			/Genre\s*:\s*([^T]+?)(?:\s*Tags\s*:|\s*Synopsis\s*:|$)/i
+		);
+		if (genreM) {
+			for (const g of genreM[1].split(/[,/|]/)) {
+				const t = g.trim();
+				if (t && t.length < 40 && !genres.includes(t)) genres.push(t);
 			}
-		});
+		}
 
-		// Chapters — list di halaman series
+		const synIdx = bodyText.search(/Synopsis\s*:/i);
+		if (synIdx >= 0) {
+			let syn = bodyText.slice(synIdx).replace(/^Synopsis\s*:\s*/i, '');
+			syn = syn.split(/\s*(?:Links|Chapter)\s*:/i)[0] || syn;
+			description = syn.replace(/\s+/g, ' ').trim().slice(0, 2000);
+		}
+
+		if (!description || description.length < 40) {
+			description =
+				$('meta[property="og:description"]').attr('content') ||
+				$('meta[name="description"]').attr('content') ||
+				'';
+		}
+
+		description = description
+			.replace(/jQuery\s*\(.*?$/gi, '')
+			.replace(/document\.(ready|getElementById).*?$/gi, '')
+			.replace(/Your email address will not be published.*$/gi, '')
+			.replace(/Leave a Reply.*$/gi, '')
+			.replace(/adsbygoogle.*?$/gi, '')
+			.replace(/\s+/g, ' ')
+			.trim();
+
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
-		// Prefer list setelah heading "Chapter"
-		const chapterHeading = $('h5, h4, h3, h2, strong')
-			.filter((_, el) => /^chapter/i.test($(el).text().trim()))
-			.first();
-
-		const scope = chapterHeading.length
-			? chapterHeading.parent().nextAll().addBack()
-			: $.root();
-
-		scope.find('a').each((i, el) => {
+		$('a[href]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			if (!href) return;
-			// Chapter path biasanya bukan /series/
-			if (/\/series\//.test(href)) return;
-			// Harus same-domain path yang terlihat chapter-like
 			const p = pathOnly(href);
+
+			if (/\/series\//.test(p)) return;
+			if (
+				/\/(notice|donate|category|tag|author|page|list-novels|latest|feed|wp-)\//i.test(p)
+			)
+				return;
 			if (p === '/' || p === pathOnly(path)) return;
-			// Hindari nav, donate, dll
-			if (/\/(notice|donate|category|tag|author|page)\//i.test(p)) return;
 
 			const rawTitle = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
 			if (!rawTitle || rawTitle.length < 2) return;
-			if (!/chapter|ch\.?\s*\d|prologue|epilogue|volume/i.test(rawTitle) && i > 5) {
-				// longgar di awal, ketat setelahnya
-				if (!/\d/.test(rawTitle)) return;
-			}
+
+			const isChapter =
+				/(?:volume|vol\.?)\s*\d+|chapter\s*\d+|ch\.?\s*\d+|prologue|epilogue/i.test(
+					rawTitle
+				) || /\/[a-z0-9-]+\/[a-z0-9-]*(?:v\d+c\d+|c\d+|chapter|\d+)/i.test(p);
+			if (!isChapter) return;
 
 			const num = parseChapterNumber(rawTitle, chapters.length + 1);
-			const id = p;
-			if (seen.has(id)) return;
-			seen.add(id);
+			if (seen.has(p)) return;
+			seen.add(p);
 
 			chapters.push({
-				id,
-				title: rawTitle.length > 80 ? `Chapter ${num}` : rawTitle,
+				id: p,
+				title: `Chapter ${num}`,
 				number: num
 			});
 		});
-
-		// Fallback: semua link yang path-nya mengandung angka / chapter-like
-		if (chapters.length < 3) {
-			$('a[href]').each((i, el) => {
-				const href = $(el).attr('href') || '';
-				const p = pathOnly(href);
-				if (!p || /\/series\//.test(p)) return;
-				if (!/\/[a-z0-9-]+\/[a-z0-9-]+\d/i.test(p) && !/chapter/i.test(p)) return;
-				if (/\/(notice|donate|category|tag|author|page|list-novels|latest)\//i.test(p))
-					return;
-				const rawTitle = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
-				if (!rawTitle || rawTitle.length < 2) return;
-				const num = parseChapterNumber(rawTitle, i + 1);
-				if (seen.has(p)) return;
-				seen.add(p);
-				chapters.push({ id: p, title: rawTitle, number: num });
-			});
-		}
 
 		chapters.sort((a, b) => {
 			const na = typeof a.number === 'number' ? a.number : 0;
@@ -486,7 +478,6 @@ export class TinyTranslationSource extends BaseSource {
 			$('title').text().split(/[|\-–]/)[0].trim() ||
 			'Chapter';
 
-		// Hapus noise
 		const contentRoot = $(
 			'.entry-content, .wp-block-post-content, article .content, .post-content, article'
 		).first();
@@ -494,7 +485,7 @@ export class TinyTranslationSource extends BaseSource {
 
 		clone
 			.find(
-				'script, style, iframe, noscript, .ads, .ad, nav, .nav, .sharedaddy, .comments, #comments, .wp-block-comments, form, .donate, .code-block, .post-views, .entry-meta, header, footer, .wp-block-group.has-background'
+				'script, style, iframe, noscript, .ads, .ad, nav, .nav, .sharedaddy, .comments, #comments, .wp-block-comments, form, .donate, .code-block, .post-views, .entry-meta, header, footer'
 			)
 			.remove();
 
@@ -503,7 +494,7 @@ export class TinyTranslationSource extends BaseSource {
 			const t = $(p).text().replace(/\s+/g, ' ').trim();
 			if (!t || t.length < 15) return;
 			if (
-				/tinytranslation|please bookmark|thanks for reading|donate us|post views|edited by|kanaa-senpai|leave a reply|your email address/i.test(
+				/tinytranslation|please bookmark|thanks for reading|donate us|post views|edited by|kanaa-senpai|leave a reply|your email address|adsbygoogle/i.test(
 					t
 				)
 			)
@@ -514,11 +505,7 @@ export class TinyTranslationSource extends BaseSource {
 		let contentHtml = parts.length >= 2 ? parts.join('\n') : '';
 
 		if (!contentHtml || contentHtml.length < 80) {
-			// Fallback: ambil text node panjang
-			const raw = clone
-				.text()
-				.replace(/\s+/g, ' ')
-				.trim();
+			const raw = clone.text().replace(/\s+/g, ' ').trim();
 			if (raw.length > 200) {
 				const paras = raw
 					.split(/(?<=[.!?])\s+(?=[A-Z“"])/)
@@ -528,7 +515,6 @@ export class TinyTranslationSource extends BaseSource {
 			}
 		}
 
-		// Prev / Next (WordPress sering pakai rel atau teks)
 		const prevHref =
 			$('a[rel="prev"]').attr('href') ||
 			$('a:contains("Previous"), a:contains("Prev"), a:contains("«")').first().attr('href');
