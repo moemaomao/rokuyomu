@@ -48,20 +48,17 @@
         nextChapter = null
     } = $derived(data ?? {});
 
-    // Reader Preferences States
     let fontFamily = $state('serif');
     let fontSize = $state(18);
     let lineHeight = $state(1.7);
     let maxWidth = $state(720);
     let isDark = $state(true);
 
-    // Feature States
     let autoScroll = $state(false);
     let scrollSpeed = $state(40);
     let ttsRate = $state(1);
     let ttsVoiceURI = $state('');
 
-    // UI States
     let showSettings = $state(false);
     let showVoiceDropdown = $state(false);
     let isSpeaking = $state(false);
@@ -78,7 +75,6 @@
         dyslexic: '"OpenDyslexic", "Comic Sans MS", sans-serif'
     };
 
-    // --- SETTINGS STORAGE ---
     function loadSettings() {
         if (!browser) return;
         try {
@@ -116,7 +112,6 @@
         if (settingsReady) saveSettings();
     });
 
-    // --- AUTO SCROLL ---
     function startAutoScroll() {
         stopAutoScroll();
         autoScroll = true;
@@ -141,7 +136,6 @@
         else startAutoScroll();
     }
 
-    // --- TEXT TO SPEECH (TTS) ---
     function getPlainText(): string {
         if (!browser) return '';
         const el = document.getElementById('novel-content');
@@ -149,7 +143,7 @@
     }
 
     function loadVoices() {
-        if (!browser || !window.speechSynthesis) return;
+        if (!browser || !('speechSynthesis' in window)) return;
         const fetchedVoices = window.speechSynthesis.getVoices();
         if (fetchedVoices.length > 0) {
             voices = fetchedVoices;
@@ -162,26 +156,43 @@
     }
 
     function speak() {
-        if (!browser || !window.speechSynthesis) return;
-        window.speechSynthesis.cancel();
+        if (!browser || !('speechSynthesis' in window)) return;
+
+        if (voices.length === 0) {
+            loadVoices();
+        }
+
         const text = getPlainText();
         if (!text.trim()) return;
 
         const u = new SpeechSynthesisUtterance(text);
         u.rate = ttsRate;
-        const voice = voices.find((v) => v.voiceURI === ttsVoiceURI);
-        if (voice) u.voice = voice;
+
+        if (voices.length > 0) {
+            const voice = voices.find((v) => v.voiceURI === ttsVoiceURI);
+            if (voice) u.voice = voice;
+        }
 
         u.onend = () => { isSpeaking = false; isPaused = false; };
-        u.onerror = () => { isSpeaking = false; isPaused = false; };
+        u.onerror = (e) => { 
+            console.error('[TTS Error]', e);
+            isSpeaking = false; 
+            isPaused = false; 
+        };
 
+        window.speechSynthesis.cancel();
         window.speechSynthesis.speak(u);
+
+        if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+        }
+
         isSpeaking = true;
         isPaused = false;
     }
 
     function pauseTTS() {
-        if (!browser || !window.speechSynthesis) return;
+        if (!browser || !('speechSynthesis' in window)) return;
         if (isPaused) {
             window.speechSynthesis.resume();
             isPaused = false;
@@ -192,7 +203,7 @@
     }
 
     function stopTTS() {
-        if (!browser || !window.speechSynthesis) return;
+        if (!browser || !('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
         isSpeaking = false;
         isPaused = false;
@@ -273,24 +284,25 @@
             });
             observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
             
-            loadVoices();
-            if (window.speechSynthesis) {
+            if ('speechSynthesis' in window) {
+                loadVoices();
                 window.speechSynthesis.onvoiceschanged = loadVoices;
+                setTimeout(loadVoices, 500);
+                setTimeout(loadVoices, 1000);
             }
 
-            return () => observer.disconnect();
+            const onKey = (e: KeyboardEvent) => {
+                if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+                if (e.key === 'ArrowLeft') goChapter(prevChapter);
+                if (e.key === 'ArrowRight') goChapter(nextChapter);
+            };
+            window.addEventListener('keydown', onKey);
+
+            return () => {
+                observer.disconnect();
+                window.removeEventListener('keydown', onKey);
+            };
         }
-
-        const onKey = (e: KeyboardEvent) => {
-            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-            if (e.key === 'ArrowLeft') goChapter(prevChapter);
-            if (e.key === 'ArrowRight') goChapter(nextChapter);
-        };
-        window.addEventListener('keydown', onKey);
-
-        return () => {
-            window.removeEventListener('keydown', onKey);
-        };
     });
 
     onDestroy(() => {
@@ -327,11 +339,10 @@
         {@html content || '<p>No content</p>'}
     </article>
 
-    <!-- BOTTOM NAV -->
-    <div class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] px-5 py-3 bg-transparent border-0">
+    <div class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] px-5 py-3 bg-transparent border-0 pointer-events-none">
         <button
             type="button"
-            class="touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark ? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70' : 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
+            class="pointer-events-auto touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark ? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70' : 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
             disabled={!prevChapter}
             aria-label="Previous chapter"
             onclick={() => goChapter(prevChapter)}
@@ -344,7 +355,7 @@
 
         <button
             type="button"
-            class="touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark ? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70' : 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
+            class="pointer-events-auto touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark ? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70' : 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
             disabled={!nextChapter}
             aria-label="Next chapter"
             onclick={() => goChapter(nextChapter)}
@@ -356,11 +367,10 @@
         </button>
     </div>
 
-    <!-- SIDE FLOATING BUTTONS -->
-    <div class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5">
+    <div class="fixed right-[15px] bottom-[85px] z-[500] flex flex-col items-center gap-2.5">
         <button
             type="button"
-            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(0,150,255,0.2)] text-[#4da6ff] active:scale-95 shadow-lg"
+            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(0,150,255,0.2)] text-[#4da6ff] active:scale-95 shadow-lg cursor-pointer"
             title="Scroll to top"
             onclick={scrollToTop}
         >
@@ -369,7 +379,7 @@
 
         <button
             type="button"
-            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.2)] text-[#35d98a] active:scale-95 shadow-lg"
+            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.2)] text-[#35d98a] active:scale-95 shadow-lg cursor-pointer"
             title="Text to Speech"
             onclick={() => (isSpeaking ? stopTTS() : speak())}
         >
@@ -383,7 +393,7 @@
         {#if isSpeaking}
             <button
                 type="button"
-                class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(255,180,0,0.2)] text-amber-400 active:scale-95 shadow-lg"
+                class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-[rgba(255,180,0,0.2)] text-amber-400 active:scale-95 shadow-lg cursor-pointer"
                 title={isPaused ? 'Resume' : 'Pause'}
                 onclick={pauseTTS}
             >
@@ -397,7 +407,7 @@
 
         <button
             type="button"
-            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 active:scale-95 shadow-lg {autoScroll ? 'bg-purple-600/40 text-purple-300' : 'bg-[rgba(120,80,255,0.2)] text-purple-400'}"
+            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 active:scale-95 shadow-lg cursor-pointer {autoScroll ? 'bg-purple-600/40 text-purple-300' : 'bg-[rgba(120,80,255,0.2)] text-purple-400'}"
             title="Auto scroll"
             onclick={toggleAutoScroll}
         >
@@ -410,7 +420,7 @@
 
         <button
             type="button"
-            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-zinc-800/40 text-purple-400 active:scale-95 shadow-lg"
+            class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full border-0 bg-zinc-800/40 text-purple-400 active:scale-95 shadow-lg cursor-pointer"
             title="Settings"
             onclick={() => (showSettings = !showSettings)}
         >
@@ -423,7 +433,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-            class="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-xs"
+            class="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-xs"
             onclick={() => (showSettings = false)}
         >
             <div
