@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount, tick } from 'svelte';
 	import { Search, Loader2, ChevronDown, Check, Layers, BookOpen, BookMarked } from 'lucide-svelte';
-	import { getImpl, setImpl, setMultiMode } from '$lib/stores/impl';
+    import { getImpl, setImpl, setMultiMode, getLastSourceForKind } from '$lib/stores/impl';
 	import {
 		getSourceMeta,
 		groupSourcesByLang,
@@ -231,7 +231,7 @@
 		navigate(buildParams());
 	}
 
-	function selectKind(id: ContentKind) {
+		function selectKind(id: ContentKind) {
 		if (id === selectedKind) {
 			closeDropdown();
 			return;
@@ -241,9 +241,30 @@
 		selectedType = 'all';
 		closeDropdown();
 
-		// Switching kind → drop current source (may be wrong category) → multi mode
-		setMultiMode();
 		loading = true;
+
+		const lastForKind = getLastSourceForKind(id);
+		const validLast =
+			lastForKind &&
+			sources.some((s) => s.id.toLowerCase() === lastForKind.toLowerCase()) &&
+			(id === 'novel' ? isNovelSource(lastForKind) : !isNovelSource(lastForKind));
+
+		if (validLast && lastForKind) {
+			setImpl(lastForKind);
+			const params = new URLSearchParams();
+			params.set('source', lastForKind);
+			if (id === 'novel') params.set('kind', 'novel');
+			goto(`/?${params}`, {
+				invalidateAll: true,
+				keepFocus: true,
+				noScroll: false
+			}).finally(() => {
+				loading = false;
+			});
+			return;
+		}
+
+		setMultiMode();
 		const params = new URLSearchParams();
 		if (id === 'novel') params.set('kind', 'novel');
 		goto(params.toString() ? `/?${params}` : '/', {
