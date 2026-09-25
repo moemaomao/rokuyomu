@@ -52,7 +52,8 @@ export const WORKER_SOURCE_IDS = new Set([
 	'siikomik',
 	'silentquill',
 	'simplyhentai',
-	'weebcentral'
+	'weebcentral',
+	'yumeneijiworks'
 ]);
 
 const instanceCache = new Map<string, IMangaSource>();
@@ -94,6 +95,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	silentquill: async () => new (await import('./impl/SilentQuill')).SilentQuillSource(),
 	simplyhentai: async () => new (await import('./impl/Simplyhentai')).SimplyHentaiSource(),
 	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
+	yumeneijiworks: async () => new (await import('./impl/YumeNeijiWorks')).YumeNeijiWorksSource(),
 };
 
 export function isWorkerSource(sourceId: string): boolean {

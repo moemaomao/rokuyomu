@@ -1,13 +1,6 @@
 /**
  * Shanghai Fantasy (shanghaifantasy.com)
  * Novel translation — WP + Fictioneer-like
- *
- * WAJIB hybrid Worker (Cloudflare sangat ketat).
- *
- * - Filter ketat path/title → nav/footer (Discord, Login, Privacy) tidak masuk
- * - Chapter title hanya "Chapter N"
- * - Cover kosong dari latest-chapters diisi ulang dari card/library
- * - Decode HTML entities (&#8217; → ')
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -43,7 +36,6 @@ function pathOnly(href: string): string {
 	}
 }
 
-/** Path valid novel: slug panjang, bukan nav/utility */
 function isNovelPath(p: string): boolean {
 	if (!p || p === '/' || p.length < 8) return false;
 	if (BLOCKED_PATH.test(p)) return false;
@@ -105,7 +97,6 @@ function extractChapterNum(text: string): number | undefined {
 	return Number.isNaN(n) ? undefined : n;
 }
 
-/** Judul chapter pendek: "Chapter 52" */
 function shortChapterTitle(raw: string, num: number): string {
 	const n = Number.isFinite(num) && num > 0 ? num : parseChapterNumber(raw, 0);
 	if (n > 0) return `Chapter ${n}`;
@@ -114,7 +105,6 @@ function shortChapterTitle(raw: string, num: number): string {
 	return decodeEntities(raw).slice(0, 40);
 }
 
-/** Dari URL chapter → path novel (buang -chapter-N...) */
 function novelPathFromChapter(href: string): string | null {
 	const p = pathOnly(href);
 	const m = p.match(/^(.+?)-chapter[-_]?\d/i);
@@ -154,7 +144,6 @@ export class ShanghaiFantasySource extends BaseSource {
 				this.fetchLibrary(1).catch(() => [] as Manga[])
 			]);
 
-			// Cover map dari sumber yang punya gambar
 			const coverMap = new Map<string, string>();
 			for (const m of [...fromCards, ...fromLib]) {
 				if (m.cover) coverMap.set(m.id, m.cover);
@@ -182,7 +171,6 @@ export class ShanghaiFantasySource extends BaseSource {
 		return out;
 	}
 
-	/** Utama: blok "Latest Chapters" di homepage */
 	private async parseLatestFromChapters(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		this.assertNotCf(html);
@@ -230,7 +218,6 @@ export class ShanghaiFantasySource extends BaseSource {
 		return list;
 	}
 
-	/** Card novel di homepage — wajib ada cover image */
 	private async parseHomeNovelCards(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		this.assertNotCf(html);
@@ -615,7 +602,6 @@ export class ShanghaiFantasySource extends BaseSource {
 					if (!contentHtml) contentHtml = $c('body').html()?.trim() || rendered;
 				}
 			} catch {
-				/* fallback HTML */
 			}
 		}
 
