@@ -111,7 +111,8 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'bacalightnovel', name: 'BacaLightNovel' },
 	{ id: 'lovelyblossoms', name: 'LovelyBlossoms' },
 	{ id: 'botitranslation', name: 'BotiTranslation' },
-	{ id: 'goldennovel', name: 'GoldenNovel' }
+	{ id: 'goldennovel', name: 'GoldenNovel' },
+	{ id: 'shanghaifantasy', name: 'Shanghai Fantasy' }
 ];
 
 export function getSourceList(): SourceMeta[] {

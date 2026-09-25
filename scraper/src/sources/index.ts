@@ -108,9 +108,11 @@ import { BacaLightNovelSource } from './impl/BacaLightNovel';
 import { LovelyBlossomsSource } from './impl/LovelyBlossoms';
 import { BotiTranslationSource } from './impl/BotiTranslation';
 import { GoldenNovelSource } from './impl/GoldenNovel';
+import { ShanghaiFantasySource } from './impl/ShanghaiFantasy';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    shanghaifantasy: new ShanghaiFantasySource(),
     goldennovel: new GoldenNovelSource(),
     botitranslation: new BotiTranslationSource(),
     lovelyblossoms: new LovelyBlossomsSource(),
