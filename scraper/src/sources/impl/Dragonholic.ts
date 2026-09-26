@@ -182,7 +182,6 @@ export class DragonholicSource extends BaseSource {
 		);
 		if (!Array.isArray(data)) return [];
 
-		// Enrich latestChapter in parallel (badge di card)
 		const enriched = await Promise.all(
 			data.map(async (item) => {
 				const latest = item?.id
@@ -350,7 +349,6 @@ export class DragonholicSource extends BaseSource {
 		return [];
 	}
 
-	/** Resolve chapter WP object by path */
 	private async resolveChapterItem(chapterId: string): Promise<any> {
 		let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 		path = path.replace(/\/$/, '');
@@ -396,14 +394,13 @@ export class DragonholicSource extends BaseSource {
 		throw new Error(`Chapter not found: ${chapterId}`);
 	}
 
-	/** Prev/next by chapter number within same series */
 	private async resolveNeighbors(
 		parentId: number,
 		currentPath: string,
 		currentNumber: number
 	): Promise<{ prev: string | null; next: string | null }> {
 		try {
-			// Ambil semua chapter id+title (tanpa content) — paginated
+			
 			const list: { path: string; number: number }[] = [];
 			let page = 1;
 			let totalPages = 1;

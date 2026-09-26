@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Sektedoujin adapter (sektedoujin.cc)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /manga/{slug}
  *   chapter : /{chapter-slug}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class SektedoujinSource extends BaseSource {
 	id = 'sektedoujin';
 	name = 'Sektedoujin';

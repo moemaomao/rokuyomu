@@ -1,13 +1,14 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * ZonaTMO (zonatmo.org)
  * - Latest: /biblioteca + /ultimas-subidas (target 24 unique)
  * - Manga:  /library/manga/{id}/{slug}
  * - Chapter:/view_uploads/{id} → /viewer/{uniqid}/cascade
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails, Chapter } from '../types';
+import * as cheerio from 'cheerio';
+
 export class ZonaTmoSource extends BaseSource {
 	id = 'zonatmo';
 	name = 'ZonaTMO';

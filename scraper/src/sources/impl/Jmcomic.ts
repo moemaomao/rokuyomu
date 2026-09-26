@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import { createHash, createDecipheriv } from 'node:crypto';
-
 /**
  * 18comic / 禁漫天堂 (JMComic)
  *
@@ -14,6 +10,11 @@ import { createHash, createDecipheriv } from 'node:crypto';
  *
  * Fix: race 2 domain (timeout 3.2s), throw on fail (jangan cache []), node:crypto
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import { createHash, createDecipheriv } from 'node:crypto';
+
 export class JmcomicSource extends BaseSource {
 	id = 'jmcomic';
 	name = '18comic';

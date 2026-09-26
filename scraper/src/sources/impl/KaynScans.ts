@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * KaynScans adapter (public AI API)
  *
@@ -14,6 +11,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   manga   : "/comic/{slug}"
  *   chapter : "/comic/{slug}/chapter/{number}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class KaynScansSource extends BaseSource {
 	id = 'kaynscans';
 	name = 'Kayn Scans';

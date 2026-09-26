@@ -1,8 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-import https from 'node:https';
-
 /**
  * Doujins.com adapter (gallery-style English doujin site)
  *
@@ -20,6 +15,12 @@ import https from 'node:https';
  *
  * Note: site SSL sometimes fails Node strict check → insecure https.Agent
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+import https from 'node:https';
+
 export class DoujinsSource extends BaseSource {
 	id = 'doujins';
 	name = 'Doujins.com';

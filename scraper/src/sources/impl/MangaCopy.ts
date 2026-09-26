@@ -132,11 +132,9 @@ export class MangaCopySource extends BaseSource {
 	const title = comic.name || comic.title || pathWord;
 	const cover = comic.cover || comic.img || '';
 
-	// update/newest: raw.name = nama chapter, comic.last_chapter_name juga ada
-	// /comics: field chapter biasanya kosong
 	let latestRaw: unknown =
 		comic.last_chapter_name ??
-		raw?.name ?? // chapter name di root (endpoint update/newest)
+		raw?.name ??
 		comic.last_chapter?.name ??
 		comic.last_chapter?.display ??
 		raw?.last_chapter_name ??

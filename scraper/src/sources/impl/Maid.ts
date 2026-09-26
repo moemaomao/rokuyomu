@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Maid - Manga Indonesia (www.maid.my.id)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa: Indonesian
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MaidSource extends BaseSource {
 	id = 'maid';
 	name = 'Maid';
@@ -139,7 +140,6 @@ export class MaidSource extends BaseSource {
 		return out;
 	}
 
-	/** Search / archive cards (flexbox3-item atau hasil search) */
 	private parseSearchCards($: cheerio.CheerioAPI): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();

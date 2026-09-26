@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * ManhuaRMTL adapter (manhuarmtl.com)
  *
@@ -16,6 +12,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /manga/{slug}
  *   chapter : /manga/{slug}/chapter-{num}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class ManhuarmtlSource extends BaseSource {
 	id = 'manhuarmtl';
 	name = 'ManhuaRMTL';

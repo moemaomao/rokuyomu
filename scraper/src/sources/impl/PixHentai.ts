@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * pixhentai.com adapter (WordPress HTML scrape)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/{slug}"
  *   chapter : "/{slug}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class PixHentaiSource extends BaseSource {
 	id = 'pixhentai';
 	name = 'PixHentai';

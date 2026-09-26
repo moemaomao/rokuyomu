@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Natsu adapter (natsu.one)
  *
@@ -16,6 +12,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /manga/{slug}
  *   chapter : /manga/{slug}/chapter-{num}.{id}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class NatsuSource extends BaseSource {
 	id = 'natsu';
 	name = 'Natsu';

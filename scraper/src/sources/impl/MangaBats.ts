@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * mangabats.xyz adapter (HTML scrape)
  *
@@ -13,6 +9,11 @@ import * as cheerio from 'cheerio';
  * Pages  : <img src> di halaman chapter (CDN: uploads.mangadex.org / amzim.beer)
  *
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaBatsSource extends BaseSource {
 	id = 'mangabats';
 	name = 'MangaBats.xyz';

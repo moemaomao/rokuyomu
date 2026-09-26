@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * MadaraScans adapter (https://madarascans.org)
  *
@@ -23,13 +19,17 @@ import * as cheerio from 'cheerio';
  * (semua page mengembalikan konten page 1).
  * Harus pakai query-style: /series/?order=update&page=N
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MadaraScansSource extends BaseSource {
 	id = 'madarascans';
 	name = 'MadaraScans';
 	baseUrl = 'https://madarascans.org';
 
 	private readonly PER_PAGE = 24;
-	/** Jumlah item per halaman di situs (~30) */
 	private readonly SITE_PER_PAGE = 30;
 	private readonly DEFAULT_LANG = 'en';
 
@@ -147,7 +147,6 @@ export class MadaraScansSource extends BaseSource {
 			if (/\bmanhwa\b/i.test(cardText)) type = 'manhwa';
 			else if (/\bmanhua\b/i.test(cardText)) type = 'manhua';
 
-			// latest chapter: live .epxs, fallback regex (sering di-comment di HTML)
 			let latestChapter: string | undefined;
 			const epText = $card.find('.epxs').first().text().replace(/\s+/g, ' ').trim();
 			if (epText) {
@@ -188,7 +187,6 @@ export class MadaraScansSource extends BaseSource {
 		return mangas;
 	}
 
-	/** Merge beberapa halaman situs supaya dapat ~PER_PAGE item. */
 	private async fetchCatalogPages(
 		buildPath: (sitePage: number) => string,
 		appPage: number
@@ -231,8 +229,7 @@ export class MadaraScansSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		try {
-			// Selalu pakai /series/?order=update (query-style pagination).
-			// Path-style /series/page/N/?order=update rusak di situs (duplikat page 1).
+			
 			const list = await this.fetchCatalogPages((sitePage) => {
 				if (sitePage <= 1) return `/series/?order=update`;
 				return `/series/?order=update&page=${sitePage}`;
@@ -279,7 +276,6 @@ export class MadaraScansSource extends BaseSource {
 	): Promise<MangaDetails> {
 		let path = this.cleanId(mangaId);
 
-		// chapter id → series slug
 		if (/chapter/i.test(path) && !path.startsWith('/series/')) {
 			const slug = path
 				.replace(/^\//, '')
@@ -420,7 +416,6 @@ export class MadaraScansSource extends BaseSource {
 
 	// ── Pages ────────────────────────────────────────────────────────────────
 
-	/** Parse ts_reader.run({...}) — sumber utama gambar Themesia. */
 	private parseTsReaderImages(html: string): string[] {
 		const images: string[] = [];
 		const seen = new Set<string>();
@@ -445,10 +440,8 @@ export class MadaraScansSource extends BaseSource {
 		const m = html.match(/ts_reader\.run\((\{[\s\S]*?\})\);/);
 		if (!m?.[1]) return images;
 
-		// Unescape JSON path escapes dulu, baru ekstrak URL penuh
 		const unescaped = m[1].replace(/\\\//g, '/');
 
-		// Prefer array images di dalam sources[]
 		let blob = unescaped;
 		const srcBlock = unescaped.match(
 			/"sources"\s*:\s*\[[\s\S]*?"images"\s*:\s*\[([\s\S]*?)\]/
@@ -470,7 +463,6 @@ export class MadaraScansSource extends BaseSource {
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		let path = this.cleanId(chapterId);
 
-		// strip accidental /series/ prefix on chapter ids
 		if (/^\/series\//i.test(path) && /chapter/i.test(path)) {
 			path = path.replace(/^\/series\//i, '/');
 		}
@@ -482,10 +474,8 @@ export class MadaraScansSource extends BaseSource {
 			try {
 				const html = await this.fetchHtml(path);
 
-				// 1) ts_reader
 				let images = this.parseTsReaderImages(html);
 
-				// 2) DOM fallback
 				if (images.length === 0) {
 					const $ = cheerio.load(html);
 					const seen = new Set<string>();
@@ -516,7 +506,6 @@ export class MadaraScansSource extends BaseSource {
 					});
 				}
 
-				// 3) regex fallback — path /wp-content/uploads/manga/
 				if (images.length === 0) {
 					const re =
 						/https?:\/\/(?:i\d\.wp\.com\/)?(?:madarascans\.org|madascans\.com)\/wp-content\/uploads\/[^"'\\\s<>]+/gi;

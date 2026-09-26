@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * klz9.com adapter (official JSON API + signed headers)
  *
@@ -14,6 +11,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   chapter : "/{slug}/c/{numericChapterId}"
  *
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class Klz9Source extends BaseSource {
 	id = 'klz9';
 	name = 'KLZ9';

@@ -1,7 +1,3 @@
-import { createHmac, randomBytes } from 'crypto';
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Kumopoi (beta.kumopoi.com) — API v1
  *
@@ -20,6 +16,11 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   message = `${METHOD}:${pathname}:${timestamp}:${nonce}`
  *   signature = HMAC-SHA256(secret, message).hex()
  */
+
+import { createHmac, randomBytes } from 'crypto';
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class KumopoiSource extends BaseSource {
 	id = 'kumopoi';
 	name = 'Kumopoi';

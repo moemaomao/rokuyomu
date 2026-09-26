@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * LectorTMO (lectortmo.vip) — tema manganexus
  *
@@ -10,6 +6,11 @@ import * as cheerio from 'cheerio';
  * Detail  : /manga/{slug}/
  * Chapter : /manga-chapter/{slug}-cap-XXX/
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class LectorTmoSource extends BaseSource {
 	id = 'lectortmo';
 	name = 'LectorTMO';

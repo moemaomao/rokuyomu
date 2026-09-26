@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-
 /**
  * hentairead.com adapter (HTML scrape)
  *
@@ -13,6 +10,10 @@ import type { Manga, MangaDetails } from '../types';
  *
  * Catatan: situs pakai Cloudflare — fetch server-side bisa gagal tanpa cookie/bypass.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+
 export class HentaireadSource extends BaseSource {
 	id = 'hentairead';
 	name = 'HentaiRead';
@@ -20,7 +21,6 @@ export class HentaireadSource extends BaseSource {
 
 	// ── HTTP ─────────────────────────────────────────────────────────────────
 
-	/** Jangan namai `headers` — bentrok property BaseSource */
 	private h(extra?: Record<string, string>): Record<string, string> {
 		return {
 			'User-Agent':
@@ -41,7 +41,6 @@ export class HentaireadSource extends BaseSource {
 		});
 		if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
 		const html = await res.text();
-		// Cloudflare challenge
 		if (
 			html.includes('Just a moment') ||
 			html.includes('cf-browser-verification') ||
@@ -79,7 +78,6 @@ export class HentaireadSource extends BaseSource {
 		);
 	}
 
-	/** Ambil URL terbesar dari srcset */
 	private pickSrcset(srcset: string): string {
 		if (!srcset) return '';
 		let best = '';
@@ -96,7 +94,6 @@ export class HentaireadSource extends BaseSource {
 		return best || srcset.trim().split(/\s+/)[0] || '';
 	}
 
-	/** Full image: hencover → henread, buang /preview */
 	private toFullImage(src: string): string {
 		if (!src) return '';
 		return src
@@ -104,7 +101,6 @@ export class HentaireadSource extends BaseSource {
 			.replace(/\/preview/gi, '');
 	}
 
-	/** Pastikan cover jadi URL absolut */
 	private normalizeCover(src: string): string {
 		if (!src) return '';
 		let cover = src.trim();
@@ -116,12 +112,6 @@ export class HentaireadSource extends BaseSource {
 
 	// ── List parser ──────────────────────────────────────────────────────────
 
-	/**
-	 * Struktur (hentairead-js):
-	 *   .manga-grid > item
-	 *     a[href*="/hentai/"]  → slug + title
-	 *     .manga-item__img img[srcset|data-src|src] → cover
-	 */
 	private parseList(html: string): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();

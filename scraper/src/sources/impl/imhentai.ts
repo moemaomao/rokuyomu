@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-import https from 'node:https';
-
 /**
  * imhentai.to adapter (HTML scrape)
  *
@@ -10,6 +6,10 @@ import https from 'node:https';
  * Pages         : https://zrocdn.xyz/galleries/{mediaId}/{n}.webp
  * ID format: "/{numericId}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+import https from 'node:https';
 
 export class ImhentaiSource extends BaseSource {
 	id = 'imhentai';
@@ -310,7 +310,6 @@ export class ImhentaiSource extends BaseSource {
 		if (!q) return this.getLatestManga(page, opts);
 
 		try {
-			// imhentai search: q= + optional language via query text
 			const qParts = [q];
 			if (langSlug && langSlug !== 'translated') {
 				qParts.push(`language:${langSlug}`);
@@ -371,7 +370,6 @@ export class ImhentaiSource extends BaseSource {
 			...characters.map((c) => `character:${c}`)
 		];
 
-		// Badge chapter = page count (Ch. 42), sama seperti nhentai
 		const latestChapter = pageCount > 0 ? pageCount : 1;
 
 		return {

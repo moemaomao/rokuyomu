@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Mangakuri adapter (API)
  *
@@ -23,6 +20,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  * Token: set MANGAKURI_TOKEN di .env ATAU isi authToken di bawah
  *        (ambil dari DevTools → Network → Authorization: Bearer ...)
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class MangakuriSource extends BaseSource {
 	id = 'mangakuri';
 	name = 'Mangakuri';

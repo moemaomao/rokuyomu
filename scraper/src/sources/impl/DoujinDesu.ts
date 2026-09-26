@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * doujin.desu.xxx adapter (JSON API + encrypted payload)
  *
@@ -13,6 +10,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   manga   : "/manga/{slug}"
  *   chapter : "/reader/{uuid}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class DoujinDesuSource extends BaseSource {
     id = 'doujindesu';
     name = 'DoujinDesu';

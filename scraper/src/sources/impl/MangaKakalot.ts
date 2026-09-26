@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * MangaKakalot.gg adapter (HTML + chapters JSON API)
  *
@@ -18,6 +14,11 @@ import * as cheerio from 'cheerio';
  *
  * Uses global fetch (works on Node + Cloudflare Workers).
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaKakalotSource extends BaseSource {
 	id = 'mangakakalot';
 	name = 'MangaKakalot';

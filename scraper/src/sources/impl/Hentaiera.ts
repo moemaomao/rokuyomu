@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-
 /**
  * HentaiEra adapter
  *
@@ -11,6 +8,10 @@ import type { Manga, MangaDetails } from '../types';
  * Detail : /gallery/{id}/
  * Pages  : m{server}.hentaiera.com/{dir}/{id}/{n}.{ext}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+
 export class HentaieraSource extends BaseSource {
 	id = 'hentaiera';
 	name = 'HentaiEra';

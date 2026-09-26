@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Comicaso (v3.comicaso.pro) adapter – API based + challenge cookie
  *
@@ -21,6 +18,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *
  * Bahasa default: Indonesian
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class ComicasoSource extends BaseSource {
 	id = 'comicaso';
 	name = 'Comicaso';

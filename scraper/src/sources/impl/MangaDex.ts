@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * MangaDex adapter (official API v5)
  *
@@ -14,6 +11,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   manga   : "/{mangaUuid}"
  *   chapter : "/{mangaUuid}/c/{chapterUuid}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class MangaDexSource extends BaseSource {
 	id = 'mangadex';
 	name = 'MangaDex';

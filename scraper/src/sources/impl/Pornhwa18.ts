@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Pornhwa18 adapter (pornhwa18.com)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /comic/{slug}
  *   chapter : /comic/{slug}/chapter-{n}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class Pornhwa18Source extends BaseSource {
 	id = 'pornhwa18';
 	name = 'Pornhwa18';

@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Rena Scans adapter (https://renascans.net)
  *
@@ -17,6 +14,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   chapter : /series/{slug}/{chapterSlug}/{chapterId}
  * Locked chapters (coins) di-skip.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class RenaScansSource extends BaseSource {
 	id = 'renascans';
 	name = 'Rena Scans';

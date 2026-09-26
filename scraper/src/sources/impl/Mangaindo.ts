@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * mangaindo.best adapter (MangaThemesia)
  *
@@ -14,6 +10,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/manga/{slug}"
  *   chapter : "/{slug}-chapter-{n}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaindoSource extends BaseSource {
 	id = 'mangaindo';
 	name = 'Mangaindo';
@@ -225,7 +226,6 @@ export class MangaindoSource extends BaseSource {
 		let type = 'manga';
 		const authors: string[] = [];
 
-		// Table rows: Status / Type / Author / Artist
 		$('table tr, .infotable tr, .wd-full').each((_, row) => {
 			const $row = $(row);
 			const label = $row.find('td, th, b, .title').first().text().toLowerCase();
@@ -253,7 +253,6 @@ export class MangaindoSource extends BaseSource {
 			}
 		});
 
-		// Fallback full text scan
 		const bodyText = $('article, .seriestucontent, .main-info').text();
 		if (type === 'manga') {
 			if (/\bManhwa\b/.test(bodyText)) type = 'manhwa';
@@ -403,5 +402,3 @@ export class MangaindoSource extends BaseSource {
 		}
 	}
  }
-
-

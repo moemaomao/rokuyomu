@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * E-Hentai Adapter
  * https://e-hentai.org
@@ -16,8 +12,13 @@ import * as cheerio from 'cheerio';
  * - retry + backoff pada 429/503/ban HTML
  * - concurrency showpage rendah
  * - enrich gdata list OFF by default
- * - cookie dari env EHENTAI_COOKIE (jangan hardcode)
+ * - cookie dari env EHENTAI_COOKIE
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails, Chapter } from '../types';
+import * as cheerio from 'cheerio';
+
 export class EhentaiSource extends BaseSource {
 	id = 'ehentai';
 	name = 'E-Hentai';

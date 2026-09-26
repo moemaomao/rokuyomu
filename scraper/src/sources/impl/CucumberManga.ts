@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Cucumber Manga adapter (WordPress Madara / wp-manga)
  *
@@ -18,6 +14,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa default: English
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class CucumberMangaSource extends BaseSource {
 	id = 'cucumbermanga';
 	name = 'Cucumber Manga';

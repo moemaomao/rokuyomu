@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * KS Group Scans adapter (https://ksgroupscans.com)
  *
@@ -18,6 +14,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /manga/{slug}
  *   chapter : /manga/{slug}/chapter-{n}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class KSGroupScansSource extends BaseSource {
 	id = 'ksgroupscans';
 	name = 'KS Group Scans';

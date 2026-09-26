@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * GD Scans adapter (https://gdscans.com)
  * Theme: WordPress Madara
@@ -13,6 +9,11 @@ import * as cheerio from 'cheerio';
  * Chapter : /manga/{slug}/volume-{v}/ch-{n}/
  * Pages   : .reading-content img / .wp-manga-chapter-img
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class GDScansSource extends BaseSource {
 	id = 'gdscans';
 	name = 'GD Scans';

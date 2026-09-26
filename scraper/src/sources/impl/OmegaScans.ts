@@ -1,5 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
 
 /**
  * Omega Scans adapter (api.omegascans.org + HTML chapter pages)
@@ -9,6 +7,9 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  * Chapters    : GET https://api.omegascans.org/chapter/query?series_id=&perPage=&page=
  * Pages       : scrape /series/{slug}/{chapter_slug}  → media.omegascans.org image URLs
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
 
 export class OmegaScansSource extends BaseSource {
 	id = 'omegascans';

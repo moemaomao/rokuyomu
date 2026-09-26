@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Demonic Scans / Manga Demon adapter (https://demonicscans.org)
  *
@@ -20,6 +16,11 @@ import * as cheerio from 'cheerio';
  * SSL: kalau CERT_HAS_EXPIRED di Node scraper, jalankan dengan:
  *   NODE_TLS_REJECT_UNAUTHORIZED=0 npx tsx src/index.ts
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class DemonicScansSource extends BaseSource {
 	id = 'demonicscans';
 	name = 'Demonic Scans';

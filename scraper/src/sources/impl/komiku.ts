@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Komiku (komiku.org) adapter – Manga / Manhwa / Manhua Bahasa Indonesia
  *
@@ -10,6 +6,12 @@ import * as cheerio from 'cheerio';
  * Detail : https://komiku.org/manga/{slug}/
  * Chapter: /{slug}-chapter-{n}/
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
+
 export class KomikuSource extends BaseSource {
 	id = 'komiku';
 	name = 'Komiku';

@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * KingComix Adapter
  * https://kingcomix.com
@@ -12,6 +8,11 @@ import * as cheerio from 'cheerio';
  * - Detail:  /{slug}/
  * - One-shot: semua page image ada di .entry-content
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails, Chapter } from '../types';
+import * as cheerio from 'cheerio';
+
 export class KingcomixSource extends BaseSource {
 	id = 'kingcomix';
 	name = 'KingComix';

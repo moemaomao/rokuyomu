@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-
 /**
  * hentailoop.com adapter
  *
@@ -14,6 +11,10 @@ import type { Manga, MangaDetails } from '../types';
  * Catatan: Cloudflare sering block outbound IP Vercel.
  * Kalau gagal terus → pindah ke workerSources.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+
 export class HentailoopSource extends BaseSource {
 	id = 'hentailoop';
 	name = 'HentaiLoop';

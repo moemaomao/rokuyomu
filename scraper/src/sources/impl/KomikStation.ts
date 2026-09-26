@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * komikstation.org adapter (MangaStream)
  *
@@ -14,6 +10,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/manga/{slug}"
  *   chapter : "/{slug}-chapter-{n}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class KomikStationSource extends BaseSource {
 	id = 'komikstation';
 	name = 'KomikStation';

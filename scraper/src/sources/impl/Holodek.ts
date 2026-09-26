@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Holodek / HoloToon (holodek.run)
  *
@@ -15,6 +11,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa: Indonesian | NSFW
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class HolodekSource extends BaseSource {
 	id = 'holodek';
 	name = 'Holodek';
@@ -324,7 +325,6 @@ export class HolodekSource extends BaseSource {
 		let rating: number | undefined;
 		let ratingCount: number | undefined;
 
-		// JSON-LD aggregateRating
 		const ldBlocks = html.match(
 			/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi
 		) || [];
@@ -341,7 +341,7 @@ export class HolodekSource extends BaseSource {
 							ratingCount = parseInt(String(ar.ratingCount), 10);
 						}
 					}
-					// author dari schema
+					
 					if (item?.author) {
 						const au = item.author;
 						const names = Array.isArray(au) ? au : [au];
@@ -356,7 +356,6 @@ export class HolodekSource extends BaseSource {
 			}
 		}
 
-		// Type & status
 		let type = 'manhwa';
 		let status = 'Ongoing';
 		$('span').each((_, el) => {

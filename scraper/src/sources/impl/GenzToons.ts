@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Genz Toons adapter (genztoons.org)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/series/{slug}"
  *   chapter : "/chapter/{seriesId}-{chapterId}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class GenzToonsSource extends BaseSource {
 	id = 'genztoons';
 	name = 'Genz Toons';

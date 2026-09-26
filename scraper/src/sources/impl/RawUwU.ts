@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * RawUwU adapter (rawuwu.net)
  *
@@ -15,6 +11,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/raw/{id}"
  *   chapter : "/read/{id}/chapter-{n}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class RawUwUSource extends BaseSource {
 	id = 'rawuwu';
 	name = 'RawUwU';

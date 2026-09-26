@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Dojing (dojing.net) adapter – MangaReader theme (18+)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa: Indonesian | NSFW
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class DojingSource extends BaseSource {
 	id = 'dojing';
 	name = 'Dojing';

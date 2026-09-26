@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Areakomik adapter (https://areakomik.com)
  * Komik dewasa Indo — custom theme
@@ -16,6 +12,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /series/{slug}
  *   chapter : /chapter/{slug}-chapter-{n}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class AreakomikSource extends BaseSource {
 	id = 'areakomik';
 	name = 'Areakomik';

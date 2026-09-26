@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Hitomi.la adapter (CF Workers optimized)
  *
@@ -14,6 +10,11 @@ import * as cheerio from 'cheerio';
  *
  * ID format: "/{numericId}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class HitomiSource extends BaseSource {
 	id = 'hitomi';
 	name = 'Hitomi.la';
@@ -459,11 +460,6 @@ export class HitomiSource extends BaseSource {
 		}
 	}
 
-	/**
-	 * Search:
-	 * - Namespace (language:xx / type:xx / artist:xx / tag:xx) → nozomi file
-	 * - Teks biasa → ambil index-all + filter judul di memori
-	 */
 	async searchManga(
 		query: string,
 		opts?: { page?: number; lang?: string; type?: string }

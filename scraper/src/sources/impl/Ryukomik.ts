@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Ryukomik adapter (ryukomik.my.id)
  *
@@ -19,6 +15,10 @@ import * as cheerio from 'cheerio';
  *   Reader loads pages through /api/proxy?url=...&source=ryukomik
  *   Proxy attaches the session cookie and streams original images
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
 
 export class RyukomikSource extends BaseSource {
 	id = 'ryukomik';

@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Mangasusu adapter (mangasusuku.com)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /komik/{slug}
  *   chapter : /{slug}-chapter-{num}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangasusuSource extends BaseSource {
 	id = 'mangasusu';
 	name = 'Mangasusu';

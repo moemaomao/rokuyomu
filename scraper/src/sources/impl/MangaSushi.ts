@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * MangaSushi.org adapter (WordPress Madara / WP-Manga)
  *
@@ -15,6 +11,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/manga/{slug}"
  *   chapter : "/manga/{slug}/chapter-{n}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaSushiSource extends BaseSource {
 	id = 'mangasushi';
 	name = 'MangaSushi';

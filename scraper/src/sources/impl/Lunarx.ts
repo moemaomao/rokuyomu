@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Lunarx / Lunar Manga adapter (lunarx.to)
  *
@@ -21,6 +18,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   manga   : /manga/{slug}
  *   chapter : /manga/{slug}/{chapter}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class LunarxSource extends BaseSource {
 	id = 'lunarx';
 	name = 'Lunarx';

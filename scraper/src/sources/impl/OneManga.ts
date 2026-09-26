@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * 1Manga.co adapter (MangaHub family, source key mn03)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/manga/{slug}"
  *   chapter : "/manga/{slug}/chapter/{number}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class OneMangaSource extends BaseSource {
 	id = 'onemanga';
 	name = '1Manga';

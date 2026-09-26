@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * MangaFire adapter (https://mangafire.to)
  *
@@ -22,6 +19,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  * - Header lebih mirip browser asli
  * - rawGet support attempt untuk ganti UA
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class MangaFireSource extends BaseSource {
 	id = 'mangafire';
 	name = 'MangaFire';
@@ -222,7 +223,7 @@ export class MangaFireSource extends BaseSource {
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 			try {
-				// delay kecil + random biar tidak terlalu bot-like
+			
 				if (attempt > 1) {
 					await new Promise((r) => setTimeout(r, 300 + Math.random() * 400));
 				}
@@ -230,7 +231,6 @@ export class MangaFireSource extends BaseSource {
 				const { ok, status, text } = await this.rawGet(url, true, attempt);
 				const trimmed = text.trim();
 
-				// deteksi Cloudflare challenge
 				if (
 					trimmed.startsWith('<') ||
 					/just a moment|cf-browser-verification|challenge-platform|cf-chl/i.test(
@@ -264,7 +264,6 @@ export class MangaFireSource extends BaseSource {
 		throw lastErr instanceof Error ? lastErr : new Error('MangaFire request failed');
 	}
 
-	/** Tanpa VRF — lebih lolos di Cloudflare Workers */
 	private async topTitles(
 		kind: 'trending' | 'new' = 'trending',
 		limit = 30,
@@ -472,8 +471,6 @@ export class MangaFireSource extends BaseSource {
 		const apiLang = lang ? this.toApiLang(lang) : null;
 		const typeFilter = this.normalizeTypeFilter(opts?.type);
 
-		// Fast path: top-titles dulu (tanpa VRF, ~1 req) — lolos Workers + timeout 10s
-		// API /titles (VRF) sering lambat/diblok di CF Workers → load_timeout di +page.server
 		try {
 			const [trending, newest] = await Promise.all([
 				this.topTitles('trending', 48, 30),
@@ -508,7 +505,6 @@ export class MangaFireSource extends BaseSource {
 			console.error('[mangafire] top-titles failed', e);
 		}
 
-		// Slow path: signed /api/titles (pagination + language akurat)
 		try {
 			const params: Array<[string, string | number]> = [
 				['order[chapter_updated_at]', 'desc'],

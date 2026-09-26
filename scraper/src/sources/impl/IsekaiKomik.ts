@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * IsekaiKomik adapter (MangaThemesia / mangareader)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa default: Indonesian
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class IsekaiKomikSource extends BaseSource {
 	id = 'isekaikomik';
 	name = 'IsekaiKomik';
@@ -86,7 +87,6 @@ export class IsekaiKomikSource extends BaseSource {
 		return 'manhwa';
 	}
 
-	/** Ambil value dari .imptdt (Status / Author / …) */
 	private imptdtValue($: cheerio.CheerioAPI, label: RegExp): string {
 		let found = '';
 		$('.imptdt').each((_, el) => {
@@ -381,7 +381,6 @@ export class IsekaiKomikSource extends BaseSource {
 					}
 				}
 
-				// 2) fallback: img di #readerarea
 				const $ = cheerio.load(html);
 				const urls: string[] = [];
 				const seen = new Set<string>();
@@ -408,7 +407,6 @@ export class IsekaiKomikSource extends BaseSource {
 					return urls;
 				}
 
-				// 3) fallback: regex CDN
 				const cdn = html.match(
 					/https:\/\/cdn\.isekaikomik\.com\/[^"'\\\s<>]+/gi
 				);

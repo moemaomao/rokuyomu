@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Vortex Scans adapter (https://vortexscans.org)
  *
@@ -17,6 +14,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *   chapter : /series/{slug}/{chapterSlug}/{chapterId}
  * Locked chapters (coins) di-skip.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class VortexScansSource extends BaseSource {
 	id = 'vortexscans';
 	name = 'Vortex Scans';

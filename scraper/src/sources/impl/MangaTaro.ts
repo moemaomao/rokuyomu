@@ -1,8 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-import { createHash } from 'node:crypto';
-
 /**
  * MangaTaro.org adapter (MangaPeak theme + custom /auth APIs)
  *
@@ -19,6 +14,12 @@ import { createHash } from 'node:crypto';
  *   manga   : "/manga/{slug}"
  *   chapter : "/read/{slug}/ch{num}-{chapterId}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+import { createHash } from 'node:crypto';
+
 export class MangaTaroSource extends BaseSource {
 	id = 'mangataro';
 	name = 'MangaTaro';

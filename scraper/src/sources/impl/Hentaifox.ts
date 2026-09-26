@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
 
 /**
  * HentaiFox adapter
@@ -13,6 +10,11 @@ import * as cheerio from 'cheerio';
  * Pages  : thumb → full image (webp) di i*.hentaifox.com
  * ID     : "/{numericId}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class HentaifoxSource extends BaseSource {
 	id = 'hentaifox';
 	name = 'HentaiFox';

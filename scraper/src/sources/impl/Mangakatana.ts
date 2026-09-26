@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * mangakatana.com adapter
  *
@@ -11,6 +7,11 @@ import * as cheerio from 'cheerio';
  * Chapter: /manga/{slug}.{id}/c{num}
  * Pages  : var thzq=[...]
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaKatanaSource extends BaseSource {
 	id = 'mangakatana';
 	name = 'MangaKatana';

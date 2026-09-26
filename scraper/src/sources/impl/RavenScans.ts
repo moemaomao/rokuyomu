@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Raven Scans adapter (https://ravenscans.org)
  * Theme: WordPress Themesia / mangareader
@@ -15,6 +11,11 @@ import * as cheerio from 'cheerio';
  *   manga   : "/manga/{slug}"
  *   chapter : "/{slug}-chapter-{n}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class RavenScansSource extends BaseSource {
 	id = 'ravenscans';
 	name = 'Raven Scans';

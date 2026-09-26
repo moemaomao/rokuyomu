@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Setsu Scans adapter (https://setsuscans.com)
  *
@@ -22,6 +18,11 @@ import * as cheerio from 'cheerio';
  * Catatan: situs di belakang Cloudflare Turnstile.
  * Hybrid Worker membantu, tapi challenge interaktif tetap bisa 403.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class SetsuScansSource extends BaseSource {
 	id = 'setsuscans';
 	name = 'Setsu Scans';
@@ -30,7 +31,6 @@ export class SetsuScansSource extends BaseSource {
 	private readonly PER_PAGE = 24;
 	private readonly DEFAULT_LANG = 'en';
 
-	/** Override header biar lebih mirip browser modern */
 	protected headers: Record<string, string> = {
 		'User-Agent':
 			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',

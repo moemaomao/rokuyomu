@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * www.mangabats.com adapter
  *
@@ -12,6 +8,11 @@ import * as cheerio from 'cheerio';
  * Chapter: /manga/{slug}/chapter-{n}
  * Pages  : #container-chapter-reader img
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaBatsComSource extends BaseSource {
 	id = 'mangabatscom';
 	name = 'MangaBats.com';

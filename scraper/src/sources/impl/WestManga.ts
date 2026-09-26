@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * West Manga adapter (v1 / data.mantweh.online API)
  *
@@ -21,6 +18,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *
  * Bahasa default: Indonesian
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class WestMangaSource extends BaseSource {
 	id = 'westmanga';
 	name = 'West Manga';

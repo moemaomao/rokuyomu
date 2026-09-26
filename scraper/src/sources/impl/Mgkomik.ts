@@ -2,16 +2,11 @@ import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types';
 import * as cheerio from 'cheerio';
 
-/**
- * MGKomik (Madara)
- * Domain aktif sering pindah + Cloudflare.
- */
 export class MgkomikSource extends BaseSource {
 	id = 'mgkomik';
 	name = 'MGKomik';
 	baseUrl = 'https://web1.mgkomik.cc';
 
-	/** Mirror yang dicoba berurutan jika 403 */
 	private readonly MIRRORS = [
 		'https://web1.mgkomik.cc',
 		'https://id.mgkomik.cc',
@@ -34,7 +29,6 @@ export class MgkomikSource extends BaseSource {
 		};
 	}
 
-	/** fetch dengan Referer + fallback mirror */
 	protected async fetchHtml(path: string): Promise<string> {
 		const rel = path.startsWith('http')
 			? path

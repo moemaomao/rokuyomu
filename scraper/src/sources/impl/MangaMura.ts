@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
 
 /**
  * MangaMura adapter (mangareader theme)
@@ -18,6 +15,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa default: ja (raw JP)
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class MangaMuraSource extends BaseSource {
 	id = 'mangamura';
 	name = 'MangaMura';

@@ -2,9 +2,6 @@ import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types';
 import * as cheerio from 'cheerio';
 
-/**
- * KLManga (klmanga.me) adapter – Japanese RAW manga
- */
 export class KlmangaSource extends BaseSource {
 	id = 'klmanga';
 	name = 'KLManga';

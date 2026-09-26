@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * SilentQuill / KDT Scans adapter (MangaThemesia)
  *
@@ -18,6 +14,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa default: English
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class SilentQuillSource extends BaseSource {
 	id = 'silentquill';
 	name = 'SilentQuill';

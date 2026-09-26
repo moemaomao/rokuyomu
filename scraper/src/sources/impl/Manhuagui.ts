@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Manhuagui (漫画柜) adapter
  *
@@ -19,6 +15,11 @@ import * as cheerio from 'cheerio';
  * Frontend image.ts → proxyImage() yang wrap /api/proxy.
  * Pastikan proxy set Referer https://www.manhuagui.com/ untuk hamreus.com & mhgui.com.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class ManhuaguiSource extends BaseSource {
 	id = 'manhuagui';
 	name = 'Manhuagui';

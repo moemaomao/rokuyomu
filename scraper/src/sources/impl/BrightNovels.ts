@@ -57,7 +57,6 @@ function stripHtml(html: string): string {
 		.trim();
 }
 
-/** Parse Inertia data-page JSON from HTML */
 function parseInertia(html: string): any | null {
 	const m =
 		html.match(/data-page="([^"]+)"/) ||
@@ -72,7 +71,7 @@ function parseInertia(html: string): any | null {
 			.replace(/&gt;/g, '>');
 		return JSON.parse(raw);
 	} catch {
-		// try decodeURIComponent style
+	
 		try {
 			return JSON.parse(decodeURIComponent(m[1].replace(/\+/g, ' ')));
 		} catch {
@@ -180,7 +179,6 @@ export class BrightNovelsSource extends BaseSource {
 			}
 		}
 
-		// Fallback: parse DOM cards
 		if (list.length < 8) {
 			const $ = cheerio.load(html);
 			$('a[href*="/series/"]').each((_, el) => {
@@ -347,7 +345,6 @@ export class BrightNovelsSource extends BaseSource {
 				});
 			}
 
-			// newest first (Rokuyomu convention)
 			out.sort((a, b) => b.number - a.number);
 			return out;
 		} catch {
@@ -356,7 +353,6 @@ export class BrightNovelsSource extends BaseSource {
 	}
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
-		// Novel = text, not images
 		return [];
 	}
 
@@ -375,7 +371,7 @@ export class BrightNovelsSource extends BaseSource {
 		const next = inertia?.props?.nextChapter;
 
 		if (!chapter && !inertia?.props?.isUnlocked) {
-			// might be paywalled
+		
 			const $ = cheerio.load(html);
 			const locked =
 				$('body').text().toLowerCase().includes('unlock') ||
@@ -403,7 +399,6 @@ export class BrightNovelsSource extends BaseSource {
 			contentHtml = el.html() || '';
 		}
 
-		// Prefer clean HTML paragraphs for novel reader
 		let content = contentHtml;
 		if (content && !content.includes('<p') && !content.includes('<br')) {
 			content = content

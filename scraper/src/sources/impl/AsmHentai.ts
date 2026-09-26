@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * AsmHentai adapter (https://asmhentai.com)
  *
@@ -15,6 +11,11 @@ import * as cheerio from 'cheerio';
  *
  * ID: manga "/g/{id}" | chapter "/g/{id}/chapter/1"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class AsmHentaiSource extends BaseSource {
 	id = 'asmhentai';
 	name = 'AsmHentai';

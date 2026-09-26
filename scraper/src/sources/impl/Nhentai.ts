@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-
 /**
  * nhentai.net adapter (API v2)
  *
@@ -10,6 +7,9 @@ import type { Manga, MangaDetails } from '../types';
  *
  * ID format: "/{numericId}"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
 
 export class NhentaiSource extends BaseSource {
 	id = 'nhentai';

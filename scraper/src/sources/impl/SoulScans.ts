@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Soul Scans ID adapter (v1 / img API)
  *
@@ -18,6 +15,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  * Bahasa default: Indonesian
  * Source list diambil dari section "Latest Project"
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class SoulScansSource extends BaseSource {
 	id = 'soulscans';
 	name = 'Soul Scans';
