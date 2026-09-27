@@ -52,6 +52,7 @@ function stripHtml(html: string): string {
 function cleanTitle(raw: string): string {
 	return decodeEntities(raw || '')
 		.replace(/\s+/g, ' ')
+		.replace(/^Read\s+/i, '')
 		.replace(/\s*(?:[–—|]|-)\s*Azure Chronicles\s*$/i, '')
 		.replace(/\s*—\s*Chapter\s+\d+.*$/i, '')
 		.trim();
@@ -173,17 +174,30 @@ export class AzureChroniclesSource extends BaseSource {
 			if (/^(read novel|start reading|view all)$/i.test(title)) continue;
 
 			let cover = '';
-			const imgs = [
-				...around.matchAll(
-					/<img[^>]+(?:src|data-src|data-lazy-src)="([^"]+)"[^>]*>/gi
-				)
-			];
-			for (const im of imgs) {
-				const src = im[1].replace(/&amp;/g, '&');
-				if (/avatar|icon|logo|emoji|svg/i.test(src)) continue;
-				if (/\.(jpg|jpeg|png|webp)/i.test(src) || /\/images?\//i.test(src)) {
-					cover = src;
-					break;
+			// background-image
+			const bg = around.match(
+				/background(?:-image)?\s*:\s*url\(['"]?([^)'"]+)['"]?\)/i
+			);
+			if (bg && !/avatar|icon|logo/i.test(bg[1])) {
+				cover = bg[1].replace(/&amp;/g, '&');
+			}
+			if (!cover) {
+				const imgs = [
+					...around.matchAll(
+						/<img[^>]+(?:src|data-src|data-lazy-src|data-original|srcset)="([^"]+)"[^>]*>/gi
+					)
+				];
+				for (const im of imgs) {
+					let src = im[1].replace(/&amp;/g, '&').split(/\s*,\s*/)[0].split(/\s+/)[0];
+					if (/avatar|icon|logo|emoji|svg|data:image/i.test(src)) continue;
+					if (
+						/\.(jpg|jpeg|png|webp|avif)/i.test(src) ||
+						/\/(images?|uploads|covers?|thumb)\//i.test(src) ||
+						/cdn\./i.test(src)
+					) {
+						cover = src;
+						break;
+					}
 				}
 			}
 
@@ -263,6 +277,31 @@ export class AzureChroniclesSource extends BaseSource {
 					/* ignore */
 				}
 			}
+		}
+
+		// Enrich cover untuk item yang masih kosong (batas 12 request)
+		const needCover = out.filter((x) => !x.cover).slice(0, 12);
+		if (needCover.length) {
+			await Promise.all(
+				needCover.map(async (item) => {
+					try {
+						const slug = slugFromNovelPath(item.id);
+						if (!slug) return;
+						const h = await this.fetchPage(`/novel/${slug}/`);
+						const og = h.match(/property="og:image"[^>]+content="([^"]+)"/i);
+						if (og) item.cover = og[1].replace(/&amp;/g, '&');
+						const chs = this.parseChapterList(h, slug);
+						if (chs.length && item.latestChapter == null) {
+							item.latestChapter = chs[0].number;
+						}
+						// perbaiki title "Read ..."
+						const t = h.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+						if (t) item.title = cleanTitle(stripHtml(t[1]));
+					} catch {
+						/* ignore */
+					}
+				})
+			);
 		}
 
 		const startIdx = (pageNum - 1) * PAGE_SIZE;
@@ -472,6 +511,13 @@ export class AzureChroniclesSource extends BaseSource {
 		if (!m) throw new Error(`Invalid chapter id: ${chapterId}`);
 		const [, seriesSlug, chapSlug] = m;
 		const path = `/novel/${seriesSlug}/${chapSlug.replace(/\/$/, '')}/`;
+
+		// Warm session via series page (membantu lolos challenge di beberapa edge)
+		try {
+			await this.fetchPage(`/novel/${seriesSlug}/`);
+		} catch {
+			/* optional */
+		}
 
 		const html = await this.fetchPage(path);
 
