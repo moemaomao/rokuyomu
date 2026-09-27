@@ -118,6 +118,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	tinytranslation: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	dragonholic: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	flenser: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-500' },
+	skydemonorder: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

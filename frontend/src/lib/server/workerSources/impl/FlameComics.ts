@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Flame Comics adapter (Next.js _next/data API)
  *
@@ -18,6 +15,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *
  * Bahasa default: English
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class FlameComicsSource extends BaseSource {
 	id = 'flamecomics';
 	name = 'Flame Comics';

@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types';
-
 /**
  * simply-hentai.com adapter (API v3)
  *
@@ -15,6 +12,10 @@ import type { Manga, MangaDetails } from '../types';
  * ID format : "/{slug}"
  * Update    : created_at (ISO) → chapter.date + description
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails } from '../types';
+
 export class SimplyHentaiSource extends BaseSource {
 	id = 'simplyhentai';
 	name = 'Simply Hentai';

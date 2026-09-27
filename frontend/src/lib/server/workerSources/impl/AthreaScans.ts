@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Athrea Scans adapter (WordPress Themesia / mangareader)
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *
  * Paid chapters (coins) return empty pages.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class AthreaScansSource extends BaseSource {
 	id = 'athreascans';
 	name = 'Athrea Scans';

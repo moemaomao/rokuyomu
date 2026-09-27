@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * ManhwaIndo adapter (www.manhwaindo.my)
  *
@@ -19,6 +15,11 @@ import * as cheerio from 'cheerio';
  *
  * Catalog utama = section "Project Update" sesuai request.
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class ManhwaIndoSource extends BaseSource {
 	id = 'manhwaindo';
 	name = 'ManhwaIndo';
@@ -222,7 +223,6 @@ export class ManhwaIndoSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		try {
-			// Section "Project Update" — /project-updates/
 			const list = await this.fetchCatalogPages((sitePage) => {
 				if (sitePage <= 1) return `/project-updates/`;
 				return `/project-updates/page/${sitePage}/`;
@@ -269,7 +269,6 @@ export class ManhwaIndoSource extends BaseSource {
 	): Promise<MangaDetails> {
 		let path = this.cleanId(mangaId);
 
-		// chapter id → series slug
 		if (/chapter/i.test(path) && !path.startsWith('/series/')) {
 			const slug = path
 				.replace(/^\//, '')
@@ -308,10 +307,9 @@ export class ManhwaIndoSource extends BaseSource {
 				.trim() ||
 			$('meta[name="description"]').attr('content') ||
 			'';
-		// strip "Synopsis" prefix if present
+	
 		description = description.replace(/^Synopsis\s*/i, '').trim();
 
-		// .imptdt: Status / Type / Released / Author / Artist
 		const info: Record<string, string> = {};
 		$('.imptdt').each((_, el) => {
 			const $el = $(el);
@@ -349,11 +347,11 @@ export class ManhwaIndoSource extends BaseSource {
 		$('.mgen a[href*="/genres/"], .wd-full a[href*="/genres/"], a[href*="/genres/"]').each(
 			(_, a) => {
 				const t = $(a).text().trim();
-				// skip site-wide genre nav (usually many); keep short unique
+	
 				if (t && t.length < 30 && !genres.includes(t)) genres.push(t);
 			}
 		);
-		// limit noise: only first unique set from series detail (typically < 15)
+	
 		const cleanGenres = genres
 			.filter((g) => !/^(manhwa|manhua|manga)$/i.test(g))
 			.slice(0, 12);
@@ -464,7 +462,6 @@ export class ManhwaIndoSource extends BaseSource {
 
 	// ── Pages ────────────────────────────────────────────────────────────────
 
-	/** Parse ts_reader.run({...}) — sumber utama gambar di Themesia. */
 	private parseTsReaderImages(html: string): string[] {
 		const images: string[] = [];
 		const seen = new Set<string>();
@@ -491,7 +488,7 @@ export class ManhwaIndoSource extends BaseSource {
 		if (!m) return images;
 
 		const raw = m[1];
-		// Prefer sources[0].images
+	
 		const sourcesMatch = raw.match(
 			/"sources"\s*:\s*\[\s*\{[\s\S]*?"images"\s*:\s*\[([\s\S]*?)\]/
 		);
@@ -521,7 +518,7 @@ export class ManhwaIndoSource extends BaseSource {
 		let path = this.cleanId(
 			chapterId.startsWith('/') ? chapterId : `/${chapterId}`
 		);
-		// strip accidental /series/ prefix on chapter ids
+		
 		if (/^\/series\//i.test(path) && /chapter/i.test(path)) {
 			path = path.replace(/^\/series\//i, '/');
 		}
@@ -544,7 +541,6 @@ export class ManhwaIndoSource extends BaseSource {
 					continue;
 				}
 
-				// 1) ts_reader (utama — DOM sering kosong saat di-scrape server-side)
 				let images = this.parseTsReaderImages(html);
 
 				// 2) DOM fallback

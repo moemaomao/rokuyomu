@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * ManhwaDesu adapter (manhwadesu.wiki)
  *
@@ -19,6 +15,11 @@ import * as cheerio from 'cheerio';
  * Catatan: domain .wiki dilindungi Cloudflare Turnstile.
  * Proxy image: set Referer https://manhwadesu.wiki/
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class ManhwaDesuSource extends BaseSource {
 	id = 'manhwadesu';
 	name = 'ManhwaDesu';
@@ -28,7 +29,6 @@ export class ManhwaDesuSource extends BaseSource {
 	private readonly SITE_PER_PAGE = 20;
 	private readonly DEFAULT_LANG = 'id';
 
-	// ✅ TARUH DI SINI — override fetchHtml
 	protected async fetchHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
 		const response = await fetch(url, {

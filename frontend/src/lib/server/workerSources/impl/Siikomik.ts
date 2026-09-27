@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Siikomik adapter (siikomik.id)
  *
@@ -20,6 +16,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /komik/{slug}
  *   chapter : /komik/{slug}/chapter-{n}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class SiikomikSource extends BaseSource {
 	id = 'siikomik';
 	name = 'Siikomik';

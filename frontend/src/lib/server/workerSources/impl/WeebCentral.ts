@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
 
 /**
  * Weeb Central adapter (HTMX + SSR)
@@ -12,6 +9,11 @@ import * as cheerio from 'cheerio';
  * Chapters : GET /series/{seriesId}/full-chapter-list  (HX-Request)
  * Pages    : GET /chapters/{chapterId}/images?reading_style=long_strip  (HX-Request)
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class WeebCentralSource extends BaseSource {
 	id = 'weebcentral';
 	name = 'Weeb Central';

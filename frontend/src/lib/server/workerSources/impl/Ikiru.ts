@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * Ikiru adapter (08.ikiru.wtf)
  *
@@ -16,6 +12,11 @@ import * as cheerio from 'cheerio';
  *   manga   : /manga/{slug}
  *   chapter : /manga/{slug}/chapter-{num}.{id}
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class IkiruSource extends BaseSource {
 	id = 'ikiru';
 	name = 'Ikiru';

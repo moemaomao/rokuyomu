@@ -114,9 +114,11 @@ import { BrightNovelsSource } from './impl/BrightNovels';
 import { TinyTranslationSource } from './impl/TinyTranslation';
 import { DragonholicSource } from './impl/Dragonholic';
 import { FlenserSource } from './impl/Flenser';
+import { SkyDemonOrderSource } from './impl/SkyDemonOrder';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    skydemonorder: new SkyDemonOrderSource(),
     flenser: new FlenserSource(),
     dragonholic: new DragonholicSource(),
     tinytranslation: new TinyTranslationSource(),

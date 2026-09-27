@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * LumosKomik adapter (03.lumosgg.com)
  *
@@ -18,6 +14,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa: Indonesian
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class LumosSource extends BaseSource {
 	id = 'lumos';
 	name = 'LumosKomik';

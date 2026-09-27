@@ -1,7 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-import * as cheerio from 'cheerio';
-
 /**
  * BacaMi (v1.bacami.site) adapter
  *
@@ -17,6 +13,11 @@ import * as cheerio from 'cheerio';
  *
  * Bahasa default: Indonesian (badge homepage = ID)
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+import * as cheerio from 'cheerio';
+
 export class BacamiSource extends BaseSource {
 	id = 'bacami';
 	name = 'BacaMi';

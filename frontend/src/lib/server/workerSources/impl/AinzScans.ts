@@ -1,6 +1,3 @@
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
-
 /**
  * Ainz Scans ID adapter (v3 API)
  *
@@ -17,6 +14,10 @@ import type { Chapter, Manga, MangaDetails } from '../types';
  *
  * Bahasa default: Indonesian (badge homepage = ID)
  */
+
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types';
+
 export class AinzScansSource extends BaseSource {
 	id = 'ainzscans';
 	name = 'Ainz Scans';
