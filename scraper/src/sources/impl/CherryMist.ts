@@ -3,11 +3,18 @@
  * Path: scraper/src/sources/impl/CherryMist.ts
  *
  * API:
- *   GET /api/series                          → semua series (array)
- *   GET /api/series/{slug|id}                → detail series
- *   GET /api/chapters?series_id={id}         → daftar chapter
- *   GET /api/chapters?limit=&order=recent&published=1 → latest updates
- *   GET /api/chapters/{id}                   → body chapter (HTML)
+ *   GET  /api/series                              → semua series (array)
+ *   GET  /api/series/{slug|id}                    → detail series
+ *   GET  /api/chapters?series_id={id}             → daftar chapter
+ *   GET  /api/chapters?limit=&order=recent&published=1 → latest updates
+ *   GET  /api/chapters/{id}                       → body chapter (HTML / cipher)
+ *   POST /api/chapters/{id}/reveal                → unlock body when bodyWithheld
+ *        body: { ticket, frames, elapsedMs, visible, focused }
+ *
+ * Anti-scrape: GET chapter sering mengembalikan content="" + bodyWithheld=true
+ * + revealTicket. Unlock via POST /reveal dengan ticket + presence proof
+ * (frames >= 24, elapsedMs >= 600, visible/focused true) — sama seperti
+ * browser site (requestAnimationFrame check).
  *
  * Chapter content memakai font-cipher (PUA + /fonts/cipher/*-{seed}.woff2).
  * Kita inject @font-face + class cm-ciphered agar WebView/reader browser
@@ -19,6 +26,10 @@ import { BaseSource } from '../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../types';
 
 const PAGE_SIZE = 30;
+
+/** Presence proof minima — mirror site (Ki=24, Bi=600) */
+const REVEAL_MIN_FRAMES = 28;
+const REVEAL_MIN_ELAPSED_MS = 650;
 
 type CmSeries = {
 	id: number;
@@ -35,7 +46,7 @@ type CmSeries = {
 	status?: string | null;
 	total_chapters?: number | null;
 	last_release_at?: string | null;
-    updated_at?: string | null;
+	updated_at?: string | null;
 	created_at?: string | null;
 	genres?: string[] | null;
 	tags?: string[] | null;
@@ -66,6 +77,18 @@ type CmChapterDetail = CmChapterListItem & {
 	cipher?: { seed?: number } | null;
 	is_unlocked?: boolean;
 	series_title?: string;
+	/** true → body tidak dikirim di GET; pakai revealTicket + POST /reveal */
+	bodyWithheld?: boolean;
+	revealTicket?: string | null;
+};
+
+type CmRevealResponse = {
+	content?: string | null;
+	foreword?: string | null;
+	afterword?: string | null;
+	cipher?: { seed?: number } | null;
+	title?: string;
+	chapter_number?: number | null;
 };
 
 function stripHtml(html: string): string {
@@ -128,6 +151,31 @@ function wrapCipherContent(html: string, seed?: number | null): string {
 	return `<style>${css}</style><div class="cm-ciphered" data-cm-ciphered data-cipher-seed="${seed}">${body}</div>`;
 }
 
+function hasUsableBody(data: {
+	content?: string | null;
+	foreword?: string | null;
+	afterword?: string | null;
+}): boolean {
+	return !!(
+		(data.content && data.content.trim()) ||
+		(data.foreword && String(data.foreword).trim()) ||
+		(data.afterword && String(data.afterword).trim())
+	);
+}
+
+/** Presence proof yang diminta endpoint /reveal (mirror browser rAF check) */
+function makeRevealProof(): {
+	frames: number;
+	elapsedMs: number;
+	visible: boolean;
+	focused: boolean;
+} {
+	// sedikit jitter biar tidak terlihat hard-coded konstan
+	const frames = REVEAL_MIN_FRAMES + Math.floor(Math.random() * 12);
+	const elapsedMs = REVEAL_MIN_ELAPSED_MS + Math.floor(Math.random() * 200);
+	return { frames, elapsedMs, visible: true, focused: true };
+}
+
 export class CherryMistSource extends BaseSource {
 	id = 'cherrymist';
 	name = 'Cherrymist Cafe';
@@ -139,7 +187,9 @@ export class CherryMistSource extends BaseSource {
 		Accept: 'application/json, text/plain, */*',
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: 'https://cherrymist.cafe/',
-		Origin: 'https://cherrymist.cafe'
+		Origin: 'https://cherrymist.cafe',
+		// Header yang dikirim reader resmi site
+		'X-CM-Reader': '1'
 	};
 
 	/** Cache full series list (API mengembalikan semua ~2k item) */
@@ -155,6 +205,89 @@ export class CherryMistSource extends BaseSource {
 		const list = Array.isArray(data) ? data : [];
 		this.seriesCache = { at: now, data: list };
 		return list;
+	}
+
+	/** POST JSON helper (BaseSource hanya punya GET fetchJson) */
+	private async postJson<T>(path: string, body: unknown): Promise<T> {
+		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: {
+				...this.headers,
+				Referer: this.baseUrl + '/',
+				Origin: this.baseUrl,
+				Accept: 'application/json',
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(body)
+		});
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			throw new Error(
+				`Failed to POST ${url}: ${response.status} ${response.statusText}${text ? ` — ${text.slice(0, 200)}` : ''}`
+			);
+		}
+		return (await response.json()) as T;
+	}
+
+	/**
+	 * GET chapter; jika bodyWithheld + revealTicket → POST /reveal
+	 * dengan presence proof (wajib, tanpa ini API return 403 Not available).
+	 */
+	private async fetchChapterDetail(chapId: string): Promise<CmChapterDetail> {
+		const path = `/api/chapters/${chapId}`;
+		let last: CmChapterDetail | null = null;
+		const maxAttempts = 3;
+
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			const data = await this.fetchJson<CmChapterDetail>(path);
+			last = data;
+
+			if (!data?.id) {
+				throw new Error('Chapter not found');
+			}
+
+			// Body sudah ada → selesai
+			if (hasUsableBody(data) && !data.bodyWithheld) {
+				return data;
+			}
+
+			// bodyWithheld: unlock via reveal ticket + presence proof
+			if (data.bodyWithheld && data.revealTicket) {
+				try {
+					const proof = makeRevealProof();
+					const revealed = await this.postJson<CmRevealResponse>(
+						`/api/chapters/${chapId}/reveal`,
+						{ ticket: data.revealTicket, ...proof }
+					);
+					const merged: CmChapterDetail = {
+						...data,
+						content: revealed.content ?? data.content,
+						foreword: revealed.foreword ?? data.foreword,
+						afterword: revealed.afterword ?? data.afterword,
+						cipher: revealed.cipher ?? data.cipher,
+						bodyWithheld: false,
+						revealTicket: null
+					};
+					if (hasUsableBody(merged)) {
+						return merged;
+					}
+				} catch (e) {
+					console.error('[CherryMist] reveal failed', chapId, e);
+					// lanjut retry GET
+				}
+			}
+
+			// Content kosong tanpa ticket / reveal gagal → tunggu sebentar lalu retry
+			if (attempt < maxAttempts - 1) {
+				await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+			}
+		}
+
+		if (last && !last.id) {
+			throw new Error('Chapter not found');
+		}
+		return last!;
 	}
 
 	private mapSeries(s: CmSeries): Manga | null {
@@ -289,7 +422,6 @@ export class CherryMistSource extends BaseSource {
 		const translator =
 			series.translator?.name || series.translator_name || undefined;
 		if (translator && !authors.includes(translator)) {
-			// simpan translator di authors dengan prefix agar tidak hilang
 			authors.push(`TL: ${translator}`);
 		}
 
@@ -333,7 +465,6 @@ export class CherryMistSource extends BaseSource {
 				typeof c.chapter_number === 'number'
 					? c.chapter_number
 					: out.length + 1;
-			const chapSlug = c.slug || String(c.id);
 			// id stabil: /story/{seriesSlug}/chapter/{chapterId}
 			const id = `/story/${seriesSlug}/chapter/${c.id}`;
 			if (seen.has(id)) continue;
@@ -372,9 +503,7 @@ export class CherryMistSource extends BaseSource {
 			throw new Error(`Invalid chapter id: ${chapterId}`);
 		}
 
-		const data = await this.fetchJson<CmChapterDetail>(
-			`/api/chapters/${chapId}`
-		);
+		const data = await this.fetchChapterDetail(chapId);
 		if (!data?.id) throw new Error('Chapter not found');
 
 		if (isChapterLocked(data) && !data.is_unlocked) {
@@ -393,13 +522,18 @@ export class CherryMistSource extends BaseSource {
 		const seed = data.cipher?.seed;
 		const content = wrapCipherContent(parts.join('\n'), seed);
 
+		if (!content.trim()) {
+			throw new Error(
+				'Chapter body is empty (withheld or unavailable). Try again later or open on cherrymist.cafe.'
+			);
+		}
+
 		// prev/next: butuh list chapter series
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		try {
 			const seriesId = data.series_id;
 			if (seriesId != null) {
-				// resolve slug dari detail series bila perlu
 				let seriesSlug = '';
 				const seriesPath = chapterId.match(/^\/story\/([^/]+)\//);
 				seriesSlug = seriesPath?.[1] || '';
@@ -408,15 +542,12 @@ export class CherryMistSource extends BaseSource {
 					seriesSlug = s.slug || String(seriesId);
 				}
 				const chs = await this.fetchChapters(seriesId, seriesSlug);
-				// chs sorted newest-first; prev = higher number, next = lower
+				// chs sorted newest-first
 				const idx = chs.findIndex((c) => c.id.endsWith(`/chapter/${chapId}`));
 				if (idx >= 0) {
-					// di list newest-first: index-1 = newer, index+1 = older
-					prevChapterId = chs[idx + 1]?.id ?? null; // previous = older
-					nextChapterId = chs[idx - 1]?.id ?? null; // next = newer
-					// sesuaikan konvensi reader: prev = chapter sebelumnya (lebih kecil)
-					// next = chapter berikutnya (lebih besar)
-					// Karena sort desc: idx+1 lebih kecil, idx-1 lebih besar
+					// sort desc: idx+1 = older (prev), idx-1 = newer (next)
+					prevChapterId = chs[idx + 1]?.id ?? null;
+					nextChapterId = chs[idx - 1]?.id ?? null;
 				}
 			}
 		} catch {
