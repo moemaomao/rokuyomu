@@ -122,6 +122,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	cherrymist: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	karistudio: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	storyseedling: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	azurechronicles: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
