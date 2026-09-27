@@ -16,7 +16,6 @@
  *   GET /wp-json/wp/v2/posts?categories={id}&per_page=100&page=
  *   GET /wp-json/wp/v2/posts?slug={chapter-slug}
  *   GET /wp-json/wp/v2/posts?slug={novel-slug}&_embed=1  → cover via featured media
- *
  */
 import { BaseSource } from '../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../types';
@@ -24,6 +23,7 @@ import type { Manga, MangaDetails, Chapter } from '../types';
 const PAGE_SIZE = 24;
 const WP = '/wp-json/wp/v2';
 const NOVELS_API = '/wp-json/novels/v1';
+
 const SKIP_CAT_SLUGS = new Set([
 	'library',
 	'uncategorized',
@@ -55,6 +55,7 @@ type WpPost = {
 	content?: WpRendered;
 	excerpt?: WpRendered;
 	categories?: number[];
+	tags?: number[];
 	featured_media?: number;
 	status?: string;
 	_embedded?: {
@@ -107,7 +108,6 @@ function pathFromLink(link?: string, fallbackSlug?: string): string {
 			const p = u.pathname.replace(/\/$/, '') || '/';
 			return p.startsWith('/') ? p : `/${p}`;
 		} catch {
-			/* fallthrough */
 		}
 	}
 	if (fallbackSlug) return `/${fallbackSlug.replace(/^\/+|\/+$/g, '')}`;
@@ -128,7 +128,7 @@ function parseChapterNumber(title: string, slug = ''): number {
 		if (m[2]) return parseFloat(`${m[1]}.${m[2]}`);
 		return parseInt(m[1], 10);
 	}
-	// prologue / side story
+	
 	if (/prologue/i.test(title) || /prologue/i.test(slug)) return 0;
 	const n = title.match(/\b(\d+(?:\.\d+)?)\b/);
 	return n ? parseFloat(n[1]) : 0;
@@ -138,7 +138,6 @@ function looksLocked(contentHtml: string): boolean {
 	const raw = (contentHtml || '').trim();
 	if (!raw) return true;
 	const text = stripHtml(raw);
-
 	if (text.length < 80) {
 		if (/premium|karium|login|purchase|unlock|buy\s+chapter/i.test(raw + text)) {
 			return true;
@@ -236,6 +235,7 @@ export class KariStudioSource extends BaseSource {
 		cover: string;
 		description: string;
 		title: string;
+		genres: string[];
 		postId?: number;
 	}> {
 		try {
@@ -243,16 +243,53 @@ export class KariStudioSource extends BaseSource {
 				`${WP}/posts?slug=${encodeURIComponent(slug)}&_embed=1&per_page=1`
 			);
 			if (!Array.isArray(posts) || !posts.length) {
-				return { cover: '', description: '', title: '' };
+				return { cover: '', description: '', title: '', genres: [] };
 			}
 			const p = posts[0];
 			const media = p._embedded?.['wp:featuredmedia']?.[0];
 			const cover = media?.source_url || '';
 			const description = stripHtml(p.content?.rendered || p.excerpt?.rendered || '');
 			const title = cleanTitle(p.title?.rendered || '');
-			return { cover, description, title, postId: p.id };
+			const genres: string[] = [];
+			const seen = new Set<string>();
+			const termGroups = p._embedded?.['wp:term'] || [];
+			for (const group of termGroups) {
+				if (!Array.isArray(group)) continue;
+				for (const t of group) {
+					if (!t || t.taxonomy !== 'post_tag') continue;
+					const name = cleanTitle(t.name || '');
+					if (!name) continue;
+					const key = name.toLowerCase();
+					if (seen.has(key)) continue;
+					seen.add(key);
+					genres.push(name);
+				}
+			}
+
+			if (!genres.length && Array.isArray((p as any).tags) && (p as any).tags.length) {
+				try {
+					const ids = ((p as any).tags as number[]).slice(0, 30);
+					const tags = await this.fetchWp<Array<{ name?: string }>>(
+						`${WP}/tags?include=${ids.join(',')}&per_page=${ids.length}`
+					);
+					if (Array.isArray(tags)) {
+						for (const t of tags) {
+							const name = cleanTitle(t.name || '');
+							if (!name) continue;
+							const key = name.toLowerCase();
+							if (seen.has(key)) continue;
+							seen.add(key);
+							genres.push(name);
+						}
+					}
+				} catch {
+					/* ignore */
+				}
+			}
+
+			return { cover, description, title, genres, postId: p.id };
 		} catch {
-			return { cover: '', description: '', title: '' };
+			return { cover: '', description: '', title: '', genres: [] };
 		}
 	}
 
@@ -279,11 +316,9 @@ export class KariStudioSource extends BaseSource {
 						if (n.title) titleBySlug.set(slug, cleanTitle(n.title));
 					}
 				} catch {
-					
 				}
 			}
 		} catch {
-			
 		}
 
 		const perPage = PAGE_SIZE;
@@ -427,6 +462,7 @@ export class KariStudioSource extends BaseSource {
 			.filter(Boolean)[0];
 		if (!slug) throw new Error('Invalid manga id');
 
+		// Resolve category
 		const cats = await this.fetchWp<WpCategory[]>(
 			`${WP}/categories?slug=${encodeURIComponent(slug)}`
 		);
@@ -439,6 +475,7 @@ export class KariStudioSource extends BaseSource {
 		const title = index.title || cleanTitle(cat.name);
 		const cover = index.cover || '';
 		const description = index.description || stripHtml(cat.description || '');
+		const genres = index.genres || [];
 
 		const chapters = await this.fetchChapters(cat.id, slug);
 
@@ -450,7 +487,7 @@ export class KariStudioSource extends BaseSource {
 			description,
 			authors: [],
 			status: 'Ongoing',
-			genres: [],
+			genres,
 			chapters,
 			type: 'novel',
 			lang: 'en',
@@ -474,7 +511,6 @@ export class KariStudioSource extends BaseSource {
 				if (p.slug === seriesSlug) continue;
 				const title = cleanTitle(p.title?.rendered || p.slug);
 				if (!/chapter|prologue|epilogue|side\s*stor|extra|interlude/i.test(title + ' ' + p.slug)) {
-				
 					if (!/\d/.test(title) && !/\d/.test(p.slug)) continue;
 				}
 				const id = pathFromLink(p.link, p.slug);
@@ -545,7 +581,7 @@ export class KariStudioSource extends BaseSource {
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		try {
-			const catIds = (p.categories || []).filter((id) => id !== 129); // skip Library
+			const catIds = (p.categories || []).filter((id) => id !== 129);
 			const catId = catIds[0];
 			if (catId) {
 				const cats = await this.fetchWp<WpCategory[]>(`${WP}/categories/${catId}`);
@@ -561,6 +597,7 @@ export class KariStudioSource extends BaseSource {
 				}
 			}
 		} catch {
+			/* optional */
 		}
 
 		return {
