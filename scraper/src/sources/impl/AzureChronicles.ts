@@ -544,24 +544,53 @@ export class AzureChroniclesSource extends BaseSource {
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
+		const seen = new Set<string>();
+		const all: Manga[] = [];
+
+		const add = (items: Manga[]) => {
+			for (const m of items) {
+				if (seen.has(m.id)) continue;
+				seen.add(m.id);
+				all.push(m);
+			}
+		};
+
 		if (await this.canUseApi()) {
 			try {
-				const api = await this.apiLatest(pageNum);
-				if (api.length) return api;
+				// Ambil beberapa page WP agar pagination UI punya data unik
+				for (let p = 1; p <= Math.max(pageNum + 1, 3); p++) {
+					const batch = await this.apiLatest(p);
+					if (!batch.length) break;
+					add(batch);
+					if (batch.length < PAGE_SIZE) break;
+				}
 			} catch (e) {
 				console.error('[AzureChronicles] API latest failed', e);
 				this.apiOk = false;
 			}
 		}
-		// HTML fallback
-		const path = pageNum <= 1 ? '/' : `/?page=${pageNum}`;
-		try {
-			const html = await this.fetchPage(path);
-			return this.parseNovelCards(html).slice(0, PAGE_SIZE);
-		} catch (e) {
-			console.error('[AzureChronicles] HTML latest failed', e);
-			return [];
+
+		// HTML: homepage sering SPA tanpa ?page= — kumpulkan + search seeds lalu slice
+		if (all.length < pageNum * PAGE_SIZE) {
+			try {
+				const html = await this.fetchPage('/');
+				add(this.parseNovelCards(html));
+			} catch (e) {
+				console.error('[AzureChronicles] HTML home failed', e);
+			}
+			const seeds = ['a', 'the', 'of', 'in', 'i', 're', 'my', 'king', 'hunter', 'mage'];
+			for (const q of seeds) {
+				if (all.length >= pageNum * PAGE_SIZE + PAGE_SIZE) break;
+				try {
+					add(await this.searchManga(q, { page: 1 }));
+				} catch {
+					/* ignore */
+				}
+			}
 		}
+
+		const start = (pageNum - 1) * PAGE_SIZE;
+		return all.slice(start, start + PAGE_SIZE);
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
@@ -640,6 +669,42 @@ export class AzureChroniclesSource extends BaseSource {
 		};
 	}
 
+
+	private async resolvePrevNext(
+		seriesSlug: string,
+		chapSlug: string,
+		chapterId: string
+	): Promise<{ prev: string | null; next: string | null }> {
+		try {
+			let chs: Chapter[] = [];
+			if (await this.canUseApi()) {
+				try {
+					chs = await this.apiChaptersBySearch(seriesSlug);
+				} catch {
+					/* ignore */
+				}
+			}
+			if (!chs.length) {
+				const html = await this.fetchPage(`/novel/${seriesSlug}/`);
+				chs = this.parseChapterListHtml(html, seriesSlug);
+			}
+			// newest-first
+			const idx = chs.findIndex(
+				(c) =>
+					c.id === chapterId ||
+					c.id.endsWith(`/${chapSlug}`) ||
+					c.id.includes(`/${chapSlug}`)
+			);
+			if (idx < 0) return { prev: null, next: null };
+			return {
+				prev: chs[idx + 1]?.id ?? null, // older
+				next: chs[idx - 1]?.id ?? null // newer
+			};
+		} catch {
+			return { prev: null, next: null };
+		}
+	}
+
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
 	}
@@ -659,10 +724,15 @@ export class AzureChroniclesSource extends BaseSource {
 			try {
 				const api = await this.apiChapterContent(seriesSlug, chapSlug);
 				if (api && stripHtml(api.content).length > 80) {
+					const nav = await this.resolvePrevNext(
+						seriesSlug,
+						chapSlug,
+						chapterId
+					);
 					return {
 						...api,
-						prevChapterId: null,
-						nextChapterId: null
+						prevChapterId: nav.prev,
+						nextChapterId: nav.next
 					};
 				}
 			} catch (e) {
@@ -705,11 +775,12 @@ export class AzureChroniclesSource extends BaseSource {
 			);
 		}
 
+		const nav = await this.resolvePrevNext(seriesSlug, chapSlug, chapterId);
 		return {
 			title,
 			content: `<div class="ac-chapter">${body}</div>`,
-			prevChapterId: null,
-			nextChapterId: null
+			prevChapterId: nav.prev,
+			nextChapterId: nav.next
 		};
 	}
 }
