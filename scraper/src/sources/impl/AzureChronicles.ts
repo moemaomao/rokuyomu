@@ -538,96 +538,89 @@ export class AzureChroniclesSource extends BaseSource {
 			titleMatch ? stripHtml(titleMatch[1]) : chapSlug.replace(/-/g, ' ')
 		);
 
-		// Chapter body candidates — hindari related-novel cards
+		// Ekstrak teks chapter: prioritaskan <p>, buang cover/img promo
+		const extractParas = (src: string): string => {
+			const chunk = src
+				.replace(/<script[\s\S]*?<\/script>/gi, '')
+				.replace(/<style[\s\S]*?<\/style>/gi, '')
+				.replace(/<nav[\s\S]*?<\/nav>/gi, '')
+				.replace(/<aside[\s\S]*?<\/aside>/gi, '')
+				.replace(/What did you think of this chapter[\s\S]*/i, '')
+				.replace(/<a[^>]+href="[^"]*\/novel\/(?![^"]*chapter-)[^"]*"[^>]*>[\s\S]*?<\/a>/gi, '');
+
+			const paras = [...chunk.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+				.map((x) => x[0])
+				.filter((p) => {
+					const t = stripHtml(p).replace(/\s+/g, ' ').trim();
+					if (t.length < 25) return false;
+					if (/^(start reading|add to library|sign in|read novel)/i.test(t)) return false;
+					if (/^chapter\s+\d+\s*$/i.test(t)) return false;
+					return true;
+				});
+			return paras.join('\n');
+		};
+
 		let body = '';
-		const candidates = [
+		// 1) container khusus chapter
+		for (const re of [
 			/<article[^>]*>([\s\S]*?)<\/article>/i,
 			/<div[^>]+class="[^"]*(?:chapter-content|entry-content|post-content|reader-content|prose)[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-			/<div[^>]+id="[^"]*(?:chapter-content|content|reader)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
-		];
-		for (const re of candidates) {
+			/<div[^>]+id="[^"]*(?:chapter-content|chapter|reader)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
+		]) {
 			const hit = html.match(re);
-			if (hit?.[1] && stripHtml(hit[1]).length > 120) {
-				body = hit[1];
+			if (!hit?.[1]) continue;
+			const paras = extractParas(hit[1]);
+			if (stripHtml(paras).length > 150) {
+				body = paras;
 				break;
 			}
 		}
 
-		if (!body) {
+		// 2) fallback: setelah h1 sampai reaction
+		if (!body || stripHtml(body).length < 150) {
 			const main = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html;
-			// Ambil blok setelah h1 Chapter ... sampai reaction/footer
 			const afterH1 = main.split(/<\/h1>/i).slice(1).join('</h1>');
 			const cut = afterH1.split(
 				/What did you think of this chapter|Discussion|Comments|<\/main>/i
 			)[0];
-			const paras = [...cut.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-				.map((p) => p[0])
-				.filter((p) => {
-					const t = stripHtml(p);
-					return t.length > 30 && !/start reading|add to library|sign in/i.test(t);
-				});
-			if (paras.length >= 2) body = paras.join('\n');
-			else if (paras.length === 1 && stripHtml(paras[0]).length > 80) body = paras[0];
+			const paras = extractParas(cut);
+			if (stripHtml(paras).length > stripHtml(body).length) body = paras;
 		}
 
-		// Bersihkan nav / related / UI noise
+		// Buang semua gambar — reader novel hanya butuh teks
 		body = body
-			.replace(/<script[\s\S]*?<\/script>/gi, '')
-			.replace(/<style[\s\S]*?<\/style>/gi, '')
-			.replace(/<nav[\s\S]*?<\/nav>/gi, '')
-			.replace(/<aside[\s\S]*?<\/aside>/gi, '')
-			.replace(/What did you think of this chapter[\s\S]*/i, '')
-			// buang card novel lain (img + title promo)
-			.replace(/<a[^>]+href="[^"]*\/novel\/[^"]*"[^>]*>[\s\S]*?<\/a>/gi, (a) =>
-				/chapter-/i.test(a) ? a : ''
-			);
+			.replace(/<img\b[^>]*>/gi, '')
+			.replace(/<picture[\s\S]*?<\/picture>/gi, '')
+			.replace(/<figure[\s\S]*?<\/figure>/gi, '')
+			.replace(/<svg[\s\S]*?<\/svg>/gi, '');
 
-		let text = stripHtml(body);
-		// Satu kali ulang full fetch kalau body terlalu pendek (challenge lolos parsial)
-		if (!text || text.length < 80) {
+		let plain = stripHtml(body).replace(/\s+/g, ' ').trim();
+
+		// Retry sekali jika teks terlalu pendek (sering karena page masih challenge/partial)
+		if (plain.length < 120) {
 			await new Promise((r) => setTimeout(r, 3000));
 			const html2 = await this.fetchPage(path, 3);
-			const titleMatch2 =
-				html2.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
-				html2.match(/property="og:title"[^>]+content="([^"]+)"/i);
-			if (titleMatch2) {
-				/* keep existing title unless empty */
+			const main2 = html2.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html2;
+			const after2 = main2.split(/<\/h1>/i).slice(1).join('</h1>');
+			const cut2 = after2.split(
+				/What did you think of this chapter|Discussion|Comments|<\/main>/i
+			)[0];
+			const paras2 = extractParas(cut2)
+				.replace(/<img\b[^>]*>/gi, '')
+				.replace(/<picture[\s\S]*?<\/picture>/gi, '');
+			if (stripHtml(paras2).length > plain.length) {
+				body = paras2;
+				plain = stripHtml(body).replace(/\s+/g, ' ').trim();
 			}
-			body = '';
-			for (const re of [
-				/<article[^>]*>([\s\S]*?)<\/article>/i,
-				/<div[^>]+class="[^"]*(?:chapter-content|entry-content|post-content|reader-content|prose)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
-			]) {
-				const hit = html2.match(re);
-				if (hit?.[1] && stripHtml(hit[1]).length > 80) {
-					body = hit[1];
-					break;
-				}
-			}
-			if (!body) {
-				const main = html2.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html2;
-				const afterH1 = main.split(/<\/h1>/i).slice(1).join('</h1>');
-				const cut = afterH1.split(
-					/What did you think of this chapter|Discussion|Comments|<\/main>/i
-				)[0];
-				const paras = [...cut.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-					.map((p) => p[0])
-					.filter((p) => stripHtml(p).length > 30);
-				if (paras.length) body = paras.join('\n');
-			}
-			body = body
-				.replace(/<script[\s\S]*?<\/script>/gi, '')
-				.replace(/<style[\s\S]*?<\/style>/gi, '')
-				.replace(/<nav[\s\S]*?<\/nav>/gi, '')
-				.replace(/What did you think of this chapter[\s\S]*/i, '');
-			text = stripHtml(body);
 		}
-		if (!text || text.length < 40) {
+
+		if (plain.length < 80) {
 			throw new Error(
 				'Chapter body empty or blocked by anti-bot — retry in a few seconds'
 			);
 		}
 
+		// Konten final: hanya paragraf teks
 		const content = `<div class="ac-chapter">${body}</div>`;
 
 		// prev/next
