@@ -71,15 +71,26 @@ export class SkyDemonOrderSource extends BaseSource {
 	baseUrl = 'https://skydemonorder.com';
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
-		if (page <= 1) {
-			const [home, list] = await Promise.all([
-				this.parseHome().catch(() => [] as Manga[]),
-				this.fetchProjectsPage(1).catch(() => [] as Manga[])
-			]);
-			return this.dedupeById([...home, ...list]).slice(0, 30);
-		}
-		return this.fetchProjectsPage(page);
-	}
+  console.log('[SDO] getLatestManga page=', page);
+  try {
+    const html = await this.fetchHtml('/');
+    console.log('[SDO] home status length=', html.length);
+    console.log('[SDO] isCF=', /just a moment|cf-browser-verification|challenge-platform/i.test(html));
+    console.log('[SDO] preview=', html.slice(0, 300).replace(/\s+/g, ' '));
+  } catch (e) {
+    console.error('[SDO] fetch home failed', e);
+  }
+
+  if (page <= 1) {
+    const [home, list] = await Promise.all([
+      this.parseHome().catch((e) => { console.error('[SDO] parseHome', e); return [] as Manga[]; }),
+      this.fetchProjectsPage(1).catch((e) => { console.error('[SDO] projects', e); return [] as Manga[]; })
+    ]);
+    console.log('[SDO] home count=', home.length, 'list count=', list.length);
+    return this.dedupeById([...home, ...list]).slice(0, 30);
+  }
+  return this.fetchProjectsPage(page);
+}
 
 	private dedupeById(items: Manga[]): Manga[] {
 		const seen = new Set<string>();
