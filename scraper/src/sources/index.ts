@@ -115,9 +115,11 @@ import { TinyTranslationSource } from './impl/TinyTranslation';
 import { DragonholicSource } from './impl/Dragonholic';
 import { FlenserSource } from './impl/Flenser';
 import { SkyDemonOrderSource } from './impl/SkyDemonOrder';
+import { CherryMistSource } from './impl/CherryMist';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    cherrymist: new CherryMistSource(),
     skydemonorder: new SkyDemonOrderSource(),
     flenser: new FlenserSource(),
     dragonholic: new DragonholicSource(),

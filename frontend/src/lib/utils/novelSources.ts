@@ -12,7 +12,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'tinytranslation',
 	'dragonholic',
 	'flenser',
-	'skydemonorder'
+	'skydemonorder',
+	'cherrymist'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
