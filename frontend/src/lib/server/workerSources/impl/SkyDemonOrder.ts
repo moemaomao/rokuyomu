@@ -66,7 +66,6 @@ function decodeJsString(raw: string): string {
 		.replace(/\\\\/g, '\\');
 }
 
-/** Deteksi halaman challenge Cloudflare — jangan diam-diam return [] */
 function assertNotCloudflare(html: string, url: string): void {
 	const lower = html.toLowerCase();
 	const markers = [
@@ -91,7 +90,6 @@ function isProjectPath(href: string, baseUrl: string): { slug: string } | null {
 	const path = href.replace(baseUrl, '').split('?')[0].split('#')[0];
 	const m = path.match(/^\/projects\/([^/]+)\/?$/);
 	if (!m) return null;
-	// skip non-novel routes
 	if (/^(genres?|tags?|search|login|register|faq|products|subscriptions)$/i.test(m[1])) {
 		return null;
 	}
@@ -104,7 +102,6 @@ function cleanTitle(raw: string): string {
 
 function isValidTitle(t: string): boolean {
 	if (!t || t.length < 3) return false;
-	// filter noise dari nav / badge
 	if (/^(read|view|more|home|projects?|browse|login|register|faq|all|new|trending)$/i.test(t)) {
 		return false;
 	}
@@ -117,7 +114,6 @@ export class SkyDemonOrderSource extends BaseSource {
 	name = 'Sky Demon Order';
 	baseUrl = 'https://skydemonorder.com';
 
-	// JANGAN hardcode cf_clearance — expired dalam hitungan jam/hari
 	protected headers: Record<string, string> = {
 		'User-Agent':
 			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -144,7 +140,6 @@ export class SkyDemonOrderSource extends BaseSource {
 			]);
 			const merged = this.dedupeById([...home, ...list]);
 			if (merged.length === 0) {
-				// rethrow supaya UI/log tahu CF/block, bukan diam kosong
 				throw new Error(
 					'[SkyDemonOrder] No novels found — likely Cloudflare blocked the request. Ensure hybrid Worker is used.'
 				);
@@ -233,7 +228,6 @@ export class SkyDemonOrderSource extends BaseSource {
 	}
 
 	private async fetchProjectsPage(page: number): Promise<Manga[]> {
-		// sort=latest_chapter | new | popular — site kadang ganti nama
 		const path =
 			page <= 1
 				? '/projects?sort=latest_chapter'
@@ -320,7 +314,6 @@ export class SkyDemonOrderSource extends BaseSource {
 		};
 	}
 
-	/** Livewire lazy chapter-list → freeChapters JSON */
 	private async fetchChaptersViaLivewire(html: string, projectPath: string): Promise<Chapter[]> {
 		try {
 			const $ = cheerio.load(html);
@@ -334,7 +327,6 @@ export class SkyDemonOrderSource extends BaseSource {
 
 			const livewireUrl = absUrl(this.baseUrl, `/${lwMatch[1]}/update`);
 
-			// support wire:name / wire:id / data-name variants
 			const lwDiv =
 				$('[wire\\:name="project.chapter-list"]').first().length
 					? $('[wire\\:name="project.chapter-list"]').first()
@@ -379,7 +371,6 @@ export class SkyDemonOrderSource extends BaseSource {
 			const xdataDiv = $ch('div[x-data]').first();
 			const xData = xdataDiv.attr('x-data') || '';
 
-			// support single/double quotes + non-greedy yang aman untuk JSON panjang
 			const freeMatch =
 				xData.match(/freeChapters:\s*JSON\.parse\(\s*'((?:\\'|[^'])*)'\s*\)/) ||
 				xData.match(/freeChapters:\s*JSON\.parse\(\s*"((?:\\"|[^"])*)"\s*\)/) ||
@@ -416,7 +407,6 @@ export class SkyDemonOrderSource extends BaseSource {
 			const out: Chapter[] = [];
 			const seen = new Set<string>();
 
-			// freeChapters biasanya oldest → newest
 			const items = [...freeChapters].reverse();
 
 			for (let i = 0; i < items.length; i++) {
