@@ -117,9 +117,11 @@ import { FlenserSource } from './impl/Flenser';
 import { SkyDemonOrderSource } from './impl/SkyDemonOrder';
 import { CherryMistSource } from './impl/CherryMist';
 import { KariStudioSource } from './impl/KariStudio';
+import { StorySeedlingSource } from './impl/StorySeedling';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    storyseedling: new StorySeedlingSource(),
     karistudio: new KariStudioSource(),
     cherrymist: new CherryMistSource(),
     skydemonorder: new SkyDemonOrderSource(),
