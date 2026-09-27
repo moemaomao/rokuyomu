@@ -107,21 +107,31 @@ export class AzureChroniclesSource extends BaseSource {
 		'Upgrade-Insecure-Requests': '1'
 	};
 
-	/** fetchHtml dengan deteksi interstitial anti-bot + 1x retry */
-	private async fetchPage(path: string): Promise<string> {
+	/** fetchHtml + retry saat interstitial anti-bot (sering intermittent) */
+	private async fetchPage(path: string, retries = 4): Promise<string> {
 		const url = path.startsWith('http') ? path : path;
-		let html = await this.fetchHtml(url);
-		if (isChallengePage(html)) {
-			// tunggu sebentar lalu retry (beberapa edge melepaskan challenge di hit ke-2)
-			await new Promise((r) => setTimeout(r, 1500));
-			html = await this.fetchHtml(url);
+		let last = '';
+		for (let i = 0; i < retries; i++) {
+			if (i > 0) {
+				// backoff: 2s, 4s, 6s...
+				await new Promise((r) => setTimeout(r, 2000 * i));
+			}
+			try {
+				last = await this.fetchHtml(url);
+			} catch (e) {
+				if (i === retries - 1) throw e;
+				continue;
+			}
+			if (!isChallengePage(last) && last.length > 5000) {
+				return last;
+			}
 		}
-		if (isChallengePage(html)) {
+		if (isChallengePage(last) || last.length < 3000) {
 			throw new Error(
-				'Azure Chronicles anti-bot challenge — coba lagi nanti / gunakan proxy'
+				'Azure Chronicles anti-bot challenge — coba lagi nanti (intermittent)'
 			);
 		}
-		return html;
+		return last;
 	}
 
 	private parseNovelCards(html: string): Manga[] {
@@ -572,17 +582,50 @@ export class AzureChroniclesSource extends BaseSource {
 				/chapter-/i.test(a) ? a : ''
 			);
 
-		const text = stripHtml(body);
-		if (!text || text.length < 40) {
-			throw new Error('Chapter body empty or blocked by anti-bot');
+		let text = stripHtml(body);
+		// Satu kali ulang full fetch kalau body terlalu pendek (challenge lolos parsial)
+		if (!text || text.length < 80) {
+			await new Promise((r) => setTimeout(r, 3000));
+			const html2 = await this.fetchPage(path, 3);
+			const titleMatch2 =
+				html2.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
+				html2.match(/property="og:title"[^>]+content="([^"]+)"/i);
+			if (titleMatch2) {
+				/* keep existing title unless empty */
+			}
+			body = '';
+			for (const re of [
+				/<article[^>]*>([\s\S]*?)<\/article>/i,
+				/<div[^>]+class="[^"]*(?:chapter-content|entry-content|post-content|reader-content|prose)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
+			]) {
+				const hit = html2.match(re);
+				if (hit?.[1] && stripHtml(hit[1]).length > 80) {
+					body = hit[1];
+					break;
+				}
+			}
+			if (!body) {
+				const main = html2.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html2;
+				const afterH1 = main.split(/<\/h1>/i).slice(1).join('</h1>');
+				const cut = afterH1.split(
+					/What did you think of this chapter|Discussion|Comments|<\/main>/i
+				)[0];
+				const paras = [...cut.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+					.map((p) => p[0])
+					.filter((p) => stripHtml(p).length > 30);
+				if (paras.length) body = paras.join('\n');
+			}
+			body = body
+				.replace(/<script[\s\S]*?<\/script>/gi, '')
+				.replace(/<style[\s\S]*?<\/style>/gi, '')
+				.replace(/<nav[\s\S]*?<\/nav>/gi, '')
+				.replace(/What did you think of this chapter[\s\S]*/i, '');
+			text = stripHtml(body);
 		}
-		// Deteksi kalau yang keambil cuma promo novel lain
-		if (
-			text.length < 200 &&
-			/I Was Reincarnated|Read novel|Start Reading/i.test(text) &&
-			!/Chapter\s*\d/i.test(title)
-		) {
-			throw new Error('Chapter body looks like related-novel promo, not content');
+		if (!text || text.length < 40) {
+			throw new Error(
+				'Chapter body empty or blocked by anti-bot — retry in a few seconds'
+			);
 		}
 
 		const content = `<div class="ac-chapter">${body}</div>`;
