@@ -116,9 +116,11 @@ import { DragonholicSource } from './impl/Dragonholic';
 import { FlenserSource } from './impl/Flenser';
 import { SkyDemonOrderSource } from './impl/SkyDemonOrder';
 import { CherryMistSource } from './impl/CherryMist';
+import { KariStudioSource } from './impl/KariStudio';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    karistudio: new KariStudioSource(),
     cherrymist: new CherryMistSource(),
     skydemonorder: new SkyDemonOrderSource(),
     flenser: new FlenserSource(),

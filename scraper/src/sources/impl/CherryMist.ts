@@ -17,17 +17,15 @@
  * browser site (requestAnimationFrame check).
  *
  * Chapter content memakai font-cipher (PUA + /fonts/cipher/*-{seed}.woff2).
- * Kita inject @font-face + class cm-ciphered agar WebView/reader browser
+ * inject @font-face + class cm-ciphered agar WebView/reader browser
  * menampilkan teks dengan benar. Plain-text offline tanpa font = tidak terbaca.
  *
- * Premium: price_type === 'locked' / coin_price > 0 → isLocked
  */
 import { BaseSource } from '../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../types';
 
 const PAGE_SIZE = 30;
 
-/** Presence proof minima — mirror site (Ki=24, Bi=600) */
 const REVEAL_MIN_FRAMES = 28;
 const REVEAL_MIN_ELAPSED_MS = 650;
 
@@ -77,7 +75,6 @@ type CmChapterDetail = CmChapterListItem & {
 	cipher?: { seed?: number } | null;
 	is_unlocked?: boolean;
 	series_title?: string;
-	/** true → body tidak dikirim di GET; pakai revealTicket + POST /reveal */
 	bodyWithheld?: boolean;
 	revealTicket?: string | null;
 };
@@ -121,12 +118,10 @@ function seriesIdPath(s: CmSeries): string {
 function isChapterLocked(c: CmChapterListItem): boolean {
 	if (c.price_type === 'locked') return true;
 	if (typeof c.coin_price === 'number' && c.coin_price > 0) return true;
-	// is_locked di list kadang 1 meski free (soft-lock UI) — andalkan price_type
 	return false;
 }
 
 function cipherFontCss(seed: number): string {
-	// Family default di site: opensans
 	const families = ['opensans'] as const;
 	const faces = families.flatMap((fam) =>
 		(['regular', 'bold', 'italic'] as const).map((style) => {
@@ -163,14 +158,13 @@ function hasUsableBody(data: {
 	);
 }
 
-/** Presence proof yang diminta endpoint /reveal (mirror browser rAF check) */
 function makeRevealProof(): {
 	frames: number;
 	elapsedMs: number;
 	visible: boolean;
 	focused: boolean;
 } {
-	// sedikit jitter biar tidak terlihat hard-coded konstan
+	
 	const frames = REVEAL_MIN_FRAMES + Math.floor(Math.random() * 12);
 	const elapsedMs = REVEAL_MIN_ELAPSED_MS + Math.floor(Math.random() * 200);
 	return { frames, elapsedMs, visible: true, focused: true };
@@ -188,11 +182,10 @@ export class CherryMistSource extends BaseSource {
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: 'https://cherrymist.cafe/',
 		Origin: 'https://cherrymist.cafe',
-		// Header yang dikirim reader resmi site
+	
 		'X-CM-Reader': '1'
 	};
 
-	/** Cache full series list (API mengembalikan semua ~2k item) */
 	private seriesCache: { at: number; data: CmSeries[] } | null = null;
 	private static CACHE_TTL = 5 * 60 * 1000;
 
@@ -207,7 +200,6 @@ export class CherryMistSource extends BaseSource {
 		return list;
 	}
 
-	/** POST JSON helper (BaseSource hanya punya GET fetchJson) */
 	private async postJson<T>(path: string, body: unknown): Promise<T> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
 		const response = await fetch(url, {
@@ -230,10 +222,6 @@ export class CherryMistSource extends BaseSource {
 		return (await response.json()) as T;
 	}
 
-	/**
-	 * GET chapter; jika bodyWithheld + revealTicket → POST /reveal
-	 * dengan presence proof (wajib, tanpa ini API return 403 Not available).
-	 */
 	private async fetchChapterDetail(chapId: string): Promise<CmChapterDetail> {
 		const path = `/api/chapters/${chapId}`;
 		let last: CmChapterDetail | null = null;
@@ -247,12 +235,10 @@ export class CherryMistSource extends BaseSource {
 				throw new Error('Chapter not found');
 			}
 
-			// Body sudah ada → selesai
 			if (hasUsableBody(data) && !data.bodyWithheld) {
 				return data;
 			}
 
-			// bodyWithheld: unlock via reveal ticket + presence proof
 			if (data.bodyWithheld && data.revealTicket) {
 				try {
 					const proof = makeRevealProof();
@@ -274,11 +260,9 @@ export class CherryMistSource extends BaseSource {
 					}
 				} catch (e) {
 					console.error('[CherryMist] reveal failed', chapId, e);
-					// lanjut retry GET
 				}
 			}
 
-			// Content kosong tanpa ticket / reveal gagal → tunggu sebentar lalu retry
 			if (attempt < maxAttempts - 1) {
 				await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
 			}
@@ -315,7 +299,6 @@ export class CherryMistSource extends BaseSource {
 	}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
-		// Prefer recent chapter releases → unique series, newest first
 		try {
 			const recent = await this.fetchJson<CmChapterListItem[]>(
 				`/api/chapters?limit=300&order=recent&published=1`
@@ -352,7 +335,6 @@ export class CherryMistSource extends BaseSource {
 			console.error('[CherryMist] recent chapters failed', e);
 		}
 
-		// Fallback: sort all series by last_release_at
 		const all = await this.getAllSeries();
 		const sorted = [...all].sort((a, b) => {
 			const ta = Date.parse(a.last_release_at || a.updated_at || '') || 0;
@@ -394,7 +376,6 @@ export class CherryMistSource extends BaseSource {
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-		// id bentuk /story/{slug} atau /story/{numericId} atau mentah slug/id
 		let key = mangaId.replace(/^\/story\//, '').replace(/^\//, '').replace(/\/$/, '');
 		if (!key) throw new Error('Invalid manga id');
 
@@ -459,13 +440,12 @@ export class CherryMistSource extends BaseSource {
 		const seen = new Set<string>();
 
 		for (const c of list) {
-			// skip unpublished / scheduled yang belum published
 			if (c.status && c.status !== 'published') continue;
 			const num =
 				typeof c.chapter_number === 'number'
 					? c.chapter_number
 					: out.length + 1;
-			// id stabil: /story/{seriesSlug}/chapter/{chapterId}
+
 			const id = `/story/${seriesSlug}/chapter/${c.id}`;
 			if (seen.has(id)) continue;
 			seen.add(id);
@@ -479,7 +459,6 @@ export class CherryMistSource extends BaseSource {
 			});
 		}
 
-		// newest first
 		out.sort((a, b) => b.number - a.number);
 		return out;
 	}
@@ -494,7 +473,7 @@ export class CherryMistSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-		// /story/{slug}/chapter/{id}  atau  /chapter/{id}
+
 		const m =
 			chapterId.match(/\/chapter\/(\d+)/) ||
 			chapterId.match(/(?:^|\/)(\d+)$/);
@@ -528,7 +507,6 @@ export class CherryMistSource extends BaseSource {
 			);
 		}
 
-		// prev/next: butuh list chapter series
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		try {
@@ -542,10 +520,8 @@ export class CherryMistSource extends BaseSource {
 					seriesSlug = s.slug || String(seriesId);
 				}
 				const chs = await this.fetchChapters(seriesId, seriesSlug);
-				// chs sorted newest-first
 				const idx = chs.findIndex((c) => c.id.endsWith(`/chapter/${chapId}`));
 				if (idx >= 0) {
-					// sort desc: idx+1 = older (prev), idx-1 = newer (next)
 					prevChapterId = chs[idx + 1]?.id ?? null;
 					nextChapterId = chs[idx - 1]?.id ?? null;
 				}

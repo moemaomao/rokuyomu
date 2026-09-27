@@ -120,6 +120,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	flenser: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-500' },
 	skydemonorder: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	cherrymist: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
+	karistudio: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
