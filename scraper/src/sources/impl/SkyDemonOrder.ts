@@ -70,27 +70,25 @@ export class SkyDemonOrderSource extends BaseSource {
 	name = 'Sky Demon Order';
 	baseUrl = 'https://skydemonorder.com';
 
-	async getLatestManga(page = 1): Promise<Manga[]> {
-  console.log('[SDO] getLatestManga page=', page);
-  try {
-    const html = await this.fetchHtml('/');
-    console.log('[SDO] home status length=', html.length);
-    console.log('[SDO] isCF=', /just a moment|cf-browser-verification|challenge-platform/i.test(html));
-    console.log('[SDO] preview=', html.slice(0, 300).replace(/\s+/g, ' '));
-  } catch (e) {
-    console.error('[SDO] fetch home failed', e);
-  }
+	protected headers: Record<string, string> = {
+		'User-Agent':
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+		'Accept-Language': 'en-US,en;q=0.9',
+		Cookie:
+			'cf_clearance=rAb94Y9IMM174SeyjuQosBmspsSiifs8qnweo6G4SXU-1790503705-1.2.1.1-1spHQSD.saD55cdM9xegf41tRoTCRO_mvuRpB8ZcEsz2dbgPm9i.4GLyw37dSdbW3qRYhNMUPvj2Aul6RsN3p01vDg78KUKSIDrX_7U8Ti7ff3I.v9do_3bTVToDiYx1CYNEdOZoYtL.C12aHM._nqdM3sXFEdNCjcGo_.S2piyra74UGm5OSndBGFyPJqsggI9ZVm_rt3n.LutE6Be.4E3GnJ4uoFUw7ZhUNixpeYvvlrmHT_sgHfSIKQBQ_eI3B2DF49EhP4ZbRSw4rOxSjkScebqNP8ucqYChD7AMKnM9AUWylUpPNt79wsi2EzdzB9as7D5MCaQQZu6sCn9ZkQtViQGoGzUOClYIXFuK4jahk5aJG0WTQyLxeYb4LiQizzjXUnCZnyGLknUA.J8SUsSYIxAVMO3v9g1n_EHnFYyLNwtDYBYzc2ksdw_w1bWETdd44zFGjtSq3kXZ7yQGfGgqiNnH9sYwnLHLAVX..MQVvQcku0FGWCwSBYEzRpE6xQixvmq36eyVgRnv.Q01rA'
+	};
 
-  if (page <= 1) {
-    const [home, list] = await Promise.all([
-      this.parseHome().catch((e) => { console.error('[SDO] parseHome', e); return [] as Manga[]; }),
-      this.fetchProjectsPage(1).catch((e) => { console.error('[SDO] projects', e); return [] as Manga[]; })
-    ]);
-    console.log('[SDO] home count=', home.length, 'list count=', list.length);
-    return this.dedupeById([...home, ...list]).slice(0, 30);
-  }
-  return this.fetchProjectsPage(page);
-}
+	async getLatestManga(page = 1): Promise<Manga[]> {
+		if (page <= 1) {
+			const [home, list] = await Promise.all([
+				this.parseHome().catch(() => [] as Manga[]),
+				this.fetchProjectsPage(1).catch(() => [] as Manga[])
+			]);
+			return this.dedupeById([...home, ...list]).slice(0, 30);
+		}
+		return this.fetchProjectsPage(page);
+	}
 
 	private dedupeById(items: Manga[]): Manga[] {
 		const seen = new Set<string>();
