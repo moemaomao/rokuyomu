@@ -1,4 +1,3 @@
-/** Novel-specific types (parallel to manga types) */
 export interface Novel {
 	id: string;
 	title: string;
@@ -27,10 +26,9 @@ export interface NovelDetails extends Novel {
 	chapters: NovelChapter[];
 }
 
-/** Chapter content = plain text (HTML stripped or with basic markup) */
 export interface NovelChapterContent {
 	title: string;
-	content: string; // HTML or plain text
+	content: string;
 	prevChapterId?: string | null;
 	nextChapterId?: string | null;
 }

@@ -9,6 +9,7 @@
  * - Banyak chapter premium (Qi) → isLocked / skip di free list
  *
  * WAJIB hybrid Worker (Cloudflare ketat).
+ * Jangan hardcode cf_clearance — cookie itu cepat expired.
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -65,27 +66,90 @@ function decodeJsString(raw: string): string {
 		.replace(/\\\\/g, '\\');
 }
 
+/** Deteksi halaman challenge Cloudflare — jangan diam-diam return [] */
+function assertNotCloudflare(html: string, url: string): void {
+	const lower = html.toLowerCase();
+	const markers = [
+		'just a moment',
+		'verify you are human',
+		'cf-browser-verification',
+		'checking your browser',
+		'enable javascript and cookies to continue',
+		'cf-chl-captcha',
+		'attention required',
+		'performing security verification'
+	];
+	if (markers.some((m) => lower.includes(m))) {
+		throw new Error(
+			`[SkyDemonOrder] Cloudflare challenge blocked fetch: ${url}. ` +
+				`Pastikan source ini dijalankan di hybrid Worker (WORKER_SOURCE_IDS).`
+		);
+	}
+}
+
+function isProjectPath(href: string, baseUrl: string): { slug: string } | null {
+	const path = href.replace(baseUrl, '').split('?')[0].split('#')[0];
+	const m = path.match(/^\/projects\/([^/]+)\/?$/);
+	if (!m) return null;
+	// skip non-novel routes
+	if (/^(genres?|tags?|search|login|register|faq|products|subscriptions)$/i.test(m[1])) {
+		return null;
+	}
+	return { slug: m[1] };
+}
+
+function cleanTitle(raw: string): string {
+	return raw.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function isValidTitle(t: string): boolean {
+	if (!t || t.length < 3) return false;
+	// filter noise dari nav / badge
+	if (/^(read|view|more|home|projects?|browse|login|register|faq|all|new|trending)$/i.test(t)) {
+		return false;
+	}
+	if (/^\d+\s*(ch|chapter|ep)/i.test(t)) return false;
+	return true;
+}
+
 export class SkyDemonOrderSource extends BaseSource {
 	id = 'skydemonorder';
 	name = 'Sky Demon Order';
 	baseUrl = 'https://skydemonorder.com';
 
+	// JANGAN hardcode cf_clearance — expired dalam hitungan jam/hari
 	protected headers: Record<string, string> = {
 		'User-Agent':
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
 		'Accept-Language': 'en-US,en;q=0.9',
-		Cookie:
-			'cf_clearance=rAb94Y9IMM174SeyjuQosBmspsSiifs8qnweo6G4SXU-1790503705-1.2.1.1-1spHQSD.saD55cdM9xegf41tRoTCRO_mvuRpB8ZcEsz2dbgPm9i.4GLyw37dSdbW3qRYhNMUPvj2Aul6RsN3p01vDg78KUKSIDrX_7U8Ti7ff3I.v9do_3bTVToDiYx1CYNEdOZoYtL.C12aHM._nqdM3sXFEdNCjcGo_.S2piyra74UGm5OSndBGFyPJqsggI9ZVm_rt3n.LutE6Be.4E3GnJ4uoFUw7ZhUNixpeYvvlrmHT_sgHfSIKQBQ_eI3B2DF49EhP4ZbRSw4rOxSjkScebqNP8ucqYChD7AMKnM9AUWylUpPNt79wsi2EzdzB9as7D5MCaQQZu6sCn9ZkQtViQGoGzUOClYIXFuK4jahk5aJG0WTQyLxeYb4LiQizzjXUnCZnyGLknUA.J8SUsSYIxAVMO3v9g1n_EHnFYyLNwtDYBYzc2ksdw_w1bWETdd44zFGjtSq3kXZ7yQGfGgqiNnH9sYwnLHLAVX..MQVvQcku0FGWCwSBYEzRpE6xQixvmq36eyVgRnv.Q01rA'
+		'Accept-Encoding': 'gzip, deflate, br',
+		'Sec-Fetch-Dest': 'document',
+		'Sec-Fetch-Mode': 'navigate',
+		'Sec-Fetch-Site': 'none',
+		'Upgrade-Insecure-Requests': '1'
 	};
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		if (page <= 1) {
 			const [home, list] = await Promise.all([
-				this.parseHome().catch(() => [] as Manga[]),
-				this.fetchProjectsPage(1).catch(() => [] as Manga[])
+				this.parseHome().catch((e) => {
+					console.error('[SkyDemonOrder] parseHome failed', e);
+					return [] as Manga[];
+				}),
+				this.fetchProjectsPage(1).catch((e) => {
+					console.error('[SkyDemonOrder] fetchProjectsPage failed', e);
+					return [] as Manga[];
+				})
 			]);
-			return this.dedupeById([...home, ...list]).slice(0, 30);
+			const merged = this.dedupeById([...home, ...list]);
+			if (merged.length === 0) {
+				// rethrow supaya UI/log tahu CF/block, bukan diam kosong
+				throw new Error(
+					'[SkyDemonOrder] No novels found — likely Cloudflare blocked the request. Ensure hybrid Worker is used.'
+				);
+			}
+			return merged.slice(0, 30);
 		}
 		return this.fetchProjectsPage(page);
 	}
@@ -101,163 +165,90 @@ export class SkyDemonOrderSource extends BaseSource {
 		return out;
 	}
 
-	private async parseHome(): Promise<Manga[]> {
-		const html = await this.fetchHtml('/');
+	private parseProjectCards(html: string): Manga[] {
+		assertNotCloudflare(html, this.baseUrl);
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
 		$('a[href*="/projects/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
-			const m = href.match(/\/projects\/([^/?#]+)/);
-			if (!m) return;
-			// skip chapter URLs (lebih dari 1 segment setelah projects)
-			if (/\/projects\/[^/]+\/.+/.test(href.replace(this.baseUrl, ''))) return;
+			const parsed = isProjectPath(href, this.baseUrl);
+			if (!parsed) return;
 
-			const id = `/projects/${m[1]}`;
+			const id = `/projects/${parsed.slug}`;
 			if (seen.has(id)) return;
 
-			const title =
-				$(el).attr('title') ||
-				$(el).find('img').attr('alt') ||
-				$(el).text().replace(/\s+/g, ' ').trim();
-			if (!title || title.length < 3) return;
+			const root = $(el).closest('article, [class*="card"], li, [class*="project"]').length
+				? $(el).closest('article, [class*="card"], li, [class*="project"]')
+				: $(el).parent();
 
-			const img =
+			const title = cleanTitle(
+				$(el).attr('title') ||
+					root.find('h2, h3, h4, [class*="title"]').first().text() ||
+					$(el).find('img').attr('alt') ||
+					root.find('img').attr('alt') ||
+					$(el).text() ||
+					''
+			);
+			if (!isValidTitle(title)) return;
+
+			const cover =
+				root.find('img').attr('src') ||
+				root.find('img').attr('data-src') ||
+				root.find('img').attr('data-lazy-src') ||
 				$(el).find('img').attr('src') ||
 				$(el).find('img').attr('data-src') ||
-				$(el).closest('[class*="card"], article, div').find('img').attr('src') ||
 				'';
+
+			const statusText = root.text();
+			const status = /premium\s*complete|completed|complete/i.test(statusText)
+				? 'Completed'
+				: /dropped|hiatus/i.test(statusText)
+					? 'Hiatus'
+					: 'Ongoing';
+
+			const chMatch = statusText.match(/(\d+)\s*ch/i);
+			const latestChapter = chMatch ? parseInt(chMatch[1], 10) : undefined;
 
 			seen.add(id);
 			list.push({
 				id,
-				title: title.slice(0, 200).replace(/\s+/g, ' ').trim(),
-				cover: absUrl(this.baseUrl, (img || '').split('?')[0]),
+				title,
+				cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
 				sourceId: this.id,
 				type: 'novel',
-				lang: 'en'
+				status,
+				lang: 'en',
+				...(latestChapter != null ? { latestChapter } : {})
 			});
 		});
 
 		return list;
 	}
 
+	private async parseHome(): Promise<Manga[]> {
+		const html = await this.fetchHtml('/');
+		return this.parseProjectCards(html);
+	}
+
 	private async fetchProjectsPage(page: number): Promise<Manga[]> {
+		// sort=latest_chapter | new | popular — site kadang ganti nama
 		const path =
 			page <= 1
 				? '/projects?sort=latest_chapter'
 				: `/projects?sort=latest_chapter&page=${page}`;
-		try {
-			const html = await this.fetchHtml(path);
-			const $ = cheerio.load(html);
-			const list: Manga[] = [];
-			const seen = new Set<string>();
-
-			// Card-style links
-			$('a[href*="/projects/"]').each((_, el) => {
-				const href = $(el).attr('href') || '';
-				const m = href.match(/\/projects\/([^/?#]+)/);
-				if (!m) return;
-				if (/\/projects\/[^/]+\/.+/.test(href.replace(this.baseUrl, ''))) return;
-
-				const id = `/projects/${m[1]}`;
-				if (seen.has(id)) return;
-
-				const root = $(el).closest('article, [class*="card"], div, li').length
-					? $(el).closest('article, [class*="card"], div, li')
-					: $(el);
-
-				const title =
-					$(el).attr('title') ||
-					root.find('h2, h3, h4, [class*="title"]').first().text().trim() ||
-					$(el).find('img').attr('alt') ||
-					$(el).text().replace(/\s+/g, ' ').trim();
-				if (!title || title.length < 3) return;
-
-				const cover =
-					root.find('img').attr('src') ||
-					root.find('img').attr('data-src') ||
-					$(el).find('img').attr('src') ||
-					'';
-
-				const statusText = root.text();
-				const status = /complete|completed/i.test(statusText)
-					? 'Completed'
-					: /dropped|hiatus/i.test(statusText)
-						? 'Hiatus'
-						: 'Ongoing';
-
-				const chMatch = statusText.match(/(\d+)\s*ch/i);
-				const latestChapter = chMatch ? parseInt(chMatch[1], 10) : undefined;
-
-				seen.add(id);
-				list.push({
-					id,
-					title: title.replace(/\s+/g, ' ').trim().slice(0, 200),
-					cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
-					sourceId: this.id,
-					type: 'novel',
-					status,
-					lang: 'en',
-					...(latestChapter != null ? { latestChapter } : {})
-				});
-			});
-
-			return list;
-		} catch {
-			return [];
-		}
+		const html = await this.fetchHtml(path);
+		return this.parseProjectCards(html);
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
 		const page = opts?.page ?? 1;
 		const q = encodeURIComponent(query.trim());
 		const path =
-			page <= 1
-				? `/projects?search=${q}`
-				: `/projects?search=${q}&page=${page}`;
-		try {
-			const html = await this.fetchHtml(path);
-			const $ = cheerio.load(html);
-			const list: Manga[] = [];
-			const seen = new Set<string>();
-
-			$('a[href*="/projects/"]').each((_, el) => {
-				const href = $(el).attr('href') || '';
-				const m = href.match(/\/projects\/([^/?#]+)/);
-				if (!m) return;
-				if (/\/projects\/[^/]+\/.+/.test(href.replace(this.baseUrl, ''))) return;
-
-				const id = `/projects/${m[1]}`;
-				if (seen.has(id)) return;
-
-				const title =
-					$(el).attr('title') ||
-					$(el).find('img').attr('alt') ||
-					$(el).text().replace(/\s+/g, ' ').trim();
-				if (!title || title.length < 3) return;
-
-				const cover =
-					$(el).find('img').attr('src') ||
-					$(el).find('img').attr('data-src') ||
-					'';
-
-				seen.add(id);
-				list.push({
-					id,
-					title: title.replace(/\s+/g, ' ').trim().slice(0, 200),
-					cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en'
-				});
-			});
-
-			return list;
-		} catch {
-			return [];
-		}
+			page <= 1 ? `/projects?search=${q}` : `/projects?search=${q}&page=${page}`;
+		const html = await this.fetchHtml(path);
+		return this.parseProjectCards(html);
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
@@ -268,14 +259,17 @@ export class SkyDemonOrderSource extends BaseSource {
 		path = path.replace(/\/$/, '');
 
 		const html = await this.fetchHtml(path);
+		assertNotCloudflare(html, path);
 		const $ = cheerio.load(html);
 
-		const title =
-			$('h1').first().text().trim() ||
-			$('meta[property="og:title"]').attr('content')?.split('|')[0]?.trim() ||
-			$('title').text().split('|')[0].trim();
+		const title = cleanTitle(
+			$('h1').first().text() ||
+				$('meta[property="og:title"]').attr('content')?.split('|')[0] ||
+				$('title').text().split('|')[0] ||
+				''
+		);
 		if (!title || title.length < 2) {
-			throw new Error('Manga not found (empty title)');
+			throw new Error('Manga not found (empty title) — possible Cloudflare block');
 		}
 
 		const cover =
@@ -313,7 +307,7 @@ export class SkyDemonOrderSource extends BaseSource {
 
 		return {
 			id: pathOnly(path),
-			title: title.replace(/\s+/g, ' ').trim(),
+			title,
 			cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
 			sourceId: this.id,
 			description,
@@ -340,7 +334,17 @@ export class SkyDemonOrderSource extends BaseSource {
 
 			const livewireUrl = absUrl(this.baseUrl, `/${lwMatch[1]}/update`);
 
-			const lwDiv = $('[wire\\:name="project.chapter-list"]').first();
+			// support wire:name / wire:id / data-name variants
+			const lwDiv =
+				$('[wire\\:name="project.chapter-list"]').first().length
+					? $('[wire\\:name="project.chapter-list"]').first()
+					: $('[wire\\:id*="chapter"]').first().length
+						? $('[wire\\:id*="chapter"]').first()
+						: $('[wire\\:snapshot]').filter((_, el) => {
+								const s = $(el).attr('wire:snapshot') || '';
+								return /chapter/i.test(s);
+							}).first();
+
 			const snapshot = lwDiv.attr('wire:snapshot');
 			if (!snapshot) return this.parseChapterFallback($, projectPath);
 
@@ -352,14 +356,20 @@ export class SkyDemonOrderSource extends BaseSource {
 					'X-CSRF-TOKEN': csrf,
 					'X-Livewire': '',
 					Referer: absUrl(this.baseUrl, projectPath),
-					Origin: this.baseUrl
+					Origin: this.baseUrl,
+					'Sec-Fetch-Dest': 'empty',
+					'Sec-Fetch-Mode': 'cors',
+					'Sec-Fetch-Site': 'same-origin'
 				},
 				body: JSON.stringify({
 					components: [{ snapshot, updates: {}, calls: [] }]
 				})
 			});
 
-			if (!res.ok) return this.parseChapterFallback($, projectPath);
+			if (!res.ok) {
+				console.error('[SkyDemonOrder] Livewire HTTP', res.status);
+				return this.parseChapterFallback($, projectPath);
+			}
 
 			const data = (await res.json()) as any;
 			const chapterHtml = data?.components?.[0]?.effects?.html;
@@ -369,18 +379,36 @@ export class SkyDemonOrderSource extends BaseSource {
 			const xdataDiv = $ch('div[x-data]').first();
 			const xData = xdataDiv.attr('x-data') || '';
 
-			const freeMatch = xData.match(/freeChapters:\s*JSON\.parse\('(.+?)'\)/);
-			if (!freeMatch) return this.parseChapterFallback($, projectPath);
+			// support single/double quotes + non-greedy yang aman untuk JSON panjang
+			const freeMatch =
+				xData.match(/freeChapters:\s*JSON\.parse\(\s*'((?:\\'|[^'])*)'\s*\)/) ||
+				xData.match(/freeChapters:\s*JSON\.parse\(\s*"((?:\\"|[^"])*)"\s*\)/) ||
+				xData.match(/freeChapters:\s*(\[[\s\S]*?\])/);
 
-			const rawJson = decodeJsString(freeMatch[1]);
-			const freeChapters = JSON.parse(rawJson) as Array<{
+			if (!freeMatch) {
+				console.error('[SkyDemonOrder] freeChapters not found in x-data');
+				return this.parseChapterFallback($, projectPath);
+			}
+
+			let freeChapters: Array<{
 				slug?: string;
 				title?: string;
 				number?: number;
 				index?: number;
 			}>;
 
-			const slugMatch = xData.match(/projectSlug:\s*'([^']+)'/);
+			if (freeMatch[0].startsWith('freeChapters:') && freeMatch[1].trim().startsWith('[')) {
+				freeChapters = JSON.parse(freeMatch[1]);
+			} else {
+				const rawJson = decodeJsString(freeMatch[1]);
+				freeChapters = JSON.parse(rawJson);
+			}
+
+			if (!Array.isArray(freeChapters) || freeChapters.length === 0) {
+				return this.parseChapterFallback($, projectPath);
+			}
+
+			const slugMatch = xData.match(/projectSlug:\s*['"]([^'"]+)['"]/);
 			const projectSlug =
 				slugMatch?.[1] ||
 				projectPath.replace(/^\/projects\//, '').replace(/\/$/, '');
@@ -388,7 +416,7 @@ export class SkyDemonOrderSource extends BaseSource {
 			const out: Chapter[] = [];
 			const seen = new Set<string>();
 
-			// freeChapters biasanya oldest → newest; kita reverse ke newest first
+			// freeChapters biasanya oldest → newest
 			const items = [...freeChapters].reverse();
 
 			for (let i = 0; i < items.length; i++) {
@@ -405,7 +433,7 @@ export class SkyDemonOrderSource extends BaseSource {
 
 				out.push({
 					id,
-					title: (item.title || `Chapter ${num}`).replace(/\s+/g, ' ').trim(),
+					title: cleanTitle(item.title || `Chapter ${num}`),
 					number: num
 				});
 			}
@@ -424,18 +452,15 @@ export class SkyDemonOrderSource extends BaseSource {
 		const seen = new Set<string>();
 		const slug = projectPath.replace(/^\/projects\//, '').replace(/\/$/, '');
 
-		$('a[href*="/projects/"]').each((i, el) => {
+		$('a[href*="/projects/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			const m = href.match(new RegExp(`/projects/${slug}/([^/?#]+)`));
 			if (!m) return;
-
 			const id = pathOnly(href);
 			if (seen.has(id)) return;
 			seen.add(id);
-
-			const title = ($(el).attr('title') || $(el).text()).replace(/\s+/g, ' ').trim();
+			const title = cleanTitle($(el).attr('title') || $(el).text());
 			if (!title || title.length < 2) return;
-
 			const num = extractChapterNum(title) ?? out.length + 1;
 			out.push({ id, title, number: num });
 		});
@@ -456,6 +481,7 @@ export class SkyDemonOrderSource extends BaseSource {
 	}> {
 		const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 		const html = await this.fetchHtml(path);
+		assertNotCloudflare(html, path);
 		const $ = cheerio.load(html);
 
 		const locked =
@@ -468,10 +494,9 @@ export class SkyDemonOrderSource extends BaseSource {
 			throw new Error('Chapter is locked / premium on Sky Demon Order');
 		}
 
-		const title =
-			$('h1').first().text().trim() ||
-			$('title').text().split('|')[0].trim() ||
-			'Chapter';
+		const title = cleanTitle(
+			$('h1').first().text() || $('title').text().split('|')[0] || 'Chapter'
+		);
 
 		const prose = $('.prose').first();
 		prose.find('script, style, nav, .ads, .ad, [class*="advert"]').remove();
@@ -491,10 +516,8 @@ export class SkyDemonOrderSource extends BaseSource {
 				.join('');
 		}
 
-		// Prev / next dari link di halaman
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
-
 		$('a[href*="/projects/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			const text = $(el).text().toLowerCase();
@@ -505,7 +528,7 @@ export class SkyDemonOrderSource extends BaseSource {
 		});
 
 		return {
-			title: title.replace(/\s+/g, ' ').trim(),
+			title,
 			content,
 			prevChapterId,
 			nextChapterId
