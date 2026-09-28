@@ -23,7 +23,7 @@ const PAGE_SIZE = 30;
  *
  * Kosongkan dulu kalau list kosong (cookie expired sering bikin fetch aneh).
  */
-const PRIVATE_COOKIE = '';
+const PRIVATE_COOKIE = process.env.COMIC_GARDO_COOKIE || 'glsc=ryN1tzJM9vm88ZLlvF9JkPOvJ8ivHA0oSanmYdEQUH1JJnX5E2k6dYmpKj4usecd';
 
 function decodeEntities(s: string): string {
 	return (s || '')
