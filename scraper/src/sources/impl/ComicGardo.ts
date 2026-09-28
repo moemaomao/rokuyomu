@@ -326,41 +326,65 @@ export class ComicGardoSource extends BaseSource {
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-	const seriesId =
+	// Ambil seriesId yang benar
+	let seriesId =
 		mangaId.match(/\/series\/(\d+)/)?.[1] ||
-		mangaId.replace(/^\/+/, '').split('/')[0];
-	
-	console.log('[ComicGardo] getMangaDetails mangaId=', mangaId, 'seriesId=', seriesId);
-	
+		mangaId.match(/^(\d+)$/)?.[1] ||
+		null;
+
+	if (!seriesId || seriesId === 'episode') {
+		const epId =
+			mangaId.match(/\/episode\/(\d+)/)?.[1] ||
+			mangaId.replace(/\D/g, '');
+		if (epId) {
+			try {
+				const html = await this.fetchHtml(`/episode/${epId}`);
+				const m =
+					html.match(/\/series\/(\d+)/) ||
+					html.match(/"series"\s*:\s*\{\s*"id"\s*:\s*"?(\d+)/);
+				if (m) seriesId = m[1];
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+
+	console.log(
+		'[ComicGardo] getMangaDetails mangaId=',
+		mangaId,
+		'→ seriesId=',
+		seriesId
+	);
+
 	if (!seriesId) throw new Error(`Invalid manga id: ${mangaId}`);
 
-		const meta = await this.fetchRssMeta(seriesId);
-		const chapters = await this.fetchAllChapters(seriesId);
+	const meta = await this.fetchRssMeta(seriesId);
+	const chapters = await this.fetchAllChapters(seriesId);
 
-		let cover = '';
-		try {
-			const xml = await this.fetchHtml(`/rss/series/${seriesId}`);
-			const enc = xml.match(/<enclosure[^>]+url="([^"]+)"/i);
-			if (enc) cover = enc[1];
-		} catch {
-			/* ignore */
-		}
-
-		return {
-			id: `/series/${seriesId}`,
-			title: meta.title || seriesId,
-			cover,
-			sourceId: this.id,
-			description: meta.description,
-			authors: meta.authors,
-			status: 'Ongoing',
-			genres: [],
-			chapters,
-			type: 'manga',
-			lang: 'ja',
-			...(chapters.length ? { latestChapter: chapters[0]?.number } : {})
-		};
+	let cover = '';
+	try {
+		const xml = await this.fetchHtml(`/rss/series/${seriesId}`);
+		const enc = xml.match(/<enclosure[^>]+url="([^"]+)"/i);
+		if (enc) cover = enc[1];
+	} catch {
+		/* ignore */
 	}
+
+	return {
+		id: `/series/${seriesId}`,
+		title: meta.title || seriesId,
+		cover,
+		sourceId: this.id,
+		description: meta.description,
+		authors: meta.authors,
+		status: 'Ongoing',
+		genres: [],
+		chapters,
+		type: 'manga',
+		lang: 'ja',
+		...(chapters.length ? { latestChapter: chapters[0]?.number } : {})
+	};
+}
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		const epId =
