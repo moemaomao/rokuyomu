@@ -3,7 +3,6 @@
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { descrambleGiga, GIGA_SOURCES } from '$lib/utils/gigaDescramble';
 	import {
 		ChevronsUp,
 		Download,
@@ -25,37 +24,10 @@ let {
 } = $derived(data);
 
 let pages = $state<string[]>([]);
-let descrambling = $state(false);
 
 $effect(() => {
 	if (!browser) return;
-
-	const list = rawPages ?? [];
-	if (!list.length) {
-		pages = [];
-		return;
-	}
-
-	// SEMENTARA matikan descramble biar gambar muncul dulu
-	pages = list;
-
-	/*
-	if (GIGA_SOURCES.has(source)) {
-		descrambling = true;
-		Promise.all(list.map((url) => descrambleGiga(proxyImage(url, true))))
-			.then((fixed) => {
-				pages = fixed;
-				descrambling = false;
-			})
-			.catch((e) => {
-				console.error('[GigaDescramble]', e);
-				pages = list;
-				descrambling = false;
-			});
-	} else {
-		pages = list;
-	}
-	*/
+	pages = rawPages ?? [];
 });
 
 	// ── Reader state ─────────────────────────────────────────────────────────
