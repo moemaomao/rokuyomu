@@ -326,7 +326,6 @@ export class ComicGardoSource extends BaseSource {
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-	// Ambil seriesId yang benar
 	let seriesId =
 		mangaId.match(/\/series\/(\d+)/)?.[1] ||
 		mangaId.match(/^(\d+)$/)?.[1] ||

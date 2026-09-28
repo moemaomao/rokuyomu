@@ -489,6 +489,7 @@ if (isJmcomic) {
 }
 
 // ── GigaViewer unscramble ──
+/*
 const isGiga =
 	sourceId === 'comicgardo' ||
 	/cdn-scissors\.gigaviewer\.com|comic-gardo\.com|gigaviewer\.com/i.test(decodedUrl);
@@ -502,7 +503,7 @@ if (isGiga) {
 		console.warn('[proxy] giga descramble failed', e);
 	}
 }
-
+*/
 return new Response(body, {
 				headers: {
 					'Content-Type': contentType,
