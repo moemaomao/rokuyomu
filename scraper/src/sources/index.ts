@@ -120,9 +120,11 @@ import { KariStudioSource } from './impl/KariStudio';
 import { StorySeedlingSource } from './impl/StorySeedling';
 import { AzureChroniclesSource } from './impl/AzureChronicles';
 import { NovelsHavenSource } from './impl/NovelsHaven';
+import ComicGardoSource from './impl/ComicGardo';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    comicgardo: new ComicGardoSource(),
     novelshaven: new NovelsHavenSource(),
     azurechronicles: new AzureChroniclesSource(),
     storyseedling: new StorySeedlingSource(),
