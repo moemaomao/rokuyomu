@@ -240,17 +240,17 @@ export class ComicGardoSource extends BaseSource {
 		}
 	}
 
-	private async fetchPagination(
-		seriesId: string,
-		offset: number
-	): Promise<PaginationItem[]> {
-		const path =
-			`/api/viewer/pagination_readable_products?type=episode` +
-			`&aggregate_id=${encodeURIComponent(seriesId)}` +
-			`&sort_order=desc&offset=${offset}`;
-		const data = await this.fetchJson<PaginationItem[]>(path);
-		return Array.isArray(data) ? data : [];
-	}
+	private async fetchPagination(seriesId: string, offset: number): Promise<PaginationItem[]> {
+	const path =
+		`/api/viewer/pagination_readable_products?type=episode` +
+		`&aggregate_id=${encodeURIComponent(seriesId)}` +
+		`&sort_order=desc&offset=${offset}`;
+	
+	console.log('[ComicGardo] fetchPagination', path);
+	
+	const data = await this.fetchJson<PaginationItem[]>(path);
+	return Array.isArray(data) ? data : [];
+}
 
 	private async fetchAllChapters(seriesId: string): Promise<Chapter[]> {
 		const out: Chapter[] = [];
@@ -326,10 +326,13 @@ export class ComicGardoSource extends BaseSource {
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-		const seriesId =
-			mangaId.match(/\/series\/(\d+)/)?.[1] ||
-			mangaId.replace(/^\/+/, '').split('/')[0];
-		if (!seriesId) throw new Error(`Invalid manga id: ${mangaId}`);
+	const seriesId =
+		mangaId.match(/\/series\/(\d+)/)?.[1] ||
+		mangaId.replace(/^\/+/, '').split('/')[0];
+	
+	console.log('[ComicGardo] getMangaDetails mangaId=', mangaId, 'seriesId=', seriesId);
+	
+	if (!seriesId) throw new Error(`Invalid manga id: ${mangaId}`);
 
 		const meta = await this.fetchRssMeta(seriesId);
 		const chapters = await this.fetchAllChapters(seriesId);
