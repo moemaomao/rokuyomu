@@ -119,9 +119,11 @@ import { CherryMistSource } from './impl/CherryMist';
 import { KariStudioSource } from './impl/KariStudio';
 import { StorySeedlingSource } from './impl/StorySeedling';
 import { AzureChroniclesSource } from './impl/AzureChronicles';
+import { NovelsHavenSource } from './impl/NovelsHaven';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    novelshaven: new NovelsHavenSource(),
     azurechronicles: new AzureChroniclesSource(),
     storyseedling: new StorySeedlingSource(),
     karistudio: new KariStudioSource(),
