@@ -141,124 +141,92 @@ export class ComicGardoSource extends BaseSource {
 	}
 
 	private parseSeriesCards(html: string): Manga[] {
-		const out: Manga[] = [];
-		const seen = new Set<string>();
+	const out: Manga[] = [];
+	const seen = new Set<string>();
 
-		if (!html || html.length < 500) {
-			console.warn('[ComicGardo] html too short', html?.length);
-			return out;
-		}
+	if (!html || html.length < 500) {
+		console.warn('[ComicGardo] html too short', html?.length);
+		return out;
+	}
 
-		// 1) Cara paling stabil: series-thumbnail + alt
-		for (const t of html.matchAll(
-			/src="(https:\/\/cdn-scissors\.gigaviewer\.com[^"]*series-thumbnail(?:%2F|\/)(\d+)-[^"]*)"[^>]*alt="([^"]*)"/gi
-		)) {
-			const id = `/series/${t[2]}`;
+	// Cara paling stabil: series-thumbnail + alt + (opsional) date
+	const regex =
+		/src="(https:\/\/cdn-scissors\.gigaviewer\.com[^"]*series-thumbnail(?:%2F|\/)(\d+)-[^"]*)"[^>]*alt="([^"]*)"/gi;
+
+	for (const t of html.matchAll(regex)) {
+		const seriesId = t[2];
+		const id = `/series/${seriesId}`;
+		if (seen.has(id)) continue;
+		seen.add(id);
+
+		const title = decodeEntities(t[3] || seriesId).trim();
+		const cover = decodeEntities(t[1]);
+
+		out.push({
+			id,
+			title,
+			cover,
+			sourceId: this.id,
+			type: 'manga',
+			lang: 'ja',
+			status: 'Ongoing'
+		});
+	}
+
+	// Fallback lama kalau masih kosong
+	if (!out.length) {
+		const blocks = html.split(/(?=class="[^"]*SeriesListItem_link_)/);
+		for (const b of blocks) {
+			const sidM = b.match(/series-thumbnail(?:%2F|\/)(\d+)-/);
+			const titleM = b.match(
+				/SeriesListItem_series_title_[^"]*"[^>]*>([^<]+)</
+			);
+			if (!sidM || !titleM) continue;
+			const seriesId = sidM[1];
+			const id = `/series/${seriesId}`;
 			if (seen.has(id)) continue;
 			seen.add(id);
+			const imgM = b.match(
+				/src="(https:\/\/cdn-scissors\.gigaviewer\.com[^"]+)"/i
+			);
 			out.push({
 				id,
-				title: decodeEntities(t[3] || t[2]).trim(),
-				cover: decodeEntities(t[1]),
+				title: decodeEntities(titleM[1]).trim(),
+				cover: imgM ? decodeEntities(imgM[1]) : '',
 				sourceId: this.id,
 				type: 'manga',
 				lang: 'ja',
 				status: 'Ongoing'
 			});
 		}
-
-		// 2) Fallback: SeriesListItem block
-		if (!out.length) {
-			const blocks = html.split(/(?=class="[^"]*SeriesListItem_link_)/);
-			for (const b of blocks) {
-				const sidM = b.match(/series-thumbnail(?:%2F|\/)(\d+)-/);
-				const titleM = b.match(
-					/SeriesListItem_series_title_[^"]*"[^>]*>([^<]+)</
-				);
-				if (!sidM || !titleM) continue;
-				const seriesId = sidM[1];
-				const id = `/series/${seriesId}`;
-				if (seen.has(id)) continue;
-				seen.add(id);
-				const imgM = b.match(
-					/src="(https:\/\/cdn-scissors\.gigaviewer\.com[^"]+)"/i
-				);
-				out.push({
-					id,
-					title: decodeEntities(titleM[1]).trim(),
-					cover: imgM ? decodeEntities(imgM[1]) : '',
-					sourceId: this.id,
-					type: 'manga',
-					lang: 'ja',
-					status: 'Ongoing'
-				});
-			}
-		}
-
-		// 3) Fallback terakhir: id saja
-		if (!out.length) {
-			for (const t of html.matchAll(
-				/series-thumbnail(?:%2F|\/)(\d+)-[^"'\s]*/gi
-			)) {
-				const id = `/series/${t[1]}`;
-				if (seen.has(id)) continue;
-				seen.add(id);
-				out.push({
-					id,
-					title: t[1],
-					cover: '',
-					sourceId: this.id,
-					type: 'manga',
-					lang: 'ja',
-					status: 'Ongoing'
-				});
-			}
-		}
-
-		console.log('[ComicGardo] parseSeriesCards result=', out.length);
-		return out;
 	}
+
+	console.log('[ComicGardo] parseSeriesCards result=', out.length);
+	return out;
+}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
-		const pageNum = Math.max(1, page);
-		const paths =
-			pageNum <= 1
-				? ['/series', '/']
-				: pageNum === 2
-					? ['/series/oneshot']
-					: ['/series/completed'];
+	const pageNum = Math.max(1, page);
 
-		const seen = new Set<string>();
-		const all: Manga[] = [];
+	try {
+		const html = await this.fetchHtml('/series');
+		console.log(
+			'[ComicGardo] fetch /series htmlLen=',
+			html?.length ?? 0,
+			'hasSeriesList=',
+			/SeriesListItem/i.test(html || '')
+		);
 
-		for (const path of paths) {
-			try {
-				const html = await this.fetchHtml(path);
-				console.log(
-					'[ComicGardo] fetch',
-					path,
-					'htmlLen=',
-					html?.length ?? 0,
-					'hasSeriesList=',
-					/SeriesListItem/i.test(html || '')
-				);
-				const cards = this.parseSeriesCards(html || '');
-				console.log('[ComicGardo] parsed cards=', cards.length);
-				for (const c of cards) {
-					if (seen.has(c.id)) continue;
-					seen.add(c.id);
-					all.push(c);
-				}
-				if (all.length >= PAGE_SIZE) break;
-			} catch (e) {
-				console.error('[ComicGardo] latest failed', path, e);
-			}
-		}
+		const all = this.parseSeriesCards(html || '');
+		console.log('[ComicGardo] total parsed=', all.length);
 
-		if (pageNum <= 1) return all.slice(0, PAGE_SIZE);
 		const start = (pageNum - 1) * PAGE_SIZE;
 		return all.slice(start, start + PAGE_SIZE);
+	} catch (e) {
+		console.error('[ComicGardo] latest failed', e);
+		return [];
 	}
+}
 
 	async searchManga(query: string, _opts?: { page?: number }): Promise<Manga[]> {
 		const q = query.trim();
