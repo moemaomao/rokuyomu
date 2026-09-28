@@ -261,23 +261,32 @@ export class AzureChroniclesSource extends BaseSource {
 	}
 
 	private mapNovelCard(n: AcNovelCard): Manga | null {
-		if (!n?.id) return null;
-		const slug = slugFromUrlOrPath(n.url);
-		if (!slug) return null;
-		this.cacheSlug(n.id, slug);
+	if (!n?.id) return null;
 
-		const latestNum = parseChapterNumber(n.latest_chapter || '', n.chapter_count);
-		return {
-			id: novelIdFromSlug(slug),
-			title: cleanTitle(n.title || slug),
-			cover: n.cover_url || '',
-			sourceId: this.id,
-			type: 'novel',
-			lang: 'en',
-			status: normalizeStatus(n.status),
-			...(latestNum > 0 ? { latestChapter: latestNum } : {})
-		};
+	let slug = slugFromUrlOrPath(n.url);
+	if (!slug && n.title) {
+		slug = cleanTitle(n.title)
+			.toLowerCase()
+			.replace(/['']/g, '')
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-+|-+$/g, '');
 	}
+
+	const latestNum = parseChapterNumber(n.latest_chapter || '', n.chapter_count);
+	const id = slug ? novelIdFromSlug(slug) : `/${n.id}`;
+	if (slug) this.cacheSlug(n.id, slug);
+
+	return {
+		id,
+		title: cleanTitle(n.title || slug || String(n.id)),
+		cover: n.cover_url || '',
+		sourceId: this.id,
+		type: 'novel',
+		lang: 'en',
+		status: normalizeStatus(n.status),
+		...(latestNum > 0 ? { latestChapter: latestNum } : {})
+	};
+}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
