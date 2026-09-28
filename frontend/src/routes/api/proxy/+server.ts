@@ -441,6 +441,14 @@ export const GET: RequestHandler = async ({ url }) => {
 				}
 			}
 
+			if (/cdn-scissors\.gigaviewer\.com|comic-gardo\.com|gigaviewer\.com/i.test(decodedUrl)) {
+	                referer = 'https://comic-gardo.com/';
+                } else if (/comic-days\.com|shonenjumpplus\.com|tonarinoyj\.jp|sunday-webry\.com/i.test(decodedUrl)) {
+	               referer = decodedUrl.includes('comic-days') ? 'https://comic-days.com/' :
+	               decodedUrl.includes('shonenjumpplus') ? 'https://shonenjumpplus.com/' :
+	              'https://comic-gardo.com/';
+                }
+
 			return new Response(body, {
 				headers: {
 					'Content-Type': contentType,
