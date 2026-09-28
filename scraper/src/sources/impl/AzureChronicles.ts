@@ -2,22 +2,85 @@
  * Azure Chronicles (azurechronicles.com)
  * Path: scraper/src/sources/impl/AzureChronicles.ts
  *
- * Stack: WordPress + Imunify360 bot-protection
+ * Stack: WordPress + custom REST azurechronicles/v2
  *
- * Model mirip Kari Studio:
- *   - Novel page: /novel/{slug}/
- *   - Chapter:    /novel/{slug}/chapter-{n}/
- *   - WP REST:    /wp-json/wp/v2/posts, categories, tags, search
+ * ID format (sama seperti script lama yang jalan):
+ *   Novel:   /novel/{slug}
+ *   Chapter: /novel/{slug}/chapter-{n}
  *
- * Catatan:
- *   IP datacenter sering kena Imunify360 403 di /wp-json/ dan interstitial HTML.
- *   Source mencoba API dulu (seperti KariStudio), fallback HTML scrape.
+ * API:
+ *   GET /wp-json/azurechronicles/v2/novels?page=&per_page=&sort=latest|popular
+ *   GET /wp-json/azurechronicles/v2/search?q=&page=&per_page=
+ *   GET /wp-json/azurechronicles/v2/novels/{id}
+ *   GET /wp-json/azurechronicles/v2/novels/{id}/chapters?page=&per_page=&order=
+ *   GET /wp-json/azurechronicles/v2/chapters/{id} → text_content
+ *   GET /wp-json/wp/v2/ac_novel?slug={slug}
  */
 import { BaseSource } from '../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../types';
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 20;
+const API = '/wp-json/azurechronicles/v2';
 const WP = '/wp-json/wp/v2';
+
+type AcApiMeta = {
+	page?: number;
+	per_page?: number;
+	total?: number;
+	total_pages?: number;
+};
+
+type AcNovelCard = {
+	id: number;
+	title?: string;
+	cover_url?: string;
+	latest_chapter?: string;
+	status?: string;
+	chapter_count?: number;
+	genres?: string[];
+	tags?: string[];
+	description?: string;
+	author?: string;
+	url?: string;
+};
+
+type AcChapterCard = {
+	id: number;
+	chapter_number?: string | number;
+	title?: string;
+	created_at?: string;
+	public_at?: string;
+	coin_cost?: number;
+	coin_price?: number;
+	is_paid?: boolean;
+	is_free?: boolean;
+	has_access?: boolean;
+	access_reason?: string;
+	is_unlocked?: boolean;
+	novel_id?: number;
+	text_content?: string;
+};
+
+type AcListResponse<T> = {
+	success?: boolean;
+	data?: { items?: T[]; meta?: AcApiMeta };
+	code?: string;
+	message?: string;
+};
+
+type AcSingleResponse<T> = {
+	success?: boolean;
+	data?: T;
+	code?: string;
+	message?: string;
+};
+
+type WpAcNovel = {
+	id: number;
+	slug: string;
+	link?: string;
+	title?: { rendered?: string };
+};
 
 function decodeEntities(s: string): string {
 	return (s || '')
@@ -32,7 +95,6 @@ function decodeEntities(s: string): string {
 		.replace(/&#8216;/g, "'")
 		.replace(/&#8220;/g, '"')
 		.replace(/&#8221;/g, '"')
-		.replace(/&#8211;/g, '–')
 		.replace(/&#8230;/g, '…')
 		.replace(/&nbsp;/g, ' ');
 }
@@ -51,70 +113,62 @@ function stripHtml(html: string): string {
 function cleanTitle(raw: string): string {
 	return decodeEntities(raw || '')
 		.replace(/\s+/g, ' ')
-		.replace(/^Read\s+/i, '')
 		.replace(/\s*(?:[–—|]|-)\s*Azure Chronicles\s*$/i, '')
-		.replace(/\s*—\s*Chapter\s+\d+.*$/i, '')
 		.trim();
 }
 
-function isChallengePage(html: string): boolean {
-	return (
-		/One moment, please/i.test(html) ||
-		/request is being verified/i.test(html) ||
-		/Access denied by Imunify360/i.test(html) ||
-		(/please wait/i.test(html) && /verified/i.test(html) && html.length < 30000)
-	);
+function normalizeStatus(s?: string): string {
+	const v = (s || '').toLowerCase();
+	if (v.includes('complete') || v.includes('finished') || v.includes('ended')) return 'Completed';
+	if (v.includes('hiatus') || v.includes('on hold')) return 'Hiatus';
+	return 'Ongoing';
 }
 
-function parseChapterNumber(title: string, slug = ''): number {
-	const fromSlug = slug.match(/chapter-(\d+)(?:-(\d+))?/i);
-	if (fromSlug) {
-		if (fromSlug[2]) return parseFloat(`${fromSlug[1]}.${fromSlug[2]}`);
-		return parseInt(fromSlug[1], 10);
+function parseChapterNumber(title: string, chapterNumber?: string | number): number {
+	if (chapterNumber != null && chapterNumber !== '') {
+		const n = parseFloat(String(chapterNumber).replace(/[^\d.]/g, ''));
+		if (!Number.isNaN(n)) return n;
 	}
-	const m = title.match(
+	const m = (title || '').match(
 		/(?:chapter|chap|ch\.?|episode|ep\.?)\s*[:.]?\s*(\d+)(?:[.,](\d+))?/i
 	);
 	if (m) {
 		if (m[2]) return parseFloat(`${m[1]}.${m[2]}`);
 		return parseInt(m[1], 10);
 	}
-	if (/prologue/i.test(title) || /prologue/i.test(slug)) return 0;
-	const n = title.match(/\b(\d+(?:\.\d+)?)\b/);
+	if (/prologue/i.test(title || '')) return 0;
+	const n = (title || '').match(/\b(\d+(?:\.\d+)?)\b/);
 	return n ? parseFloat(n[1]) : 0;
 }
 
-function slugFromPath(path: string): string | null {
-	const m = path.match(/\/novel\/([^/]+)/i);
-	return m ? m[1] : null;
+function slugFromUrlOrPath(urlOrPath?: string): string | null {
+	if (!urlOrPath) return null;
+	const m = urlOrPath.match(/\/novel\/([^/]+)/i);
+	if (m) return m[1];
+	const clean = urlOrPath.replace(/^\/+|\/+$/g, '');
+	if (clean && !/^\d+$/.test(clean) && !clean.includes('/')) return clean;
+	return null;
 }
 
-type WpRendered = { rendered?: string };
-type WpPost = {
-	id: number;
-	date?: string;
-	slug: string;
-	link?: string;
-	title?: WpRendered;
-	content?: WpRendered;
-	excerpt?: WpRendered;
-	categories?: number[];
-	tags?: number[];
-	featured_media?: number;
-	_embedded?: {
-		'wp:featuredmedia'?: Array<{ source_url?: string }>;
-		'wp:term'?: Array<
-			Array<{ id: number; name: string; slug: string; taxonomy: string }>
-		>;
-	};
-};
-type WpCategory = {
-	id: number;
-	count: number;
-	name: string;
-	slug: string;
-	description?: string;
-};
+function novelIdFromSlug(slug: string): string {
+	return `/novel/${slug}`;
+}
+
+function chapterIdFromSlug(slug: string, chapterNumber: string | number): string {
+	const n = String(chapterNumber).replace(/[^\d.]/g, '') || '0';
+	// site URL style: /novel/{slug}/chapter-{n}/
+	const whole = n.includes('.') ? n.replace('.', '-') : n;
+	return `/novel/${slug}/chapter-${whole}`;
+}
+
+function isChapterLocked(ch: AcChapterCard): boolean {
+	if (ch.is_free === true || ch.has_access === true) return false;
+	if (ch.is_unlocked === true) return false;
+	if (ch.is_paid === true) return true;
+	if ((ch.coin_cost ?? 0) > 0 || (ch.coin_price ?? 0) > 0) return true;
+	if (ch.access_reason === 'login_required' || ch.access_reason === 'paid') return true;
+	return false;
+}
 
 export class AzureChroniclesSource extends BaseSource {
 	id = 'azurechronicles';
@@ -124,543 +178,163 @@ export class AzureChroniclesSource extends BaseSource {
 	protected headers: Record<string, string> = {
 		'User-Agent':
 			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-		Accept: 'application/json, text/html, */*',
+		Accept: 'application/json, text/plain, */*',
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: 'https://azurechronicles.com/',
 		Origin: 'https://azurechronicles.com'
 	};
 
-	private apiOk: boolean | null = null;
+	/** numeric novel id → slug cache */
+	private slugByNovelId = new Map<number, string>();
+	/** slug → numeric novel id cache */
+	private idBySlug = new Map<string, number>();
 
-	private async fetchWp<T>(path: string): Promise<T> {
+	private async fetchApi<T>(path: string): Promise<T> {
 		return this.fetchJson<T>(path.startsWith('http') ? path : path);
 	}
 
-	/** Cek apakah /wp-json/ bisa diakses dari IP ini */
-	private async canUseApi(): Promise<boolean> {
-		if (this.apiOk != null) return this.apiOk;
-		try {
-			const data = await this.fetchWp<unknown>(`${WP}/posts?per_page=1`);
-			this.apiOk = data != null;
-		} catch {
-			this.apiOk = false;
-		}
-		return this.apiOk;
+	private cacheSlug(novelId: number, slug: string) {
+		if (!novelId || !slug) return;
+		this.slugByNovelId.set(novelId, slug);
+		this.idBySlug.set(slug, novelId);
 	}
 
-	private async fetchPage(path: string, retries = 3): Promise<string> {
-		let last = '';
-		for (let i = 0; i < retries; i++) {
-			if (i > 0) await new Promise((r) => setTimeout(r, 1500 * i));
-			try {
-				last = await this.fetchHtml(path);
-			} catch (e) {
-				if (i === retries - 1) throw e;
-				continue;
-			}
-			if (!isChallengePage(last) && last.length > 4000) return last;
-		}
-		if (isChallengePage(last)) {
-			throw new Error(
-				'Azure Chronicles blocked (Imunify360 / challenge) — retry later'
-			);
-		}
-		return last;
-	}
-
-	/* ─── API path (KariStudio-style) ─── */
-
-	private mapPostToManga(p: WpPost): Manga | null {
-		const link = p.link || '';
+	private async resolveNovel(
+		mangaId: string
+	): Promise<{ numericId: number; slug: string }> {
+		const raw = mangaId.replace(/^\/+/, '').replace(/\/+$/, '');
+		const parts = raw.split('/').filter(Boolean);
 		const slug =
-			slugFromPath(link) ||
-			(p.slug?.startsWith('chapter-') ? null : p.slug);
-		if (!slug || /^chapter-/i.test(slug)) return null;
-		const media = p._embedded?.['wp:featuredmedia']?.[0];
-		const cover = media?.source_url || '';
+			parts[0] === 'novel' ? parts[1] : /^\d+$/.test(parts[0]) ? null : parts[0];
+
+		// numeric id only
+		if (/^\d+$/.test(raw) || (parts.length === 1 && /^\d+$/.test(parts[0]))) {
+			const numericId = parseInt(parts[0] || raw, 10);
+			const cached = this.slugByNovelId.get(numericId);
+			if (cached) return { numericId, slug: cached };
+
+			const res = await this.fetchApi<AcSingleResponse<AcNovelCard>>(
+				`${API}/novels/${numericId}`
+			);
+			const n = res?.data;
+			if (!n?.id) throw new Error(`Series not found: ${mangaId}`);
+			const s =
+				slugFromUrlOrPath(n.url) ||
+				(n.title || '')
+					.toLowerCase()
+					.replace(/[^a-z0-9]+/g, '-')
+					.replace(/^-|-$/g, '');
+			if (!s) throw new Error(`No slug for novel ${numericId}`);
+			this.cacheSlug(numericId, s);
+			return { numericId, slug: s };
+		}
+
+		if (!slug) throw new Error(`Invalid manga id: ${mangaId}`);
+
+		const cachedId = this.idBySlug.get(slug);
+		if (cachedId) return { numericId: cachedId, slug };
+
+		// WP CPT by slug
+		const posts = await this.fetchApi<WpAcNovel[]>(
+			`${WP}/ac_novel?slug=${encodeURIComponent(slug)}&per_page=1`
+		);
+		if (Array.isArray(posts) && posts[0]?.id) {
+			this.cacheSlug(posts[0].id, posts[0].slug || slug);
+			return { numericId: posts[0].id, slug: posts[0].slug || slug };
+		}
+
+		// fallback search
+		const search = await this.fetchApi<AcListResponse<AcNovelCard>>(
+			`${API}/search?q=${encodeURIComponent(slug.replace(/-/g, ' '))}&per_page=10`
+		);
+		const hit = (search?.data?.items || []).find((n) => {
+			const s = slugFromUrlOrPath(n.url);
+			return s === slug || n.id;
+		});
+		if (hit?.id) {
+			const s = slugFromUrlOrPath(hit.url) || slug;
+			this.cacheSlug(hit.id, s);
+			return { numericId: hit.id, slug: s };
+		}
+
+		throw new Error(`Series not found: ${slug}`);
+	}
+
+	private mapNovelCard(n: AcNovelCard): Manga | null {
+		if (!n?.id) return null;
+		const slug = slugFromUrlOrPath(n.url);
+		if (!slug) return null;
+		this.cacheSlug(n.id, slug);
+
+		const latestNum = parseChapterNumber(n.latest_chapter || '', n.chapter_count);
 		return {
-			id: `/novel/${slug}`,
-			title: cleanTitle(p.title?.rendered || slug),
-			cover,
+			id: novelIdFromSlug(slug),
+			title: cleanTitle(n.title || slug),
+			cover: n.cover_url || '',
 			sourceId: this.id,
 			type: 'novel',
 			lang: 'en',
-			status: 'Ongoing'
+			status: normalizeStatus(n.status),
+			...(latestNum > 0 ? { latestChapter: latestNum } : {})
 		};
 	}
-
-	private async apiLatest(page: number): Promise<Manga[]> {
-		const posts = await this.fetchWp<WpPost[]>(
-			`${WP}/posts?per_page=${PAGE_SIZE}&page=${page}&orderby=modified&order=desc&_embed=1`
-		);
-		if (!Array.isArray(posts)) return [];
-		const out: Manga[] = [];
-		const seen = new Set<string>();
-		for (const p of posts) {
-			const m = this.mapPostToManga(p);
-			if (!m || seen.has(m.id)) continue;
-			// Skip pure chapter posts
-			if (/\/chapter-\d+/i.test(p.link || '')) continue;
-			seen.add(m.id);
-			out.push(m);
-		}
-		return out;
-	}
-
-	private async apiSearch(query: string, page: number): Promise<Manga[]> {
-		const posts = await this.fetchWp<WpPost[]>(
-			`${WP}/search?search=${encodeURIComponent(query)}&per_page=${PAGE_SIZE}&page=${page}&type=post&_embed=1`
-		);
-		// fallback: posts?search=
-		let list = Array.isArray(posts) ? posts : [];
-		if (!list.length) {
-			const alt = await this.fetchWp<WpPost[]>(
-				`${WP}/posts?search=${encodeURIComponent(query)}&per_page=${PAGE_SIZE}&page=${page}&_embed=1`
-			);
-			list = Array.isArray(alt) ? alt : [];
-		}
-		const out: Manga[] = [];
-		const seen = new Set<string>();
-		for (const p of list) {
-			const m = this.mapPostToManga(p);
-			if (!m || seen.has(m.id)) continue;
-			if (/\/chapter-\d+/i.test(p.link || '')) continue;
-			seen.add(m.id);
-			out.push(m);
-		}
-		return out;
-	}
-
-	private async apiDetails(slug: string): Promise<MangaDetails | null> {
-		// Coba post dengan slug novel
-		let posts = await this.fetchWp<WpPost[]>(
-			`${WP}/posts?slug=${encodeURIComponent(slug)}&_embed=1&per_page=5`
-		);
-		if (!Array.isArray(posts) || !posts.length) {
-			// Kadang novel adalah custom post type — coba categories
-			const cats = await this.fetchWp<WpCategory[]>(
-				`${WP}/categories?slug=${encodeURIComponent(slug)}`
-			);
-			if (!Array.isArray(cats) || !cats[0]) return null;
-			const cat = cats[0];
-			const chapters = await this.apiChaptersByCategory(cat.id, slug);
-			return {
-				id: `/novel/${slug}`,
-				title: cleanTitle(cat.name),
-				cover: '',
-				sourceId: this.id,
-				description: stripHtml(cat.description || ''),
-				authors: [],
-				status: 'Ongoing',
-				genres: [],
-				chapters,
-				type: 'novel',
-				lang: 'en',
-				...(chapters.length ? { latestChapter: chapters[0]?.number } : {})
-			};
-		}
-
-		// Pilih post yang link-nya /novel/{slug}/ (bukan chapter)
-		const index =
-			posts.find((p) => {
-				const path = (p.link || '').replace(/\/$/, '');
-				return path.endsWith(`/novel/${slug}`) || p.slug === slug;
-			}) || posts[0];
-
-		const media = index._embedded?.['wp:featuredmedia']?.[0];
-		const cover = media?.source_url || '';
-		const title = cleanTitle(index.title?.rendered || slug);
-		const description = stripHtml(
-			index.content?.rendered || index.excerpt?.rendered || ''
-		);
-
-		const genres: string[] = [];
-		const seenG = new Set<string>();
-		for (const group of index._embedded?.['wp:term'] || []) {
-			if (!Array.isArray(group)) continue;
-			for (const t of group) {
-				if (!t?.name) continue;
-				if (t.taxonomy !== 'post_tag' && t.taxonomy !== 'category') continue;
-				if (t.slug === slug) continue;
-				const name = cleanTitle(t.name);
-				const key = name.toLowerCase();
-				if (seenG.has(key)) continue;
-				seenG.add(key);
-				genres.push(name);
-			}
-		}
-
-		// Chapters: posts in same category, or search by parent path
-		let chapters: Chapter[] = [];
-		const catIds = (index.categories || []).filter(Boolean);
-		if (catIds.length) {
-			chapters = await this.apiChaptersByCategory(catIds[0], slug);
-		}
-		if (!chapters.length) {
-			chapters = await this.apiChaptersBySearch(slug);
-		}
-
-		return {
-			id: `/novel/${slug}`,
-			title,
-			cover,
-			sourceId: this.id,
-			description,
-			authors: [],
-			status: 'Ongoing',
-			genres,
-			chapters,
-			type: 'novel',
-			lang: 'en',
-			...(chapters.length ? { latestChapter: chapters[0]?.number } : {})
-		};
-	}
-
-	private async apiChaptersByCategory(
-		catId: number,
-		seriesSlug: string
-	): Promise<Chapter[]> {
-		const out: Chapter[] = [];
-		const seen = new Set<string>();
-		for (let page = 1; page <= 20; page++) {
-			const posts = await this.fetchWp<WpPost[]>(
-				`${WP}/posts?categories=${catId}&per_page=100&page=${page}&orderby=date&order=asc&_fields=id,slug,title,date,link`
-			);
-			if (!Array.isArray(posts) || !posts.length) break;
-			for (const p of posts) {
-				const link = p.link || '';
-				if (!/\/chapter-\d+/i.test(link) && !/^chapter-/i.test(p.slug)) {
-					if (p.slug === seriesSlug) continue;
-					if (!/\d/.test(p.slug + (p.title?.rendered || ''))) continue;
-				}
-				const chapSlug =
-					(link.match(/\/(chapter-[^/]+)\/?$/i) || [])[1] || p.slug;
-				const id = `/novel/${seriesSlug}/${chapSlug}`;
-				if (seen.has(id)) continue;
-				seen.add(id);
-				const title = cleanTitle(p.title?.rendered || chapSlug);
-				out.push({
-					id,
-					title,
-					number: parseChapterNumber(title, chapSlug),
-					date: p.date
-				});
-			}
-			if (posts.length < 100) break;
-		}
-		out.sort((a, b) => b.number - a.number);
-		return out;
-	}
-
-	private async apiChaptersBySearch(seriesSlug: string): Promise<Chapter[]> {
-		const out: Chapter[] = [];
-		const seen = new Set<string>();
-		// Search posts whose link contains /novel/{slug}/chapter-
-		for (let page = 1; page <= 10; page++) {
-			const posts = await this.fetchWp<WpPost[]>(
-				`${WP}/posts?search=${encodeURIComponent(seriesSlug)}&per_page=100&page=${page}&_fields=id,slug,title,date,link`
-			);
-			if (!Array.isArray(posts) || !posts.length) break;
-			for (const p of posts) {
-				const link = p.link || '';
-				if (!link.includes(`/novel/${seriesSlug}/`)) continue;
-				const cm = link.match(/\/(chapter-[^/]+)\/?$/i);
-				if (!cm) continue;
-				const chapSlug = cm[1];
-				const id = `/novel/${seriesSlug}/${chapSlug}`;
-				if (seen.has(id)) continue;
-				seen.add(id);
-				const title = cleanTitle(p.title?.rendered || chapSlug);
-				out.push({
-					id,
-					title,
-					number: parseChapterNumber(title, chapSlug),
-					date: p.date
-				});
-			}
-			if (posts.length < 100) break;
-		}
-		out.sort((a, b) => b.number - a.number);
-		return out;
-	}
-
-	private async apiChapterContent(
-		seriesSlug: string,
-		chapSlug: string
-	): Promise<{ title: string; content: string } | null> {
-		// Prefer slug chapter-N
-		let posts = await this.fetchWp<WpPost[]>(
-			`${WP}/posts?slug=${encodeURIComponent(chapSlug)}&per_page=5`
-		);
-		if (!Array.isArray(posts)) posts = [];
-		let p =
-			posts.find((x) => (x.link || '').includes(`/novel/${seriesSlug}/`)) ||
-			posts[0];
-		if (!p?.content?.rendered) {
-			// search by path
-			const alt = await this.fetchWp<WpPost[]>(
-				`${WP}/posts?search=${encodeURIComponent(chapSlug)}&per_page=20`
-			);
-			if (Array.isArray(alt)) {
-				p =
-					alt.find((x) =>
-						(x.link || '').includes(`/novel/${seriesSlug}/${chapSlug}`)
-					) || alt[0];
-			}
-		}
-		if (!p?.content?.rendered) return null;
-		const raw = p.content.rendered;
-		const text = stripHtml(raw);
-		if (text.length < 80) return null;
-		return {
-			title: cleanTitle(p.title?.rendered || chapSlug),
-			content: `<div class="ac-chapter">${raw}</div>`
-		};
-	}
-
-	/* ─── HTML fallback ─── */
-
-	private parseNovelCards(html: string): Manga[] {
-		const out: Manga[] = [];
-		const seen = new Set<string>();
-		const re =
-			/href="((?:https?:\/\/azurechronicles\.com)?\/novel\/([^/"?#]+))\/?"/gi;
-		let m: RegExpExecArray | null;
-		while ((m = re.exec(html))) {
-			const slug = m[2];
-			if (!slug || /^(page|tag|genre)/i.test(slug)) continue;
-			if (/\/chapter-/i.test(m[1])) continue;
-			const id = `/novel/${slug}`;
-			if (seen.has(id)) continue;
-			seen.add(id);
-			const around = html.slice(
-				Math.max(0, m.index - 500),
-				Math.min(html.length, m.index + 700)
-			);
-			let title = '';
-			const alt = around.match(/<img[^>]+alt="([^"]{3,})"/i);
-			if (alt) title = cleanTitle(alt[1]);
-			if (!title) {
-				const tl = around.match(
-					new RegExp(`href="[^"]*/novel/${slug}/?"[^>]*>\\s*([^<]{3,120})`, 'i')
-				);
-				if (tl) title = cleanTitle(tl[1]);
-			}
-			if (!title) {
-				title = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-			}
-			if (/^(read novel|start reading)$/i.test(title)) continue;
-
-			let cover = '';
-			const img = around.match(
-				/<img[^>]+(?:src|data-src)="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i
-			);
-			if (img) cover = img[1].replace(/&amp;/g, '&');
-
-			out.push({
-				id,
-				title,
-				cover,
-				sourceId: this.id,
-				type: 'novel',
-				lang: 'en',
-				status: 'Ongoing'
-			});
-		}
-		return out;
-	}
-
-	private parseChapterListHtml(html: string, seriesSlug: string): Chapter[] {
-		const out: Chapter[] = [];
-		const seen = new Set<string>();
-		const re = new RegExp(
-			`href="(?:https?:\\/\\/azurechronicles\\.com)?\\/novel\\/${seriesSlug.replace(
-				/[.*+?^${}()|[\\]\\\\]/g,
-				'\\$&'
-			)}\\/(chapter-[^"/?#]+)\\/?"[^>]*>([\\s\\S]*?)<\\/a>`,
-			'gi'
-		);
-		let m: RegExpExecArray | null;
-		while ((m = re.exec(html))) {
-			const chapSlug = m[1];
-			const id = `/novel/${seriesSlug}/${chapSlug}`;
-			if (seen.has(id)) continue;
-			let title = cleanTitle(stripHtml(m[2]))
-				.replace(/\s+\d+[smhdw]\s+ago\s*$/i, '')
-				.trim();
-			if (
-				!title ||
-				/^(start reading|read novel|add to library)$/i.test(title)
-			)
-				continue;
-			seen.add(id);
-			out.push({
-				id,
-				title,
-				number: parseChapterNumber(title, chapSlug)
-			});
-		}
-		out.sort((a, b) => b.number - a.number);
-		return out;
-	}
-
-	private extractChapterText(html: string): string {
-		const extractParas = (src: string): string => {
-			const chunk = src
-				.replace(/<script[\s\S]*?<\/script>/gi, '')
-				.replace(/<style[\s\S]*?<\/style>/gi, '')
-				.replace(/<nav[\s\S]*?<\/nav>/gi, '')
-				.replace(/What did you think of this chapter[\s\S]*/i, '');
-			return [...chunk.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
-				.map((x) => x[0])
-				.filter((p) => {
-					const t = stripHtml(p).replace(/\s+/g, ' ').trim();
-					return (
-						t.length >= 25 &&
-						!/^(start reading|add to library|sign in)/i.test(t)
-					);
-				})
-				.join('\n');
-		};
-
-		for (const re of [
-			/<article[^>]*>([\s\S]*?)<\/article>/i,
-			/<div[^>]+class="[^"]*(?:chapter-content|entry-content|post-content|prose)[^"]*"[^>]*>([\s\S]*?)<\/div>/i
-		]) {
-			const hit = html.match(re);
-			if (hit?.[1] && stripHtml(extractParas(hit[1])).length > 150) {
-				return extractParas(hit[1]);
-			}
-		}
-		const main = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html;
-		const after = main.split(/<\/h1>/i).slice(1).join('</h1>');
-		const cut = after.split(
-			/What did you think of this chapter|Discussion|Comments/i
-		)[0];
-		return extractParas(cut);
-	}
-
-	/* ─── Public API ─── */
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
-		const seen = new Set<string>();
-		const all: Manga[] = [];
-
-		const add = (items: Manga[]) => {
-			for (const m of items) {
-				if (seen.has(m.id)) continue;
-				seen.add(m.id);
-				all.push(m);
-			}
-		};
-
-		if (await this.canUseApi()) {
-			try {
-				// Ambil beberapa page WP agar pagination UI punya data unik
-				for (let p = 1; p <= Math.max(pageNum + 1, 3); p++) {
-					const batch = await this.apiLatest(p);
-					if (!batch.length) break;
-					add(batch);
-					if (batch.length < PAGE_SIZE) break;
-				}
-			} catch (e) {
-				console.error('[AzureChronicles] API latest failed', e);
-				this.apiOk = false;
-			}
+		try {
+			const res = await this.fetchApi<AcListResponse<AcNovelCard>>(
+				`${API}/novels?page=${pageNum}&per_page=${PAGE_SIZE}&sort=latest`
+			);
+			const items = res?.data?.items;
+			if (!Array.isArray(items)) return [];
+			return items.map((n) => this.mapNovelCard(n)).filter((m): m is Manga => !!m);
+		} catch (e) {
+			console.error('[AzureChronicles] getLatestManga failed', e);
+			return [];
 		}
-
-		// HTML: homepage sering SPA tanpa ?page= — kumpulkan + search seeds lalu slice
-		if (all.length < pageNum * PAGE_SIZE) {
-			try {
-				const html = await this.fetchPage('/');
-				add(this.parseNovelCards(html));
-			} catch (e) {
-				console.error('[AzureChronicles] HTML home failed', e);
-			}
-			const seeds = ['a', 'the', 'of', 'in', 'i', 're', 'my', 'king', 'hunter', 'mage'];
-			for (const q of seeds) {
-				if (all.length >= pageNum * PAGE_SIZE + PAGE_SIZE) break;
-				try {
-					add(await this.searchManga(q, { page: 1 }));
-				} catch {
-					/* ignore */
-				}
-			}
-		}
-
-		const start = (pageNum - 1) * PAGE_SIZE;
-		return all.slice(start, start + PAGE_SIZE);
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
+		const page = Math.max(1, opts?.page ?? 1);
 		const q = query.trim();
 		if (!q) return [];
-		const page = opts?.page ?? 1;
-		if (await this.canUseApi()) {
-			try {
-				const api = await this.apiSearch(q, page);
-				if (api.length) return api;
-			} catch {
-				this.apiOk = false;
-			}
-		}
 		try {
-			const html = await this.fetchPage(`/?s=${encodeURIComponent(q)}`);
-			return this.parseNovelCards(html).slice(0, PAGE_SIZE);
-		} catch {
+			const res = await this.fetchApi<AcListResponse<AcNovelCard>>(
+				`${API}/search?q=${encodeURIComponent(q)}&page=${page}&per_page=${PAGE_SIZE}`
+			);
+			const items = res?.data?.items;
+			if (!Array.isArray(items)) return [];
+			return items.map((n) => this.mapNovelCard(n)).filter((m): m is Manga => !!m);
+		} catch (e) {
+			console.error('[AzureChronicles] searchManga failed', e);
 			return [];
 		}
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-		const slug = slugFromPath(mangaId) || mangaId.replace(/^\/+|\/+$/g, '');
-		if (!slug) throw new Error(`Invalid manga id: ${mangaId}`);
+		const { numericId, slug } = await this.resolveNovel(mangaId);
 
-		if (await this.canUseApi()) {
-			try {
-				const api = await this.apiDetails(slug);
-				if (api) return api;
-			} catch (e) {
-				console.error('[AzureChronicles] API details failed', e);
-				this.apiOk = false;
-			}
-		}
+		const res = await this.fetchApi<AcSingleResponse<AcNovelCard>>(
+			`${API}/novels/${numericId}`
+		);
+		const n = res?.data;
+		if (!n?.id) throw new Error(`Series not found: ${mangaId}`);
 
-		const html = await this.fetchPage(`/novel/${slug}/`);
-		const titleMatch =
-			html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
-			html.match(/property="og:title"[^>]+content="([^"]+)"/i);
-		const title = cleanTitle(
-			titleMatch ? stripHtml(titleMatch[1]) : slug.replace(/-/g, ' ')
-		);
-		const coverMatch = html.match(
-			/property="og:image"[^>]+content="([^"]+)"/i
-		);
-		const cover = (coverMatch?.[1] || '').replace(/&amp;/g, '&');
-		const genres: string[] = [];
-		const gb = html.match(/Genres\s*:?\s*([\s\S]{0,300}?)<\//i);
-		if (gb) {
-			for (const g of stripHtml(gb[1]).split(/[,|/]/)) {
-				const t = g.trim();
-				if (t && t.length < 40 && !/genre/i.test(t)) genres.push(t);
-			}
-		}
-		let description = '';
-		const og = html.match(
-			/property="og:description"[^>]+content="([^"]+)"/i
-		);
-		if (og) description = decodeEntities(og[1]);
-		const chapters = this.parseChapterListHtml(html, slug);
+		const finalSlug = slugFromUrlOrPath(n.url) || slug;
+		this.cacheSlug(n.id, finalSlug);
+
+		const chapters = await this.fetchAllChapters(numericId, finalSlug);
+		const genres = Array.isArray(n.genres) ? n.genres.map(cleanTitle).filter(Boolean) : [];
+		const authors = n.author ? [cleanTitle(n.author)].filter(Boolean) : [];
 
 		return {
-			id: `/novel/${slug}`,
-			title,
-			cover,
+			id: novelIdFromSlug(finalSlug),
+			title: cleanTitle(n.title || finalSlug),
+			cover: n.cover_url || '',
 			sourceId: this.id,
-			description,
-			authors: [],
-			status: /Completed/i.test(html) ? 'Completed' : 'Ongoing',
+			description: stripHtml(n.description || ''),
+			authors,
+			status: normalizeStatus(n.status),
 			genres,
 			chapters,
 			type: 'novel',
@@ -669,40 +343,52 @@ export class AzureChroniclesSource extends BaseSource {
 		};
 	}
 
+	private async fetchAllChapters(
+		novelId: number,
+		slug: string
+	): Promise<Chapter[]> {
+		const out: Chapter[] = [];
+		const seen = new Set<string>();
+		let page = 1;
+		const perPage = 100;
 
-	private async resolvePrevNext(
-		seriesSlug: string,
-		chapSlug: string,
-		chapterId: string
-	): Promise<{ prev: string | null; next: string | null }> {
-		try {
-			let chs: Chapter[] = [];
-			if (await this.canUseApi()) {
-				try {
-					chs = await this.apiChaptersBySearch(seriesSlug);
-				} catch {
-					/* ignore */
-				}
-			}
-			if (!chs.length) {
-				const html = await this.fetchPage(`/novel/${seriesSlug}/`);
-				chs = this.parseChapterListHtml(html, seriesSlug);
-			}
-			// newest-first
-			const idx = chs.findIndex(
-				(c) =>
-					c.id === chapterId ||
-					c.id.endsWith(`/${chapSlug}`) ||
-					c.id.includes(`/${chapSlug}`)
+		while (page <= 50) {
+			const res = await this.fetchApi<AcListResponse<AcChapterCard>>(
+				`${API}/novels/${novelId}/chapters?page=${page}&per_page=${perPage}&order=desc`
 			);
-			if (idx < 0) return { prev: null, next: null };
-			return {
-				prev: chs[idx + 1]?.id ?? null, // older
-				next: chs[idx - 1]?.id ?? null // newer
-			};
-		} catch {
-			return { prev: null, next: null };
+			const items = res?.data?.items;
+			if (!Array.isArray(items) || items.length === 0) break;
+
+			for (const ch of items) {
+				if (!ch?.id) continue;
+				const num = parseChapterNumber(ch.title || '', ch.chapter_number);
+				const chapNumStr =
+					ch.chapter_number != null && String(ch.chapter_number).trim() !== ''
+						? String(ch.chapter_number).replace(/[^\d.]/g, '')
+						: String(num);
+				const id = chapterIdFromSlug(slug, chapNumStr || num);
+				if (seen.has(id)) continue;
+				seen.add(id);
+
+				out.push({
+					id,
+					title: cleanTitle(ch.title || `Chapter ${chapNumStr}`),
+					number: num,
+					date: ch.public_at || ch.created_at || undefined,
+					isLocked: isChapterLocked(ch)
+				});
+			}
+
+			const totalPages = res?.data?.meta?.total_pages ?? page;
+			if (page >= totalPages || items.length < perPage) break;
+			page++;
 		}
+
+		out.sort((a, b) => {
+			if (b.number !== a.number) return b.number - a.number;
+			return (b.date || '').localeCompare(a.date || '');
+		});
+		return out;
 	}
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
@@ -715,73 +401,157 @@ export class AzureChroniclesSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-		const m = chapterId.match(/\/novel\/([^/]+)\/(chapter-[^/]+)/i);
-		if (!m) throw new Error(`Invalid chapter id: ${chapterId}`);
-		const [, seriesSlug, chapSlug] = m;
+		// /novel/{slug}/chapter-{n}  OR  plain numeric
+		const path = chapterId.replace(/^\/+/, '').replace(/\/+$/, '');
+		const m = path.match(/^novel\/([^/]+)\/chapter-([\d.-]+)/i);
+		let slug: string;
+		let chapNumStr: string;
+		let numericChapterId: number | null = null;
 
-		// 1) WP API dulu (seperti KariStudio)
-		if (await this.canUseApi()) {
-			try {
-				const api = await this.apiChapterContent(seriesSlug, chapSlug);
-				if (api && stripHtml(api.content).length > 80) {
-					const nav = await this.resolvePrevNext(
-						seriesSlug,
-						chapSlug,
-						chapterId
-					);
-					return {
-						...api,
-						prevChapterId: nav.prev,
-						nextChapterId: nav.next
-					};
-				}
-			} catch (e) {
-				console.error('[AzureChronicles] API chapter failed', e);
-				this.apiOk = false;
-			}
+		if (m) {
+			slug = m[1];
+			chapNumStr = m[2].replace('-', '.');
+		} else if (/^\d+$/.test(path.split('/').pop() || '')) {
+			// fallback numeric chapter id
+			numericChapterId = parseInt(path.split('/').pop()!, 10);
+			slug = '';
+			chapNumStr = '';
+		} else {
+			throw new Error(`Invalid chapter id: ${chapterId}`);
 		}
 
-		// 2) HTML fallback
-		const path = `/novel/${seriesSlug}/${chapSlug}/`;
-		try {
-			await this.fetchPage(`/novel/${seriesSlug}/`);
-		} catch {
-			/* warm */
-		}
-		const html = await this.fetchPage(path);
-		const titleMatch =
-			html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
-			html.match(/property="og:title"[^>]+content="([^"]+)"/i);
-		const title = cleanTitle(
-			titleMatch ? stripHtml(titleMatch[1]) : chapSlug.replace(/-/g, ' ')
-		);
+		// Resolve numeric chapter id via novel chapter list if we only have path
+		let novelNumericId: number | null = null;
+		if (m) {
+			const resolved = await this.resolveNovel(`/novel/${slug}`);
+			novelNumericId = resolved.numericId;
+			slug = resolved.slug;
 
-		let body = this.extractChapterText(html);
-		body = body
-			.replace(/<img\b[^>]*>/gi, '')
-			.replace(/<picture[\s\S]*?<\/picture>/gi, '');
-		let plain = stripHtml(body).replace(/\s+/g, ' ').trim();
-
-		if (plain.length < 100) {
-			await new Promise((r) => setTimeout(r, 2500));
-			const html2 = await this.fetchPage(path, 3);
-			body = this.extractChapterText(html2).replace(/<img\b[^>]*>/gi, '');
-			plain = stripHtml(body).replace(/\s+/g, ' ').trim();
+			// find chapter id from list
+			const chaptersMeta = await this.fetchChapterMeta(novelNumericId);
+			const targetNum = parseFloat(chapNumStr);
+			const found = chaptersMeta.find(
+				(c) =>
+					c.number === targetNum ||
+					String(c.chapter_number) === chapNumStr ||
+					String(c.chapter_number) === String(targetNum)
+			);
+			if (!found) throw new Error(`Chapter not found: ${chapterId}`);
+			numericChapterId = found.id;
 		}
 
-		if (plain.length < 80) {
+		if (!numericChapterId) throw new Error(`Chapter not found: ${chapterId}`);
+
+		// Fetch content
+		const url = `${this.baseUrl}${API}/chapters/${numericChapterId}`;
+		const response = await fetch(url, {
+			headers: { ...this.headers, Accept: 'application/json' }
+		});
+		const json = (await response.json().catch(() => null)) as any;
+
+		if (response.status === 403 || json?.code === 'ac_api_chapter_locked') {
+			const access = json?.data?.access;
+			const price =
+				access?.chapter?.coin_price ?? access?.chapter?.coin_cost ?? '?';
 			throw new Error(
-				'Chapter body empty or blocked by anti-bot — retry in a few seconds'
+				`Chapter is locked / paid on Azure Chronicles (${access?.reason || 'locked'}, coins: ${price})`
+			);
+		}
+		if (!response.ok) {
+			throw new Error(
+				`Failed to fetch chapter ${numericChapterId}: ${response.status}`
 			);
 		}
 
-		const nav = await this.resolvePrevNext(seriesSlug, chapSlug, chapterId);
-		return {
-			title,
-			content: `<div class="ac-chapter">${body}</div>`,
-			prevChapterId: nav.prev,
-			nextChapterId: nav.next
-		};
+		const ch = (json as AcSingleResponse<AcChapterCard>)?.data;
+		if (!ch?.id) throw new Error(`Chapter not found: ${chapterId}`);
+
+		const raw = ch.text_content || '';
+		if (!raw.trim()) {
+			throw new Error('Chapter body is empty (may require login or unlock)');
+		}
+
+		const title = cleanTitle(ch.title || `Chapter ${ch.chapter_number ?? ''}`);
+		const content = `<div class="ac-chapter">${raw}</div>`;
+
+		// Resolve slug if still missing
+		if (!slug && ch.novel_id) {
+			novelNumericId = ch.novel_id;
+			const cached = this.slugByNovelId.get(ch.novel_id);
+			if (cached) {
+				slug = cached;
+			} else {
+				try {
+					const det = await this.fetchApi<AcSingleResponse<AcNovelCard>>(
+						`${API}/novels/${ch.novel_id}`
+					);
+					slug = slugFromUrlOrPath(det?.data?.url) || '';
+					if (slug) this.cacheSlug(ch.novel_id, slug);
+				} catch {
+					/* ignore */
+				}
+			}
+		}
+		if (!novelNumericId && ch.novel_id) novelNumericId = ch.novel_id;
+
+		// prev / next — path-based, newest-first list
+		let prevChapterId: string | null = null;
+		let nextChapterId: string | null = null;
+
+		if (novelNumericId && slug) {
+			try {
+				const list = await this.fetchAllChapters(novelNumericId, slug);
+				const currentPath = chapterIdFromSlug(
+					slug,
+					ch.chapter_number ?? chapNumStr
+				);
+				const idx = list.findIndex(
+					(c) =>
+						c.id === currentPath ||
+						c.id === chapterId ||
+						c.number === parseChapterNumber(title, ch.chapter_number)
+				);
+				if (idx >= 0) {
+					prevChapterId = list[idx + 1]?.id ?? null; // older
+					nextChapterId = list[idx - 1]?.id ?? null; // newer
+				}
+			} catch (e) {
+				console.warn('[AzureChronicles] prev/next failed', e);
+			}
+		}
+
+		return { title, content, prevChapterId, nextChapterId };
+	}
+
+	private async fetchChapterMeta(
+		novelId: number
+	): Promise<Array<{ id: number; number: number; chapter_number?: string | number }>> {
+		const out: Array<{
+			id: number;
+			number: number;
+			chapter_number?: string | number;
+		}> = [];
+		let page = 1;
+		const perPage = 100;
+		while (page <= 50) {
+			const res = await this.fetchApi<AcListResponse<AcChapterCard>>(
+				`${API}/novels/${novelId}/chapters?page=${page}&per_page=${perPage}&order=asc`
+			);
+			const items = res?.data?.items;
+			if (!Array.isArray(items) || !items.length) break;
+			for (const c of items) {
+				if (!c?.id) continue;
+				out.push({
+					id: c.id,
+					number: parseChapterNumber(c.title || '', c.chapter_number),
+					chapter_number: c.chapter_number
+				});
+			}
+			const totalPages = res?.data?.meta?.total_pages ?? page;
+			if (page >= totalPages || items.length < perPage) break;
+			page++;
+		}
+		return out;
 	}
 }
 
