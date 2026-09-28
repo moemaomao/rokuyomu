@@ -8,35 +8,35 @@ async function descrambleGigaImage(buffer: ArrayBuffer): Promise<Uint8Array> {
 	const canvas = new OffscreenCanvas(img.width, img.height);
 	const ctx = canvas.getContext('2d')!;
 
-	const divideNum = 4;
-	const multiple = 8;
-	const totalTiles = divideNum * multiple; // 32
+	const COLS = 4;
+	const ROWS = 4;
+	const tileW = Math.floor(img.width / COLS);
+	const tileH = Math.floor(img.height / ROWS);
 
-	const cellWidth = Math.floor(img.width / totalTiles) * multiple;
-	const cellHeight = Math.floor(img.height / totalTiles) * multiple;
+	for (let y = 0; y < ROWS; y++) {
+		for (let x = 0; x < COLS; x++) {
+			// Coba mapping kebalikan
+			const srcX = y * tileW;
+			const srcY = x * tileH;
+			const dstX = x * tileW;
+			const dstY = y * tileH;
 
-	// Draw original dulu
-	ctx.drawImage(img, 0, 0);
-
-	for (let i = 0; i < totalTiles * totalTiles; i++) {
-		const row = Math.floor(i / totalTiles);
-		const col = i % totalTiles;
-
-		const sourceX = col * cellWidth;
-		const sourceY = row * cellHeight;
-
-		// Transpose
-		const destIndex = col * totalTiles + row;
-		const destX = (destIndex % totalTiles) * cellWidth;
-		const destY = Math.floor(destIndex / totalTiles) * cellHeight;
-
-		if (destX < img.width && destY < img.height) {
 			ctx.drawImage(
 				img,
-				sourceX, sourceY, cellWidth, cellHeight,
-				destX, destY, cellWidth, cellHeight
+				srcX, srcY, tileW, tileH,
+				dstX, dstY, tileW, tileH
 			);
 		}
+	}
+
+	// sisa pixel
+	const remainW = img.width - tileW * COLS;
+	const remainH = img.height - tileH * ROWS;
+	if (remainW > 0) {
+		ctx.drawImage(img, tileW * COLS, 0, remainW, img.height, tileW * COLS, 0, remainW, img.height);
+	}
+	if (remainH > 0) {
+		ctx.drawImage(img, 0, tileH * ROWS, img.width - remainW, remainH, 0, tileH * ROWS, img.width - remainW, remainH);
 	}
 
 	const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
@@ -489,7 +489,6 @@ if (isJmcomic) {
 }
 
 // ── GigaViewer unscramble ──
-/*
 const isGiga =
 	sourceId === 'comicgardo' ||
 	/cdn-scissors\.gigaviewer\.com|comic-gardo\.com|gigaviewer\.com/i.test(decodedUrl);
@@ -503,7 +502,7 @@ if (isGiga) {
 		console.warn('[proxy] giga descramble failed', e);
 	}
 }
-*/
+
 return new Response(body, {
 				headers: {
 					'Content-Type': contentType,
