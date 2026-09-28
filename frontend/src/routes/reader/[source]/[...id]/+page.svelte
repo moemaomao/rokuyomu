@@ -36,10 +36,6 @@ $effect(() => {
 		return;
 	}
 
-	// Sementara matikan descramble dulu sampai proxy beres
-	pages = list;
-
-	/*
 	if (GIGA_SOURCES.has(source)) {
 		descrambling = true;
 		Promise.all(list.map((url) => descrambleGiga(proxyImage(url, true))))
@@ -49,13 +45,12 @@ $effect(() => {
 			})
 			.catch((e) => {
 				console.error('[GigaDescramble]', e);
-				pages = list;
+				pages = list; // fallback ke original kalau gagal
 				descrambling = false;
 			});
 	} else {
 		pages = list;
 	}
-	*/
 });
 
 	// ── Reader state ─────────────────────────────────────────────────────────
