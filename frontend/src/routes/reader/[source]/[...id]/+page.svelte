@@ -45,7 +45,7 @@ $effect(() => {
 			})
 			.catch((e) => {
 				console.error('[GigaDescramble]', e);
-				pages = list; // fallback ke original kalau gagal
+				pages = list; 
 				descrambling = false;
 			});
 	} else {
