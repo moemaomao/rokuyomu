@@ -376,6 +376,11 @@ export const GET: RequestHandler = async ({ url }) => {
 			}
 		} else if (sourceId === 'areakomik' || /gudangkomik|pic\.gudangkomik/i.test(decodedUrl)) {
             referer = 'https://areakomik.com/';
+        } else if (
+	             sourceId === 'comicgardo' ||
+	         /cdn-scissors\.gigaviewer\.com|comic-gardo\.com|gigaviewer\.com/i.test(decodedUrl)
+        )   {
+	           referer = 'https://comic-gardo.com/';
         }
 
 		// ============================================================
