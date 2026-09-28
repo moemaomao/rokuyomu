@@ -1,6 +1,43 @@
 import type { RequestHandler } from './$types';
 import { unscrambleJmImage, parseJmImageUrl } from '$lib/server/unscramble';
 
+async function descrambleGigaImage(buffer: ArrayBuffer): Promise<Uint8Array> {
+	const blob = new Blob([buffer]);
+	const img = await createImageBitmap(blob);
+
+	const canvas = new OffscreenCanvas(img.width, img.height);
+	const ctx = canvas.getContext('2d')!;
+
+	const COLS = 4;
+	const ROWS = 4;
+	const tileW = Math.floor(img.width / COLS);
+	const tileH = Math.floor(img.height / ROWS);
+
+	for (let y = 0; y < ROWS; y++) {
+		for (let x = 0; x < COLS; x++) {
+			const srcX = x * tileW;
+			const srcY = y * tileH;
+			const dstX = y * tileW;
+			const dstY = x * tileH;
+
+			ctx.drawImage(img, srcX, srcY, tileW, tileH, dstX, dstY, tileW, tileH);
+		}
+	}
+
+	// sisa pixel
+	const remainW = img.width - tileW * COLS;
+	const remainH = img.height - tileH * ROWS;
+	if (remainW > 0) {
+		ctx.drawImage(img, tileW * COLS, 0, remainW, img.height, tileW * COLS, 0, remainW, img.height);
+	}
+	if (remainH > 0) {
+		ctx.drawImage(img, 0, tileH * ROWS, img.width - remainW, remainH, 0, tileH * ROWS, img.width - remainW, remainH);
+	}
+
+	const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+	return new Uint8Array(await outBlob.arrayBuffer());
+}
+
 const USER_AGENT =
 	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -435,26 +472,33 @@ export const GET: RequestHandler = async ({ url }) => {
 				: getFilename(decodedUrl, contentType);
 
 			// ── JMComic unscramble ──
-			let body: BodyInit = imageResponse.body as any;
+let body: BodyInit = imageResponse.body as any;
 
-			if (isJmcomic) {
-				const parsed = parseJmImageUrl(decodedUrl);
-				if (parsed) {
-					const buf = Buffer.from(await imageResponse.arrayBuffer());
-					const fixed = await unscrambleJmImage(buf, parsed.photoId, parsed.filename);
-					body = new Uint8Array(fixed);
-				}
-			}
+if (isJmcomic) {
+	const parsed = parseJmImageUrl(decodedUrl);
+	if (parsed) {
+		const buf = Buffer.from(await imageResponse.arrayBuffer());
+		const fixed = await unscrambleJmImage(buf, parsed.photoId, parsed.filename);
+		body = new Uint8Array(fixed);
+	}
+}
 
-			if (/cdn-scissors\.gigaviewer\.com|comic-gardo\.com|gigaviewer\.com/i.test(decodedUrl)) {
-	                referer = 'https://comic-gardo.com/';
-                } else if (/comic-days\.com|shonenjumpplus\.com|tonarinoyj\.jp|sunday-webry\.com/i.test(decodedUrl)) {
-	               referer = decodedUrl.includes('comic-days') ? 'https://comic-days.com/' :
-	               decodedUrl.includes('shonenjumpplus') ? 'https://shonenjumpplus.com/' :
-	              'https://comic-gardo.com/';
-                }
+// ── GigaViewer unscramble ──
+const isGiga =
+	sourceId === 'comicgardo' ||
+	/cdn-scissors\.gigaviewer\.com|comic-gardo\.com|gigaviewer\.com/i.test(decodedUrl);
 
-			return new Response(body, {
+if (isGiga) {
+	try {
+		const buf = await imageResponse.arrayBuffer();
+		const fixed = await descrambleGigaImage(buf);
+		body = fixed as any;
+	} catch (e) {
+		console.warn('[proxy] giga descramble failed', e);
+	}
+}
+
+return new Response(body, {
 				headers: {
 					'Content-Type': contentType,
 					'Content-Disposition': `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
