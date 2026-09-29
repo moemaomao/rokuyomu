@@ -31,6 +31,7 @@
 	// Hybrid sync
 	import { syncBookmarksOnLogin } from '$lib/stores/bookmark.svelte';
 	import { syncHistoryOnLogin } from '$lib/stores/history';
+	import { syncNotificationsOnLogin } from '$lib/stores/notification.svelte';
 
 	// Icons
 	import {
@@ -207,22 +208,27 @@
 	const SYNC_DONE_KEY = 'rokuyomu_cloud_synced';
 
 	async function runCloudSyncOnce() {
-		if (!browser) return;
-		const user = getUser();
-		if (!user) return;
+	if (!browser) return;
+	const user = getUser();
+	if (!user) return;
 
-		const doneKey = `${SYNC_DONE_KEY}:${user.uid}`;
-		if (sessionStorage.getItem(doneKey) === '1') return;
+	const doneKey = `${SYNC_DONE_KEY}:${user.uid}`;
+	if (sessionStorage.getItem(doneKey) === '1') return;
 
-		sessionStorage.setItem(doneKey, '1');
-		try {
-			await Promise.all([syncBookmarksOnLogin(), syncHistoryOnLogin()]);
-			loadBookmarks();
-		} catch (e) {
-			sessionStorage.removeItem(doneKey);
-			console.warn('[cloud sync]', e);
-		}
+	sessionStorage.setItem(doneKey, '1');
+	try {
+		await Promise.all([
+			syncBookmarksOnLogin(),
+			syncHistoryOnLogin(),
+			syncNotificationsOnLogin()
+		]);
+		loadBookmarks();
+		loadNotifBadge();
+	} catch (e) {
+		sessionStorage.removeItem(doneKey);
+		console.warn('[cloud sync]', e);
 	}
+}
 
 	async function handleAuthSuccess() {
 		isAuthOpen = false;

@@ -1,9 +1,18 @@
 /**
  * Notification store — track manga for new chapter alerts.
- * Data disimpan di IndexedDB (store "notifications") + localStorage fallback.
- * Mirip pola bookmark.svelte.ts
+ * Data: IndexedDB + Firebase sync.
  */
 import { browser } from '$app/environment';
+import {
+	collection,
+	doc,
+	setDoc,
+	deleteDoc,
+	getDocs,
+	writeBatch
+} from 'firebase/firestore';
+import { db } from '$lib/firebase';
+import { getUser } from '$lib/stores/auth.svelte';
 import {
 	idbGetNotifications,
 	idbSetAllNotifications,
@@ -15,7 +24,49 @@ import {
 export type { NotificationEntry };
 
 const MAX = 80;
-const CHECK_COOLDOWN_MS = 5 * 60 * 1000; // minimal 5 menit antar cek per manga
+const CHECK_COOLDOWN_MS = 5 * 60 * 1000;
+const TOMBSTONE_KEY = 'rokuyomu_notification_tombstones';
+const FIRESTORE_BATCH_LIMIT = 450;
+
+function notifKey(mangaId: string, sourceId: string): string {
+	return `${sourceId}::${mangaId}`;
+}
+
+function notifDocId(mangaId: string, sourceId: string): string {
+	return encodeURIComponent(notifKey(mangaId, sourceId)).replace(/%/g, '_');
+}
+
+function readTombstones(): Set<string> {
+	if (!browser) return new Set();
+	try {
+		const raw = localStorage.getItem(TOMBSTONE_KEY);
+		if (!raw) return new Set();
+		const arr = JSON.parse(raw) as string[];
+		return new Set((arr || []).filter(Boolean));
+	} catch {
+		return new Set();
+	}
+}
+
+function writeTombstones(set: Set<string>) {
+	if (!browser) return;
+	localStorage.setItem(TOMBSTONE_KEY, JSON.stringify([...set]));
+}
+
+function addTombstone(mangaId: string, sourceId: string) {
+	const k = notifKey(mangaId, sourceId);
+	if (!k || k === '::') return;
+	const set = readTombstones();
+	set.add(k);
+	writeTombstones(set);
+}
+
+function removeTombstone(mangaId: string, sourceId: string) {
+	const k = notifKey(mangaId, sourceId);
+	const set = readTombstones();
+	set.delete(k);
+	writeTombstones(set);
+}
 
 let notifications = $state<NotificationEntry[]>([]);
 let ready = $state(false);
@@ -58,10 +109,6 @@ function lightEntry(entry: NotificationEntry): NotificationEntry {
 		lastChecked: entry.lastChecked || 0,
 		timestamp: entry.timestamp || Date.now()
 	};
-}
-
-function notifKey(mangaId: string, sourceId: string): string {
-	return `${sourceId}::${mangaId}`;
 }
 
 if (browser) {
@@ -149,6 +196,8 @@ export async function addNotification(
 		timestamp: Date.now()
 	});
 
+	removeTombstone(full.mangaId, full.sourceId);
+
 	const list = (await idbGetNotifications()).filter(
 		(n) => !(n.mangaId === entry.mangaId && n.sourceId === entry.sourceId)
 	);
@@ -157,13 +206,50 @@ export async function addNotification(
 	await idbSetAllNotifications(trimmed);
 	notifications = trimmed;
 	window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+	const user = getUser();
+	if (user && db) {
+		try {
+			await setDoc(
+				doc(db, 'users', user.uid, 'notifications', notifDocId(full.mangaId, full.sourceId)),
+				full
+			);
+		} catch (e) {
+			console.error('Failed to sync notification to cloud', e);
+		}
+	}
 }
 
 export async function removeNotification(mangaId: string, sourceId?: string) {
 	if (!browser) return;
+
+	const list = await idbGetNotifications();
+	const toRemove = sourceId
+		? list.filter((n) => n.mangaId === mangaId && n.sourceId === sourceId)
+		: list.filter((n) => n.mangaId === mangaId);
+
+	for (const n of toRemove) {
+		addTombstone(n.mangaId, n.sourceId);
+	}
+
 	await idbDeleteNotification(mangaId, sourceId);
 	notifications = await idbGetNotifications();
 	window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+	const user = getUser();
+	if (user && db && toRemove.length) {
+		try {
+			const batch = writeBatch(db);
+			for (const n of toRemove) {
+				batch.delete(
+					doc(db, 'users', user.uid, 'notifications', notifDocId(n.mangaId, n.sourceId))
+				);
+			}
+			await batch.commit();
+		} catch (e) {
+			console.error('Failed to remove notification from cloud', e);
+		}
+	}
 }
 
 export async function toggleNotification(
@@ -208,6 +294,18 @@ export async function markAsRead(mangaId: string, sourceId: string) {
 	await idbSetAllNotifications(list);
 	notifications = list;
 	window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+	const user = getUser();
+	if (user && db) {
+		try {
+			await setDoc(
+				doc(db, 'users', user.uid, 'notifications', notifDocId(mangaId, sourceId)),
+				list[idx]
+			);
+		} catch (e) {
+			console.error('Failed to sync markAsRead to cloud', e);
+		}
+	}
 }
 
 export async function markAllAsRead() {
@@ -228,19 +326,146 @@ export async function markAllAsRead() {
 	await idbSetAllNotifications(cleaned);
 	notifications = cleaned;
 	window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+	const user = getUser();
+	if (user && db && cleaned.length) {
+		try {
+			for (let i = 0; i < cleaned.length; i += FIRESTORE_BATCH_LIMIT) {
+				const chunk = cleaned.slice(i, i + FIRESTORE_BATCH_LIMIT);
+				const batch = writeBatch(db);
+				for (const n of chunk) {
+					batch.set(
+						doc(db, 'users', user.uid, 'notifications', notifDocId(n.mangaId, n.sourceId)),
+						n
+					);
+				}
+				await batch.commit();
+			}
+		} catch (e) {
+			console.error('Failed to sync markAllAsRead to cloud', e);
+		}
+	}
 }
 
 export async function clearNotifications() {
 	if (!browser) return;
+
+	const list = await idbGetNotifications();
+	for (const n of list) addTombstone(n.mangaId, n.sourceId);
+
 	await idbClearNotifications();
 	notifications = [];
 	window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+	const user = getUser();
+	if (user && db && list.length) {
+		try {
+			for (let i = 0; i < list.length; i += FIRESTORE_BATCH_LIMIT) {
+				const chunk = list.slice(i, i + FIRESTORE_BATCH_LIMIT);
+				const batch = writeBatch(db);
+				for (const n of chunk) {
+					batch.delete(
+						doc(db, 'users', user.uid, 'notifications', notifDocId(n.mangaId, n.sourceId))
+					);
+				}
+				await batch.commit();
+			}
+			writeTombstones(new Set());
+		} catch (e) {
+			console.error('Failed to clear cloud notifications', e);
+		}
+	} else if (!user) {
+		writeTombstones(new Set());
+	}
 }
 
-/**
- * Cek chapter terbaru untuk semua (atau satu) notifikasi aktif.
- * Memakai endpoint /api/chapters yang sudah ada di frontend.
- */
+export async function syncNotificationsOnLogin() {
+	if (!browser || !db) return;
+
+	const user = getUser();
+	if (!user) return;
+
+	const firestore = db;
+
+	try {
+		const local = await idbGetNotifications();
+		const snap = await getDocs(collection(firestore, 'users', user.uid, 'notifications'));
+		const cloud: NotificationEntry[] = [];
+		snap.forEach((d) => cloud.push(d.data() as NotificationEntry));
+
+		const tombstones = readTombstones();
+		const map = new Map<string, NotificationEntry>();
+
+		for (const n of [...cloud, ...local]) {
+			const light = lightEntry(n);
+			const key = notifKey(light.mangaId, light.sourceId);
+			if (!key || key === '::') continue;
+			if (tombstones.has(key)) continue;
+
+			const existing = map.get(key);
+			if (!existing) {
+				map.set(key, light);
+				continue;
+			}
+
+			const newer = light.timestamp >= existing.timestamp ? light : existing;
+			const older = light.timestamp >= existing.timestamp ? existing : light;
+			map.set(key, {
+				...newer,
+				hasNew: newer.hasNew || older.hasNew,
+				newChapterId: newer.hasNew
+					? newer.newChapterId
+					: older.hasNew
+						? older.newChapterId
+						: newer.newChapterId,
+				newChapterTitle: newer.hasNew
+					? newer.newChapterTitle
+					: older.hasNew
+						? older.newChapterTitle
+						: newer.newChapterTitle,
+				newChapterNumber: newer.hasNew
+					? newer.newChapterNumber
+					: older.hasNew
+						? older.newChapterNumber
+						: newer.newChapterNumber,
+				lastChecked: Math.max(newer.lastChecked || 0, older.lastChecked || 0)
+			});
+		}
+
+		const merged = Array.from(map.values())
+			.sort((a, b) => b.timestamp - a.timestamp)
+			.slice(0, MAX);
+
+		await idbSetAllNotifications(merged);
+		notifications = merged;
+		window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+		const tombstoneList = [...tombstones];
+		const batch = writeBatch(firestore);
+
+		merged.forEach((n) => {
+			batch.set(
+				doc(firestore, 'users', user.uid, 'notifications', notifDocId(n.mangaId, n.sourceId)),
+				n
+			);
+		});
+		for (const key of tombstoneList) {
+			const [sourceId, ...rest] = key.split('::');
+			const mangaId = rest.join('::');
+			if (sourceId && mangaId) {
+				batch.delete(
+					doc(firestore, 'users', user.uid, 'notifications', notifDocId(mangaId, sourceId))
+				);
+			}
+		}
+		await batch.commit();
+
+		writeTombstones(new Set());
+	} catch (e) {
+		console.error('Failed to sync notifications on login', e);
+	}
+}
+
 export async function checkForNewChapters(options?: {
 	force?: boolean;
 	onlyMangaId?: string;
@@ -311,7 +536,6 @@ export async function checkForNewChapters(options?: {
 				} else if (!knownId && knownNum > 0 && latestNum > knownNum) {
 					isNew = true;
 				} else if (!knownId && !knownNum && latestId) {
-					// pertama kali: set baseline, jangan tandai new
 					isNew = false;
 				}
 
@@ -329,7 +553,6 @@ export async function checkForNewChapters(options?: {
 						})
 					);
 				} else {
-					// update baseline jika belum punya lastChapter
 					updates.push(
 						lightEntry({
 							...n,
@@ -350,7 +573,6 @@ export async function checkForNewChapters(options?: {
 			}
 		}
 
-		// merge back ke full list
 		const full = await idbGetNotifications();
 		const map = new Map(full.map((x) => [notifKey(x.mangaId, x.sourceId), x]));
 		for (const u of updates) {
@@ -362,6 +584,26 @@ export async function checkForNewChapters(options?: {
 		await idbSetAllNotifications(merged);
 		notifications = merged;
 		window.dispatchEvent(new CustomEvent('notifications-changed'));
+
+		// Push update ke cloud (batch) jika login
+		const user = getUser();
+		if (user && db && updates.length) {
+			try {
+				for (let i = 0; i < updates.length; i += FIRESTORE_BATCH_LIMIT) {
+					const chunk = updates.slice(i, i + FIRESTORE_BATCH_LIMIT);
+					const batch = writeBatch(db);
+					for (const n of chunk) {
+						batch.set(
+							doc(db, 'users', user.uid, 'notifications', notifDocId(n.mangaId, n.sourceId)),
+							lightEntry(n)
+						);
+					}
+					await batch.commit();
+				}
+			} catch (e) {
+				console.error('Failed to sync notification checks to cloud', e);
+			}
+		}
 	} finally {
 		checking = false;
 	}
