@@ -125,6 +125,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	azurechronicles: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-500' },
 	novelshaven: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	nulltranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	novelspyramid: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

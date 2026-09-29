@@ -19,6 +19,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'azurechronicles',
 	'novelshaven',
 	'nulltranslation',
+	'novelspyramid',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

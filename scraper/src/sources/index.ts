@@ -122,9 +122,11 @@ import { AzureChroniclesSource } from './impl/AzureChronicles';
 import { NovelsHavenSource } from './impl/NovelsHaven';
 import ComicGardoSource from './impl/ComicGardo';
 import { NullTranslationSource } from './impl/NullTranslation';
+import { NovelsPyramidSource } from './impl/NovelsPyramid';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    novelspyramid: new NovelsPyramidSource(),
     nulltranslation: new NullTranslationSource(),
     comicgardo: new ComicGardoSource(),
     novelshaven: new NovelsHavenSource(),
