@@ -267,10 +267,28 @@ function extractEncryptedBase64(html: string): string | null {
 }
 
 function b64ToBytes(b64: string): Uint8Array {
-	if (typeof Buffer !== 'undefined') {
-		return new Uint8Array(Buffer.from(b64, 'base64'));
-	}
-	const bin = atob(b64);
+	// Prefer atob (Workers / browsers); fallback for Node without @types/node
+	const atobFn =
+		typeof atob === 'function'
+			? atob
+			: (s: string) => {
+					const chars =
+						'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+					const clean = s.replace(/[^A-Za-z0-9+/]/g, '');
+					let str = '';
+					for (let i = 0; i < clean.length; i += 4) {
+						const a = chars.indexOf(clean[i]);
+						const b = chars.indexOf(clean[i + 1]);
+						const c = chars.indexOf(clean[i + 2]);
+						const d = chars.indexOf(clean[i + 3]);
+						const n = (a << 18) | (b << 12) | ((c & 63) << 6) | (d & 63);
+						str += String.fromCharCode((n >> 16) & 255);
+						if (c !== -1 && clean[i + 2] !== '=') str += String.fromCharCode((n >> 8) & 255);
+						if (d !== -1 && clean[i + 3] !== '=') str += String.fromCharCode(n & 255);
+					}
+					return str;
+				};
+	const bin = atobFn(b64);
 	const out = new Uint8Array(bin.length);
 	for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
 	return out;
@@ -283,13 +301,19 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 async function getSubtle(): Promise<SubtleCrypto> {
-	const c =
-		(globalThis as any).crypto?.subtle ||
-		(await import('node:crypto')).webcrypto?.subtle;
-	if (!c) throw new Error('WebCrypto subtle not available');
-	return c as SubtleCrypto;
+	const g = globalThis as any;
+	if (g.crypto?.subtle) return g.crypto.subtle as SubtleCrypto;
+	try {
+		// Node 19+ / some runtimes
+		const mod = await (Function('return import("node:crypto")')() as Promise<any>);
+		if (mod?.webcrypto?.subtle) return mod.webcrypto.subtle as SubtleCrypto;
+	} catch {
+		/* ignore */
+	}
+	throw new Error('WebCrypto subtle not available');
 }
 
+/** AES-256-GCM: iv = first 12 bytes, rest = ciphertext||tag */
 async function decryptChapterBody(encryptedB64: string, keyB64: string): Promise<string> {
 	const subtle = await getSubtle();
 	const keyBytes = b64ToBytes(keyB64);
@@ -358,28 +382,99 @@ export class NullTranslationSource extends BaseSource {
 		const pageNum = Math.max(1, page);
 		const pageSize = 24;
 
-		const html = await this.fetchHtml('/releases');
-		const list = this.parseReleasesList(html);
+		const byId = new Map<string, Manga>();
 
+		// 1) Homepage RSC embeds a larger catalog of book objects
 		try {
 			const home = await this.fetchHtml('/');
-			const extra = this.parseReleasesList(home);
-			const seen = new Set(list.map((m) => m.id));
-			for (const m of extra) {
-				if (!seen.has(m.id)) {
-					seen.add(m.id);
-					list.push(m);
+			for (const m of this.parseRscBookCards(home)) {
+				byId.set(m.id, m);
+			}
+		} catch {
+			/* ignore */
+		}
+
+		// 2) /releases — best for latestChapter badges + extra titles
+		try {
+			const rel = await this.fetchHtml('/releases');
+			for (const m of this.parseReleasesList(rel)) {
+				const prev = byId.get(m.id);
+				if (!prev) {
+					byId.set(m.id, m);
+				} else {
+					// merge badge / prefer non-empty latestChapter
+					byId.set(m.id, {
+						...prev,
+						latestChapter: m.latestChapter ?? prev.latestChapter,
+						cover: prev.cover || m.cover,
+						title: prev.title || m.title
+					});
 				}
 			}
 		} catch {
 			/* ignore */
 		}
 
+		const list = [...byId.values()];
+		// Prefer items with latestChapter first (more "fresh"), then title
+		list.sort((a, b) => {
+			const la = Number(a.latestChapter ?? 0) || 0;
+			const lb = Number(b.latestChapter ?? 0) || 0;
+			if (lb !== la) return lb - la;
+			return (a.title || '').localeCompare(b.title || '');
+		});
+
 		const startIdx = (pageNum - 1) * pageSize;
 		return list.slice(startIdx, startIdx + pageSize);
 	}
 
-	/** Parse /releases (or similar) HTML → Manga[] with latestChapter badges */
+	/**
+	 * Homepage (and similar) embeds book objects in RSC:
+	 *   "id":"…","title":"…","titleRaw":"…" … "numChapters":N
+	 */
+	private parseRscBookCards(html: string): Manga[] {
+		const unesc = unescapeRsc(html);
+		const out: Manga[] = [];
+		const seen = new Set<string>();
+
+		const re =
+			/"id":"([A-Za-z0-9_-]+)","title":"([^"]+)","titleRaw":"([^"]*)","author":"([^"]*)"/g;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(unesc)) !== null) {
+			const bookId = m[1];
+			const id = `/book/${bookId}`;
+			if (seen.has(id)) continue;
+			seen.add(id);
+
+			const title = cleanText(m[2]);
+			if (!title || title.length < 2) continue;
+
+			// numChapters in the following ~2KB
+			const window = unesc.slice(m.index, m.index + 2500);
+			const nc = window.match(/"numChapters":(\d+)/);
+			const latestChapter = nc ? parseInt(nc[1], 10) : undefined;
+
+			// status if present
+			const st = window.match(/"translationStatus":"([^"]+)"/);
+			const status = normalizeStatus(st?.[1]);
+
+			out.push({
+				id,
+				title,
+				cover: guessCoverFromTitle(title),
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				status,
+				...(latestChapter != null && latestChapter > 0 ? { latestChapter } : {})
+			});
+		}
+
+		// Also pick up CDN covers mapped by filename ≈ title
+		return out;
+	}
+
+	/** Parse /releases HTML → Manga[] with latestChapter from Ch. N badges */
 	private parseReleasesList(html: string): Manga[] {
 		const $ = cheerio.load(html);
 		const out: Manga[] = [];
@@ -389,14 +484,6 @@ export class NullTranslationSource extends BaseSource {
 		const re = /\/book\/([A-Za-z0-9_-]+)(?!\/chapter)[\s\S]{0,3000}?Ch\.\s*(\d+)/gi;
 		let m: RegExpExecArray | null;
 		while ((m = re.exec(html)) !== null) {
-			const bid = m[1];
-			const n = parseInt(m[2], 10);
-			if (!Number.isFinite(n)) continue;
-			const prev = latestByBook.get(bid);
-			if (prev == null || n > prev) latestByBook.set(bid, n);
-		}
-		const reCh = /\/book\/([A-Za-z0-9_-]+)\/chapter\/[A-Za-z0-9_-]+[\s\S]{0,400}?Ch\.\s*(\d+)/gi;
-		while ((m = reCh.exec(html)) !== null) {
 			const bid = m[1];
 			const n = parseInt(m[2], 10);
 			if (!Number.isFinite(n)) continue;
@@ -421,7 +508,9 @@ export class NullTranslationSource extends BaseSource {
 			if (imgAlt && (title.length < 2 || /^ch\.?\s*\d+/i.test(title))) title = imgAlt;
 			if (!title || title.length < 2 || /^ch\.?\s*\d+/i.test(title)) return;
 			if (
-				/^(all|releases|genres|tags|authors|home|discover|login|by book|by date)$/i.test(title)
+				/^(all|releases|genres|tags|authors|home|discover|login|by book|by date)$/i.test(
+					title
+				)
 			) {
 				return;
 			}
@@ -447,15 +536,24 @@ export class NullTranslationSource extends BaseSource {
 	async searchManga(query: string, _opts?: { page?: number }): Promise<Manga[]> {
 		const q = query.trim().toLowerCase();
 		if (!q) return [];
-		const pool = await this.getLatestManga(1).catch(() => [] as Manga[]);
-		// Also pull page-1 full releases without slice for better search
+		const byId = new Map<string, Manga>();
 		try {
-			const html = await this.fetchHtml('/releases');
-			const all = this.parseReleasesList(html);
-			return all.filter((m) => m.title.toLowerCase().includes(q)).slice(0, 24);
+			const home = await this.fetchHtml('/');
+			for (const m of this.parseRscBookCards(home)) byId.set(m.id, m);
 		} catch {
-			return pool.filter((m) => m.title.toLowerCase().includes(q)).slice(0, 24);
+			/* ignore */
 		}
+		try {
+			const rel = await this.fetchHtml('/releases');
+			for (const m of this.parseReleasesList(rel)) {
+				if (!byId.has(m.id)) byId.set(m.id, m);
+			}
+		} catch {
+			/* ignore */
+		}
+		return [...byId.values()]
+			.filter((m) => m.title.toLowerCase().includes(q))
+			.slice(0, 24);
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
