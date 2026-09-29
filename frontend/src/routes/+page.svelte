@@ -117,13 +117,20 @@
 		if (typeof window !== 'undefined') checkR18Gate();
 	});
 
-	function proxyImage(url: string, sourceId?: string): string {
-		const src = sourceId || currentSource;
-		if (!url || !src) return '';
-		let u = String(url).trim();
-		if (u.startsWith('//')) u = 'https:' + u;
-		return `/api/proxy?url=${encodeURIComponent(u)}&source=${src}`;
-	}
+	function proxyImage(url: string, sourceId?: string, w = 200): string {
+	const src = sourceId || currentSource;
+	if (!url || !src) return '';
+	let u = String(url).trim();
+	if (u.startsWith('//')) u = 'https:' + u;
+	if (/wsrv\.nl|images\.weserv\.nl/i.test(u)) return u;
+
+	const params = new URLSearchParams({
+		url: u,
+		source: src,
+		w: String(w)
+	});
+	return `/api/proxy?${params.toString()}`;
+}
 
 	function onCoverError(e: Event) {
 	const img = e.currentTarget as HTMLImageElement;
