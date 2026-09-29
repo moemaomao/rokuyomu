@@ -121,9 +121,11 @@ import { StorySeedlingSource } from './impl/StorySeedling';
 import { AzureChroniclesSource } from './impl/AzureChronicles';
 import { NovelsHavenSource } from './impl/NovelsHaven';
 import ComicGardoSource from './impl/ComicGardo';
+import { NullTranslationSource } from './impl/NullTranslation';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    nulltranslation: new NullTranslationSource(),
     comicgardo: new ComicGardoSource(),
     novelshaven: new NovelsHavenSource(),
     azurechronicles: new AzureChroniclesSource(),

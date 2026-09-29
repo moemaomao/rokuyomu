@@ -125,6 +125,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'azurechronicles', name: 'Azure Chronicles' },
 	{ id: 'novelshaven', name: 'Novels Haven' },
 	{ id: 'comicgardo', name: 'Comic Gardo' },
+	{ id: 'nulltranslation', name: 'Null Translation' },
 ];
 
 export function getSourceList(): SourceMeta[] {

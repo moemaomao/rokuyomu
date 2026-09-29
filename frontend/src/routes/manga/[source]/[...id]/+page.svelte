@@ -273,7 +273,7 @@
 	const original = img.dataset.original;
 	if (!original || img.dataset.fallback === '1') {
 		img.src = coverNotFound;
-		img.onerror = null; // cegah infinite loop
+		img.onerror = null;
 		return;
 	}
 	img.dataset.fallback = '1';

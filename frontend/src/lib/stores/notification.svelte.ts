@@ -585,7 +585,6 @@ export async function checkForNewChapters(options?: {
 		notifications = merged;
 		window.dispatchEvent(new CustomEvent('notifications-changed'));
 
-		// Push update ke cloud (batch) jika login
 		const user = getUser();
 		if (user && db && updates.length) {
 			try {
