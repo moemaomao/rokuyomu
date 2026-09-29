@@ -83,18 +83,19 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, '&quot;');
 }
 
+/** Remove anti-scrape decoy blocks; keep real <p> text as HTML paragraphs */
 function sanitizeChapterHtml(html: string): string {
 	const $ = cheerio.load(`<div id="root">${html || ''}</div>`);
 	$('#root style, #root script').remove();
 	$('#root [aria-hidden="true"]').remove();
-	
+	// also drop zero-size / clip decoys by class noise if any remain empty
 	const parts: string[] = [];
 	$('#root p').each((_: number, el: any) => {
 		const t = cleanText($(el).text());
 		if (t) parts.push(`<p>${escapeHtml(t)}</p>`);
 	});
 	if (parts.length) return parts.join('\n');
-
+	// fallback: whole text
 	const raw = cleanText($('#root').text());
 	if (!raw) return '';
 	return raw
@@ -142,17 +143,134 @@ export class FenrirRealmSource extends BaseSource {
 		Accept: 'application/json, text/plain, */*',
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: `${BASE}/`,
-		Origin: BASE
+		Origin: BASE,
+		'Sec-Fetch-Dest': 'empty',
+		'Sec-Fetch-Mode': 'cors',
+		'Sec-Fetch-Site': 'same-origin',
+		'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+		'sec-ch-ua-mobile': '?0',
+		'sec-ch-ua-platform': '"Windows"'
 	};
 
+	private htmlHeaders(): Record<string, string> {
+		return {
+			'User-Agent': this.headers['User-Agent'],
+			Accept:
+				'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+			'Accept-Language': 'en-US,en;q=0.9',
+			Referer: `${BASE}/`,
+			'Sec-Fetch-Dest': 'document',
+			'Sec-Fetch-Mode': 'navigate',
+			'Sec-Fetch-Site': 'none',
+			'Sec-Fetch-User': '?1',
+			'Upgrade-Insecure-Requests': '1',
+			'sec-ch-ua': this.headers['sec-ch-ua'],
+			'sec-ch-ua-mobile': '?0',
+			'sec-ch-ua-platform': '"Windows"'
+		};
+	}
+
 	private async apiGet<T = unknown>(path: string): Promise<T> {
-		const url = path.startsWith('http') ? path : `${API}${path.startsWith('/') ? path : `/${path}`}`;
-		const res = await fetch(url, { headers: this.headers });
-		if (!res.ok) {
-			const body = await res.text().catch(() => '');
-			throw new Error(`FenrirRealm API ${res.status} ${path} ${body.slice(0, 120)}`);
+		const url = path.startsWith('http')
+			? path
+			: `${API}${path.startsWith('/') ? path : `/${path}`}`;
+		const res = await fetch(url, {
+			headers: {
+				...this.headers,
+				Accept: 'application/json, text/plain, */*',
+				Referer: `${BASE}/`
+			}
+		});
+		const text = await res.text();
+		if (!res.ok || text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
+			throw new Error(
+				`FenrirRealm API ${res.status} ${path} ${text.slice(0, 100).replace(/\s+/g, ' ')}`
+			);
 		}
-		return (await res.json()) as T;
+		try {
+			return JSON.parse(text) as T;
+		} catch {
+			throw new Error(`FenrirRealm API invalid JSON ${path}`);
+		}
+	}
+
+	/** Homepage SSR — works more often than JSON API behind Cloudflare. */
+	private async fetchHomeHtml(): Promise<string> {
+		const res = await fetch(`${BASE}/`, { headers: this.htmlHeaders() });
+		const html = await res.text();
+		if (!res.ok || /just a moment|cf-challenge|challenge-platform/i.test(html) && html.length < 50000) {
+			// soft: still try parse if series links present
+			if (!/\/series\/[a-z0-9-]+/i.test(html)) {
+				throw new Error(`FenrirRealm home HTML blocked (${res.status})`);
+			}
+		}
+		return html;
+	}
+
+	/**
+	 * Parse homepage cards. New Releases section appears after the heading;
+	 * we collect unique /series/{slug} with nearby title + "N ch" badge.
+	 */
+	private parseHomeHtmlList(html: string): Manga[] {
+		const $ = cheerio.load(html);
+		const out: Manga[] = [];
+		const seen = new Set<string>();
+
+		// Build chapter count map from "123 ch" near each series link
+		const latestBySlug = new Map<string, number>();
+		const re = /\/series\/([a-z0-9-]+)[\s\S]{0,1200}?(\d+)\s*ch\b/gi;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(html)) !== null) {
+			const slug = m[1];
+			if (slug === 'ranking') continue;
+			const n = parseInt(m[2], 10);
+			if (!Number.isFinite(n)) continue;
+			const prev = latestBySlug.get(slug);
+			if (prev == null || n > prev) latestBySlug.set(slug, n);
+		}
+
+		$('a[href*="/series/"]').each((_: number, el: any) => {
+			const href = $(el).attr('href') || '';
+			const mm = href.match(/\/series\/([a-z0-9-]+)\/?$/i);
+			if (!mm) return;
+			const slug = mm[1];
+			if (slug === 'ranking') return;
+			const id = `/series/${slug}`;
+			if (seen.has(id)) return;
+
+			let title =
+				cleanText($(el).attr('title') || '') ||
+				cleanText($(el).find('h1,h2,h3,h4').first().text()) ||
+				cleanText($(el).text());
+			if (!title || title.length < 3) return;
+			if (/^(read now|explore|add to|series|home)$/i.test(title)) return;
+			// skip long blurbs mistaken as title
+			if (title.length > 120) {
+				title = title.slice(0, 120);
+			}
+
+			seen.add(id);
+			let cover =
+				$(el).find('img').attr('src') ||
+				$(el).find('img').attr('data-src') ||
+				$(el).closest('div').find('img').first().attr('src') ||
+				'';
+			cover = absUrl(cover);
+			const latestChapter = latestBySlug.get(slug);
+
+			out.push({
+				id,
+				title,
+				cover,
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				status: 'Ongoing',
+				...(latestChapter != null && latestChapter > 0 ? { latestChapter } : {})
+			});
+		});
+
+		return out;
 	}
 
 	private mapCard(s: ApiSeriesCard, latestChapter?: number): Manga | null {
@@ -176,6 +294,7 @@ export class FenrirRealmSource extends BaseSource {
 		};
 	}
 
+	/** Resolve Ch. badge from chapters list (API cards omit count). */
 	private async attachLatestChapter(m: Manga): Promise<Manga> {
 		const existing = Number(m.latestChapter ?? 0);
 		if (existing > 0) return m;
@@ -217,6 +336,7 @@ export class FenrirRealmSource extends BaseSource {
 		const pageNum = Math.max(1, page);
 
 		if (pageNum === 1) {
+			// 1) JSON home API (new_releases)
 			try {
 				const home = await this.apiGet<{
 					new_releases?: ApiSeriesCard[];
@@ -236,25 +356,51 @@ export class FenrirRealmSource extends BaseSource {
 					return this.attachLatestChapters(ordered);
 				}
 			} catch (e) {
-				console.warn('[FenrirRealm] home failed', e);
+				console.warn('[FenrirRealm] home API failed, trying HTML', e);
+			}
+
+			// 2) Cloudflare-friendly: SSR homepage HTML
+			try {
+				const html = await this.fetchHomeHtml();
+				const fromHtml = this.parseHomeHtmlList(html);
+				if (fromHtml.length) {
+					// badges may already be present from "N ch"; fill gaps
+					return this.attachLatestChapters(fromHtml);
+				}
+			} catch (e) {
+				console.warn('[FenrirRealm] home HTML failed', e);
 			}
 		}
 
-		const data = await this.apiGet<{ data?: ApiSeriesCard[]; meta?: { current_page?: number } }>(
-			`/series?sort=latest&page=${pageNum}`
-		);
-		const out: Manga[] = [];
-		for (const s of data.data || []) {
-			const m = this.mapCard(s);
-			if (m) out.push(m);
+		// Page 2+ / final fallback: series catalog API
+		try {
+			const data = await this.apiGet<{ data?: ApiSeriesCard[] }>(
+				`/series?sort=latest&page=${pageNum}`
+			);
+			const out: Manga[] = [];
+			for (const s of data.data || []) {
+				const m = this.mapCard(s);
+				if (m) out.push(m);
+			}
+			if (out.length) return this.attachLatestChapters(out);
+		} catch (e) {
+			console.warn('[FenrirRealm] series API failed', e);
 		}
-		return this.attachLatestChapters(out);
+
+		// Last resort page 1 HTML again
+		if (pageNum === 1) {
+			const html = await this.fetchHomeHtml();
+			return this.attachLatestChapters(this.parseHomeHtmlList(html));
+		}
+		return [];
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
 		const q = query.trim();
 		if (!q) return [];
 		const page = Math.max(1, opts?.page ?? 1);
+		// Public search path used by site: /search/{query}
+		// API: try series list with search param variants
 		const attempts = [
 			`/series?sort=latest&page=${page}&search=${encodeURIComponent(q)}`,
 			`/series?sort=latest&page=${page}&q=${encodeURIComponent(q)}`,
@@ -273,7 +419,7 @@ export class FenrirRealmSource extends BaseSource {
 				/* next */
 			}
 		}
-	
+		// Fallback: filter page-1 new releases / latest
 		const pool = await this.getLatestManga(1).catch(() => [] as Manga[]);
 		const ql = q.toLowerCase();
 		return pool.filter((m) => m.title.toLowerCase().includes(ql)).slice(0, 24);
@@ -285,38 +431,112 @@ export class FenrirRealmSource extends BaseSource {
 		const slug = this.extractSeriesSlug(mangaId);
 		if (!slug) throw new Error(`FenrirRealm: invalid manga id ${mangaId}`);
 
-		const series = await this.apiGet<{
-			id?: number;
-			title?: string;
-			slug?: string;
-			status?: string;
-			description?: string;
-			cover?: string;
-			cover_data_url?: string;
-			genres?: { name?: string; slug?: string }[];
-			tags?: { name?: string; slug?: string }[];
-			user?: { username?: string; name?: string };
-			content_rating?: string;
-		}>(`/series/${encodeURIComponent(slug)}`);
+		// Prefer JSON API; fall back to SSR page (seriesData embed) when CF blocks API
+		try {
+			const series = await this.apiGet<{
+				title?: string;
+				status?: string;
+				description?: string;
+				cover?: string;
+				cover_data_url?: string;
+				genres?: { name?: string }[];
+				tags?: { name?: string }[];
+				user?: { username?: string; name?: string };
+			}>(`/series/${encodeURIComponent(slug)}`);
 
-		const title = cleanText(series.title || slug);
-		const cover = absUrl(series.cover) || series.cover_data_url || '';
-		const description = stripHtmlToText(series.description || '');
+			const title = cleanText(series.title || slug);
+			const cover = absUrl(series.cover) || series.cover_data_url || '';
+			const description = stripHtmlToText(series.description || '');
+			const authors: string[] = [];
+			const authorName = series.user?.name || series.user?.username;
+			if (authorName) authors.push(cleanText(authorName));
+			const genres: string[] = [];
+			for (const g of series.genres || []) {
+				const n = cleanText(g.name || '');
+				if (n && !genres.includes(n)) genres.push(n);
+			}
+			for (const tg of series.tags || []) {
+				const n = cleanText(tg.name || '');
+				if (n && !genres.includes(n)) genres.push(n);
+			}
+			const chapters = await this.fetchChapterList(slug);
+			return {
+				id: `/series/${slug}`,
+				title,
+				cover,
+				sourceId: this.id,
+				description,
+				authors,
+				status: normalizeStatus(series.status),
+				genres: genres.slice(0, 30),
+				chapters,
+				type: 'novel',
+				lang: 'en',
+				...(chapters.length ? { latestChapter: chapters[0]?.number } : {})
+			};
+		} catch (apiErr) {
+			console.warn('[FenrirRealm] detail API failed, trying HTML', apiErr);
+		}
+
+		return this.getMangaDetailsFromHtml(slug);
+	}
+
+	private async getMangaDetailsFromHtml(slug: string): Promise<MangaDetails> {
+		const res = await fetch(`${BASE}/series/${encodeURIComponent(slug)}`, {
+			headers: this.htmlHeaders()
+		});
+		const html = await res.text();
+		if (!res.ok) throw new Error(`FenrirRealm: series page ${res.status}`);
+
+		// seriesData:{title:"...",slug:"...",...} from SvelteKit payload
+		const idx = html.indexOf('seriesData:');
+		let title = slug;
+		let status = 'Ongoing';
+		let description = '';
+		let cover = '';
 		const authors: string[] = [];
-		const authorName = series.user?.name || series.user?.username;
-		if (authorName) authors.push(cleanText(authorName));
-
 		const genres: string[] = [];
-		for (const g of series.genres || []) {
-			const n = cleanText(g.name || '');
-			if (n && !genres.includes(n)) genres.push(n);
-		}
-		for (const t of series.tags || []) {
-			const n = cleanText(t.name || '');
-			if (n && !genres.includes(n)) genres.push(n);
+
+		if (idx >= 0) {
+			const chunk = html.slice(idx, idx + 25000);
+			const t = chunk.match(/title:"((?:[^"\\]|\\.)*)"/);
+			if (t) title = cleanText(JSON.parse(`"${t[1]}"`));
+			const st = chunk.match(/status:"([^"]+)"/);
+			if (st) status = normalizeStatus(st[1]);
+			const cov = chunk.match(/cover:"([^"]+)"/);
+			if (cov) cover = absUrl(cov[1]);
+			const desc = chunk.match(/description:"((?:[^"\\]|\\.)*)"/);
+			if (desc) {
+				try {
+					description = stripHtmlToText(JSON.parse(`"${desc[1]}"`));
+				} catch {
+					description = stripHtmlToText(desc[1]);
+				}
+			}
+			const author = chunk.match(/user:\{username:"([^"]+)"(?:,name:"([^"]*)")?/);
+			if (author) authors.push(cleanText(author[2] || author[1]));
+			for (const gm of chunk.matchAll(/name:"([^"]+)",slug:"[^"]+"/g)) {
+				const n = cleanText(gm[1]);
+				if (n && n.length < 40 && !genres.includes(n)) genres.push(n);
+			}
+		} else {
+			const $ = cheerio.load(html);
+			title =
+				cleanText($('h1').first().text()) ||
+				cleanText($('meta[property="og:title"]').attr('content') || '').split(/[|\-–]/)[0].trim() ||
+				slug;
+			cover = absUrl($('meta[property="og:image"]').attr('content') || '');
+			description = cleanText($('meta[property="og:description"]').attr('content') || '');
 		}
 
-		const chapters = await this.fetchChapterList(slug);
+		let chapters: Chapter[] = [];
+		try {
+			chapters = await this.fetchChapterList(slug);
+		} catch {
+			chapters = [];
+		}
+
+		if (!title) throw new Error(`FenrirRealm: empty detail for ${slug}`);
 
 		return {
 			id: `/series/${slug}`,
@@ -325,7 +545,7 @@ export class FenrirRealmSource extends BaseSource {
 			sourceId: this.id,
 			description,
 			authors,
-			status: normalizeStatus(series.status),
+			status,
 			genres: genres.slice(0, 30),
 			chapters,
 			type: 'novel',
@@ -379,6 +599,7 @@ export class FenrirRealmSource extends BaseSource {
 		const path = chapterId.replace(/\/$/, '');
 		const m = path.match(/\/series\/([a-z0-9-]+)\/chapters\/([^/]+)/i);
 		if (m) return { seriesSlug: m[1], chapterSlug: m[2] };
+		// fallback: only chapter slug (legacy)
 		const m2 = path.match(/\/chapters\/([^/]+)/i);
 		if (m2) return { seriesSlug: '', chapterSlug: m2[1] };
 		return { seriesSlug: '', chapterSlug: path.replace(/^\//, '') };
@@ -405,6 +626,7 @@ export class FenrirRealmSource extends BaseSource {
 				`/series/${encodeURIComponent(seriesSlug)}/chapters/${encodeURIComponent(chapterSlug)}`
 			);
 		} else {
+			// numeric id path
 			data = await this.apiGet<ApiChapter>(`/chapters/${encodeURIComponent(chapterSlug)}`);
 		}
 
@@ -426,13 +648,16 @@ export class FenrirRealmSource extends BaseSource {
 			throw new Error(`FenrirRealm: empty chapter body (${chapterId})`);
 		}
 
+		// Prev / next from chapter list when we know the series
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		if (seriesSlug) {
 			try {
 				const list = await this.fetchChapterList(seriesSlug);
+				// list is desc by number
 				const idx = list.findIndex((c) => c.id.endsWith(`/chapters/${chapterSlug}`));
 				if (idx >= 0) {
+					// higher index = older = previous in reading order (asc)
 					nextChapterId = idx > 0 ? list[idx - 1]?.id ?? null : null;
 					prevChapterId = idx < list.length - 1 ? list[idx + 1]?.id ?? null : null;
 				}
