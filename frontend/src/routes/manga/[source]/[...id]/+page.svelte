@@ -250,13 +250,23 @@
 		return { normal, female, male };
 	});
 
-	function proxyImage(url: string, _w?: number, _h?: number): string {
-		if (!url) return '';
-		let u = String(url).trim();
-		if (!u || u === '-') return '';
-		if (u.startsWith('//')) u = 'https:' + u;
-		return `/api/proxy?url=${encodeURIComponent(u)}&source=${source}`;
-	}
+	function proxyImage(url: string, w?: number, h?: number): string {
+	if (!url) return '';
+	let u = String(url).trim();
+	if (!u || u === '-') return '';
+	if (u.startsWith('//')) u = 'https:' + u;
+
+	if (/wsrv\.nl|images\.weserv\.nl/i.test(u)) return u;
+
+	const params = new URLSearchParams({
+		url: u,
+		source: source || ''
+	});
+	if (w && w > 0) params.set('w', String(w));
+	if (h && h > 0) params.set('h', String(h));
+
+	return `/api/proxy?${params.toString()}`;
+}
 
 	function onCoverError(e: Event) {
 	const img = e.currentTarget as HTMLImageElement;
