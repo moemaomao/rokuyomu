@@ -12,6 +12,7 @@ import { getAllSourceIds } from '$lib/server/sources';
 import { remoteLatest } from '$lib/server/scraperClient';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
 import type { Manga } from '$lib/server/sources/types';
+import { listToBackupItems, saveSourceBackup } from '$lib/server/backupMeta';
 
 export const BROWSE_LIMIT = 24;
 
@@ -150,6 +151,12 @@ async function refreshOne(
 		await kv.put(cacheKey, JSON.stringify(list), {
 			expirationTtl: LIST_CACHE_TTL
 		});
+
+		if (page === 1 && list.length > 0) {
+			const items = listToBackupItems(list, sourceId);
+			await saveSourceBackup(sourceId, items, kv);
+		}
+
 		return { sourceId, page, ok: true, count: list.length, skipped: false };
 	} catch (e: unknown) {
 		const message = e instanceof Error ? e.message : String(e);

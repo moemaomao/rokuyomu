@@ -13,6 +13,7 @@
 	let manga = $derived((data as any).manga);
 	let source = $derived((data as any).source as string);
 	let canonicalUrl = $derived((data as any).canonicalUrl as string | undefined);
+	let fromBackup = $derived(Boolean((data as any).fromBackup));
 
 	const VIEW_KEY = 'mikoroku-chapter-view';
 	const SORT_KEY = 'mikoroku-chapter-sort';
@@ -481,6 +482,13 @@
 			{/if}
 
 			<div class="relative z-10 p-[18px_14px_14px] md:p-[28px_24px_20px] lg:p-[28px_24px_22px] xl:p-[32px_28px_24px]">
+			{#if fromBackup}
+					<div
+						class="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-200"
+					>
+						Source sedang down — menampilkan metadata backup. Daftar chapter tidak tersedia.
+					</div>
+				{/if}
 				<!-- Cover + Info -->
 				<div class="flex items-start gap-3.5 md:gap-7 lg:gap-10">
 					<div class="flex w-[100px] shrink-0 flex-col items-center gap-3 md:w-[200px] lg:w-[240px]">

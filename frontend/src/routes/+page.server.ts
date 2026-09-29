@@ -5,6 +5,11 @@ import { remoteLatest } from '$lib/server/scraperClient';
 import { parsePreferredFromCookie } from '$lib/stores/preferredSources';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
 import { getCached } from '$lib/server/cache';
+import {
+	fallbackBrowseList,
+	listToBackupItems,
+	saveSourceBackup
+} from '$lib/server/backupMeta';
 import type { PageServerLoad } from './$types';
 import type { Manga } from '$lib/server/sources/types';
 
@@ -84,15 +89,27 @@ async function fetchSourceList(
 					LOAD_TIMEOUT_MS
 				);
 				const list = Array.isArray(result) ? result : [];
-				return list.slice(0, limit).map((m, index) =>
+				const mapped = list.slice(0, limit).map((m, index) =>
 					ensureUpdatedAt({ ...m, sourceId: m.sourceId || id }, pageNum, index)
 				);
+
+				// Refresh backup (page 1, tanpa search)
+				if (pageNum === 1 && !q && kv && mapped.length > 0) {
+					saveSourceBackup(id, listToBackupItems(mapped, id), kv).catch(() => {});
+				}
+
+				return mapped;
 			},
 			LIST_CACHE_TTL,
 			kv
 		);
 	} catch (e) {
 		console.error(`[Browse] ${id} failed:`, e);
+		const fb = await fallbackBrowseList(id, kv, limit);
+		if (fb.length) {
+			console.warn(`[Browse] ${id} using backup (${fb.length} items)`);
+			return fb;
+		}
 		return [];
 	}
 }
@@ -117,113 +134,125 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 	let preferredSources: string[] = [];
 
 	// ── Multi mode ───────────────────────────────────────────────────────────
-if (!sourceParam) {
-	preferredSources = parsePreferredFromCookie(request.headers.get('cookie'));
-	const validIds = new Set(sources.map((s) => s.id));
-	preferredSources = preferredSources
-		.filter((id) => validIds.has(id))
-		.slice(0, MAX_PREFERRED);
+	if (!sourceParam) {
+		preferredSources = parsePreferredFromCookie(request.headers.get('cookie'));
+		const validIds = new Set(sources.map((s) => s.id));
+		preferredSources = preferredSources
+			.filter((id) => validIds.has(id))
+			.slice(0, MAX_PREFERRED);
 
-	isMulti = true;
-	depends('browse:multi');
+		isMulti = true;
+		depends('browse:multi');
 
-	if (preferredSources.length === 0) {
-		mangas = [];
-	} else {
+		if (preferredSources.length === 0) {
+			mangas = [];
+		} else {
+			const perSourceLimit = Math.ceil(MAX_MANGAS / preferredSources.length);
 
-		const perSourceLimit = Math.ceil(MAX_MANGAS / preferredSources.length);
+			const sortedSources = [...preferredSources].sort().join(',');
+			const cacheKey = `browse:multi:${sortedSources}:p${pageNum}:q${query}:l${lang}:t${type}:ps${perSourceLimit}`;
 
-		const sortedSources = [...preferredSources].sort().join(',');
-		const cacheKey = `browse:multi:${sortedSources}:p${pageNum}:q${query}:l${lang}:t${type}:ps${perSourceLimit}`;
+			mangas = await getCached(
+				cacheKey,
+				async () => {
+					const lists: Manga[][] = [];
+					const conc = pageNum <= 1 ? CONCURRENCY : 1;
 
-		mangas = await getCached(
-			cacheKey,
-			async () => {
-				const lists: Manga[][] = [];
-				const conc = pageNum <= 1 ? CONCURRENCY : 1;
+					for (let i = 0; i < preferredSources.length; i += conc) {
+						const batch = preferredSources.slice(i, i + conc);
+						const batchResults = await Promise.all(
+							batch.map((id) =>
+								fetchSourceList(id, pageNum, query, lang, type, locals.kv, perSourceLimit)
+							)
+						);
+						lists.push(...batchResults);
+					}
 
-				for (let i = 0; i < preferredSources.length; i += conc) {
-					const batch = preferredSources.slice(i, i + conc);
-					const batchResults = await Promise.all(
-						batch.map((id) =>
-							fetchSourceList(id, pageNum, query, lang, type, locals.kv, perSourceLimit)
+					return mergeByTime(lists, preferredSources).slice(0, MAX_MANGAS);
+				},
+				LIST_CACHE_TTL,
+				locals.kv
+			);
+		}
+	}
+	// ── Single source mode ───────────────────────────────────────────────────
+	else {
+		depends(`browse:${sourceParam}`);
+		try {
+			const q = (query || '').trim();
+			const l = (lang || 'all').toLowerCase();
+			const t = (type || 'all').toLowerCase();
+
+			const cacheKey = `browse:${sourceParam}:p${pageNum}:q${q}:l${l}:t${t}:lim${MAX_MANGAS}`;
+
+			mangas = await getCached(
+				cacheKey,
+				async () => {
+					const result = await withTimeout(
+						remoteLatest(sourceParam, pageNum, { lang: l, type: t, q }),
+						LOAD_TIMEOUT_MS
+					);
+					const list = Array.isArray(result) ? result : [];
+
+					const mapped = list.slice(0, MAX_MANGAS).map((m, index) =>
+						ensureUpdatedAt(
+							{ ...m, sourceId: m.sourceId || sourceParam },
+							pageNum,
+							index
 						)
 					);
-					lists.push(...batchResults);
-				}
 
-				return mergeByTime(lists, preferredSources).slice(0, MAX_MANGAS);
-			},
-			LIST_CACHE_TTL,
-			locals.kv
-		);
+					// Refresh backup (page 1, tanpa search)
+					if (pageNum === 1 && !q && locals.kv && mapped.length > 0) {
+						saveSourceBackup(
+							sourceParam!,
+							listToBackupItems(mapped, sourceParam!),
+							locals.kv
+						).catch(() => {});
+					}
+
+					return mapped;
+				},
+				LIST_CACHE_TTL,
+				locals.kv
+			);
+		} catch (e) {
+			console.error('[Browse] load failed:', e);
+			mangas = await fallbackBrowseList(sourceParam, locals.kv, MAX_MANGAS);
+			if (mangas.length) {
+				console.warn(`[Browse] ${sourceParam} using backup fallback`);
+			}
+		}
 	}
-}
-	// ── Single source mode ───────────────────────────────────────────────────
-else {
-	depends(`browse:${sourceParam}`);
-	try {
-		const q = (query || '').trim();
-		const l = (lang || 'all').toLowerCase();
-		const t = (type || 'all').toLowerCase();
 
-		const cacheKey = `browse:${sourceParam}:p${pageNum}:q${q}:l${l}:t${t}:lim${MAX_MANGAS}`;
-
-		mangas = await getCached(
-			cacheKey,
-			async () => {
-				const result = await withTimeout(
-					remoteLatest(sourceParam, pageNum, { lang: l, type: t, q }),
-					LOAD_TIMEOUT_MS
-				);
-				const list = Array.isArray(result) ? result : [];
-
-				return list.slice(0, MAX_MANGAS).map((m, index) =>
-					ensureUpdatedAt(
-						{ ...m, sourceId: m.sourceId || sourceParam },
-						pageNum,
-						index
-					)
-				);
-			},
-			LIST_CACHE_TTL,
-			locals.kv
-		);
-	} catch (e) {
-		console.error('[Browse] load failed:', e);
-		mangas = [];
+	if (isMulti) {
+		setHeaders({
+			'Cache-Control': 'private, no-store'
+		});
+	} else {
+		setHeaders({
+			'Cache-Control': 'public, s-maxage=180, stale-while-revalidate=900'
+		});
 	}
-}
 
+	const seen = new Set<string>();
+	mangas = mangas.filter((m) => {
+		const key = `${m.sourceId ?? ''}:${m.id}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
 
-if (isMulti) {
-  setHeaders({
-    'Cache-Control': 'private, no-store'
-  });
-} else {
-  setHeaders({
-    'Cache-Control': 'public, s-maxage=180, stale-while-revalidate=900'
-  });
-}
-
-const seen = new Set<string>();
-mangas = mangas.filter((m) => {
-	const key = `${m.sourceId ?? ''}:${m.id}`;
-	if (seen.has(key)) return false;
-	seen.add(key);
-	return true;
-});
-
-return {
-  mangas,
-  sources,
-  currentSource,
-  currentPage: pageNum,
-  searchQuery: query,
-  selectedLang: lang,
-  selectedType: type,
-  needsSource: false,
-  isMulti,
-  preferredSources
- };
+	return {
+		mangas,
+		sources,
+		currentSource,
+		currentPage: pageNum,
+		searchQuery: query,
+		selectedLang: lang,
+		selectedType: type,
+		needsSource: false,
+		isMulti,
+		preferredSources
+	};
 };
