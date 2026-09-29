@@ -123,9 +123,11 @@ import { NovelsHavenSource } from './impl/NovelsHaven';
 import ComicGardoSource from './impl/ComicGardo';
 import { NullTranslationSource } from './impl/NullTranslation';
 import { NovelsPyramidSource } from './impl/NovelsPyramid';
+import { FenrirRealmSource } from './impl/FenrirRealm';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    fenrirealm: new FenrirRealmSource(),
     novelspyramid: new NovelsPyramidSource(),
     nulltranslation: new NullTranslationSource(),
     comicgardo: new ComicGardoSource(),

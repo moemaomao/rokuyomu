@@ -126,6 +126,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	novelshaven: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	nulltranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	novelspyramid: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	fenrirealm: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
