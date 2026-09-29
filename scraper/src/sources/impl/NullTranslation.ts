@@ -13,7 +13,7 @@
  *   https://cdn.nulltranslation.com/null-translation-cms-cover-images/{Name}.jpg
  *
  * Chapter body:
- *   - Embedded in RSC flight as base64 AES-GCM blob (ref like 1f:A…)
+ *   - Embedded in RSC flight as base64 AES-GCM blob
  *   - Key from GET /api/chapter/key → { key: base64 } (no auth required)
  *   - Decrypt: iv = first 12 bytes, ciphertext+tag = rest, AES-256-GCM
  *
@@ -165,7 +165,6 @@ function isFutureRelease(iso?: string): boolean {
 	if (!iso) return false;
 	const t = Date.parse(iso);
 	if (Number.isNaN(t)) return false;
-	// small skew: still locked until release time
 	return t > Date.now();
 }
 
@@ -257,11 +256,9 @@ function extractGenresTags(unesc: string): string[] {
 	return out.slice(0, 30);
 }
 
-/** Longest base64 blob in page = encrypted chapter body */
 function extractEncryptedBase64(html: string): string | null {
 	const unesc = unescapeRsc(html);
 	const matches = [...unesc.matchAll(/["']([A-Za-z0-9+/]{500,}={0,2})["']/g)].map((m) => m[1]);
-	// Also from raw (inside push strings without surrounding in unesc)
 	const rawMatches = [...html.matchAll(/([A-Za-z0-9+/]{500,}={0,2})/g)].map((m) => m[1]);
 	const all = [...matches, ...rawMatches];
 	if (!all.length) return null;
@@ -279,6 +276,12 @@ function b64ToBytes(b64: string): Uint8Array {
 	return out;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+	const copy = new Uint8Array(bytes.byteLength);
+	copy.set(bytes);
+	return copy.buffer;
+}
+
 async function getSubtle(): Promise<SubtleCrypto> {
 	const c =
 		(globalThis as any).crypto?.subtle ||
@@ -287,13 +290,6 @@ async function getSubtle(): Promise<SubtleCrypto> {
 	return c as SubtleCrypto;
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-	const copy = new Uint8Array(bytes.byteLength);
-	copy.set(bytes);
-	return copy.buffer;
-}
-
-/** AES-256-GCM: iv = first 12 bytes, rest = ciphertext||tag */
 async function decryptChapterBody(encryptedB64: string, keyB64: string): Promise<string> {
 	const subtle = await getSubtle();
 	const keyBytes = b64ToBytes(keyB64);
@@ -322,7 +318,6 @@ function textToHtmlParagraphs(text: string): string {
 		.replace(/\r/g, '\n')
 		.replace(/=====+/g, '')
 		.trim();
-	// Split on blank lines; also break single newlines that look like paragraphs
 	const parts = cleaned
 		.split(/\n{2,}/)
 		.map((p) => p.replace(/\n+/g, ' ').trim())
@@ -361,132 +356,106 @@ export class NullTranslationSource extends BaseSource {
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
+		const pageSize = 24;
+
+		const html = await this.fetchHtml('/releases');
+		const list = this.parseReleasesList(html);
+
+		try {
+			const home = await this.fetchHtml('/');
+			const extra = this.parseReleasesList(home);
+			const seen = new Set(list.map((m) => m.id));
+			for (const m of extra) {
+				if (!seen.has(m.id)) {
+					seen.add(m.id);
+					list.push(m);
+				}
+			}
+		} catch {
+			/* ignore */
+		}
+
+		const startIdx = (pageNum - 1) * pageSize;
+		return list.slice(startIdx, startIdx + pageSize);
+	}
+
+	/** Parse /releases (or similar) HTML → Manga[] with latestChapter badges */
+	private parseReleasesList(html: string): Manga[] {
+		const $ = cheerio.load(html);
 		const out: Manga[] = [];
 		const seen = new Set<string>();
 
-		const pushFromHtml = (html: string) => {
-			const $ = cheerio.load(html);
-			$('a[href*="/book/"]').each((_: number, el: any) => {
-				const href = $(el).attr('href') || '';
-				if (!href || /\/chapter\//i.test(href)) return;
-				const m = href.match(/\/book\/([A-Za-z0-9_-]+)/);
-				if (!m) return;
-				const bookId = m[1];
-				const id = `/book/${bookId}`;
-				if (seen.has(id)) return;
+		const latestByBook = new Map<string, number>();
+		const re = /\/book\/([A-Za-z0-9_-]+)(?!\/chapter)[\s\S]{0,3000}?Ch\.\s*(\d+)/gi;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(html)) !== null) {
+			const bid = m[1];
+			const n = parseInt(m[2], 10);
+			if (!Number.isFinite(n)) continue;
+			const prev = latestByBook.get(bid);
+			if (prev == null || n > prev) latestByBook.set(bid, n);
+		}
+		const reCh = /\/book\/([A-Za-z0-9_-]+)\/chapter\/[A-Za-z0-9_-]+[\s\S]{0,400}?Ch\.\s*(\d+)/gi;
+		while ((m = reCh.exec(html)) !== null) {
+			const bid = m[1];
+			const n = parseInt(m[2], 10);
+			if (!Number.isFinite(n)) continue;
+			const prev = latestByBook.get(bid);
+			if (prev == null || n > prev) latestByBook.set(bid, n);
+		}
 
-				let title = cleanText($(el).text());
-				if (!title || /^ch\.?\s*\d+/i.test(title) || title.length < 2) {
-					title = cleanText($(el).attr('title') || '');
-				}
-				if (!title || /^ch\.?\s*\d+/i.test(title)) return;
-				if (
-					/^(all|releases|genres|tags|authors|home|discover|login|by book|by date)$/i.test(
-						title
-					)
-				) {
-					return;
-				}
+		$('a[href*="/book/"]').each((_: number, el: any) => {
+			const href = $(el).attr('href') || '';
+			if (!href || /\/chapter\//i.test(href)) return;
+			const mm = href.match(/\/book\/([A-Za-z0-9_-]+)/);
+			if (!mm) return;
+			const bookId = mm[1];
+			const id = `/book/${bookId}`;
+			if (seen.has(id)) return;
 
-				seen.add(id);
+			let title = cleanText($(el).text());
+			if (!title || /^ch\.?\s*\d+/i.test(title) || title.length < 2) {
+				title = cleanText($(el).attr('title') || '');
+			}
+			const imgAlt = cleanText($(el).find('img').attr('alt') || '');
+			if (imgAlt && (title.length < 2 || /^ch\.?\s*\d+/i.test(title))) title = imgAlt;
+			if (!title || title.length < 2 || /^ch\.?\s*\d+/i.test(title)) return;
+			if (
+				/^(all|releases|genres|tags|authors|home|discover|login|by book|by date)$/i.test(title)
+			) {
+				return;
+			}
 
-				let latestChapter: number | undefined;
-				const block = $(el).parent().text() || '';
-				const chMatch = block.match(/Ch\.?\s*(\d+)/i);
-				if (chMatch) latestChapter = parseInt(chMatch[1], 10);
+			seen.add(id);
+			const latestChapter = latestByBook.get(bookId);
 
-				const imgAlt = cleanText($(el).find('img').attr('alt') || '');
-				if (imgAlt && imgAlt.length > title.length) title = imgAlt;
-
-				out.push({
-					id,
-					title,
-					cover: guessCoverFromTitle(title),
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en',
-					status: 'Ongoing',
-					...(latestChapter != null ? { latestChapter } : {})
-				});
+			out.push({
+				id,
+				title,
+				cover: guessCoverFromTitle(title),
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				status: 'Ongoing',
+				...(latestChapter != null ? { latestChapter } : {})
 			});
-		};
+		});
 
-		// Page 1: releases (best freshness) + home
-		// Page 2+: /all?page=N and home offsets (site is mostly SPA; best-effort)
-		const paths: string[] =
-			pageNum <= 1
-				? ['/releases', '/', '/all']
-				: [`/all?page=${pageNum}`, `/all?page=${pageNum}&sort=latest`, `/?page=${pageNum}`];
-
-		for (const path of paths) {
-			try {
-				const html = await this.fetchHtml(path);
-				pushFromHtml(html);
-			} catch {
-				/* next */
-			}
-		}
-
-		// Stable pagination: slice the unique list into pages of 24
-		// (releases HTML is a single feed; client page=2 would otherwise be empty)
-		const pageSize = 24;
-		if (pageNum === 1) {
-			return out.slice(0, pageSize);
-		}
-		// Re-fetch full pool from page-1 sources then slice
-		if (out.length <= pageSize) {
-			const pool: Manga[] = [];
-			const poolSeen = new Set<string>();
-			for (const path of ['/releases', '/', '/all']) {
-				try {
-					const html = await this.fetchHtml(path);
-					const $ = cheerio.load(html);
-					$('a[href*="/book/"]').each((_: number, el: any) => {
-						const href = $(el).attr('href') || '';
-						if (!href || /\/chapter\//i.test(href)) return;
-						const m = href.match(/\/book\/([A-Za-z0-9_-]+)/);
-						if (!m) return;
-						const id = `/book/${m[1]}`;
-						if (poolSeen.has(id)) return;
-						let title = cleanText($(el).text());
-						if (!title || /^ch\.?\s*\d+/i.test(title)) {
-							title = cleanText($(el).find('img').attr('alt') || '');
-						}
-						if (!title || title.length < 2 || /^ch\.?\s*\d+/i.test(title)) return;
-						if (/^(all|releases|genres|tags|authors|home|discover|login)$/i.test(title))
-							return;
-						poolSeen.add(id);
-						const block = $(el).parent().text() || '';
-						const chMatch = block.match(/Ch\.?\s*(\d+)/i);
-						const latestChapter = chMatch ? parseInt(chMatch[1], 10) : undefined;
-						pool.push({
-							id,
-							title,
-							cover: guessCoverFromTitle(title),
-							sourceId: this.id,
-							type: 'novel',
-							lang: 'en',
-							status: 'Ongoing',
-							...(latestChapter != null ? { latestChapter } : {})
-						});
-					});
-				} catch {
-					/* ignore */
-				}
-			}
-			const start = (pageNum - 1) * pageSize;
-			return pool.slice(start, start + pageSize);
-		}
-
-		const start = (pageNum - 1) * pageSize;
-		return out.slice(start, start + pageSize);
+		return out;
 	}
 
 	async searchManga(query: string, _opts?: { page?: number }): Promise<Manga[]> {
 		const q = query.trim().toLowerCase();
 		if (!q) return [];
 		const pool = await this.getLatestManga(1).catch(() => [] as Manga[]);
-		return pool.filter((m) => m.title.toLowerCase().includes(q)).slice(0, 24);
+		// Also pull page-1 full releases without slice for better search
+		try {
+			const html = await this.fetchHtml('/releases');
+			const all = this.parseReleasesList(html);
+			return all.filter((m) => m.title.toLowerCase().includes(q)).slice(0, 24);
+		} catch {
+			return pool.filter((m) => m.title.toLowerCase().includes(q)).slice(0, 24);
+		}
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
@@ -507,21 +476,18 @@ export class NullTranslationSource extends BaseSource {
 		const chaptersRaw = extractChaptersIn(unesc);
 		const chapters = mapChapters(chaptersRaw, bookId);
 
+		const $ = cheerio.load(html);
 		const title =
 			book?.title ||
-			cleanText(
-				cheerio.load(html)('h1').first().text() ||
-					cheerio.load(html)('title').text().split(/[|\-–]/)[0]
-			) ||
+			cleanText($('h1').first().text() || $('title').text().split(/[|\-–]/)[0]) ||
 			bookId;
 
 		const cover = resolveCoverFromHtml(html, unesc, title);
 		const description = extractDescription(unesc);
 		const genres = extractGenresTags(unesc);
-		const authors = book?.author ? [book.author] : [];
+		const authors: string[] = book?.author ? [book.author] : [];
 
 		if (!authors.length) {
-			const $ = cheerio.load(html);
 			$('a[href*="author="]').each((_: number, el: any) => {
 				const t = cleanText($(el).text());
 				if (t && !authors.includes(t)) authors.push(t);
@@ -569,7 +535,6 @@ export class NullTranslationSource extends BaseSource {
 		const unesc = unescapeRsc(html);
 		const $ = cheerio.load(html);
 
-		// Meta title from embedded chapter object
 		let title = '';
 		const chNeedle = `"id":"${chId}"`;
 		const cIdx = unesc.indexOf(chNeedle);
@@ -580,12 +545,13 @@ export class NullTranslationSource extends BaseSource {
 			if (obj?.title) title = cleanText(obj.title);
 		}
 		if (!title) {
-			title = cleanText($('h1').first().text());
-			if (/yemen runners|click the wand|null translation/i.test(title)) title = '';
+			const h1 = cleanText($('h1').first().text());
+			if (h1 && !/yemen runners|click the wand|null translation/i.test(h1)) {
+				title = h1;
+			}
 		}
 		if (!title) title = `Chapter ${chId}`;
 
-		// Prev / next
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		$('a[href*="/chapter/"]').each((_: number, el: any) => {
@@ -595,7 +561,6 @@ export class NullTranslationSource extends BaseSource {
 			if (/^next/.test(t)) nextChapterId = href;
 		});
 
-		// Encrypted body + key
 		const encB64 = extractEncryptedBase64(html);
 		if (!encB64) {
 			throw new Error(`NullTranslation: no encrypted chapter blob found for ${path}`);
@@ -623,12 +588,6 @@ export class NullTranslationSource extends BaseSource {
 			throw new Error(
 				`NullTranslation: AES-GCM decrypt failed — ${e instanceof Error ? e.message : e}`
 			);
-		}
-
-		// First line often repeats title
-		const lines = plain.replace(/\r\n/g, '\n').trim().split('\n');
-		if (lines[0] && /chapter\s*\d+/i.test(lines[0]) && !title) {
-			title = cleanText(lines[0]);
 		}
 
 		const htmlContent = textToHtmlParagraphs(plain);
