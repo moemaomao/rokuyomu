@@ -421,41 +421,48 @@
 			>
 				{#each mangas as manga, i (`${manga.sourceId ?? 'x'}:${manga.id}:${i}`)}
 					<a
-						href="/manga/{manga.sourceId}{manga.id}{selectedLang !== 'all'
-							? `?lang=${selectedLang}`
-							: ''}"
-						class="group block"
-					>
-						<div
-							class="relative overflow-hidden rounded-md bg-zinc-900 ring-1 ring-black/5 dark:ring-white/5"
-						>
-							<div class="relative aspect-[3/4] w-full overflow-hidden">
-								{#if manga.cover}
-									<img
-										src={proxyImage(manga.cover, manga.sourceId)}
-										data-original={manga.cover}
-										data-source={manga.sourceId}
-										alt={manga.title}
-										loading="lazy"
-										decoding="async"
-										onerror={onCoverError}
-										class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-									/>
-								{:else}
-	                               <img
-		                               src={coverNotFound}
-		                               alt="Cover not found"
-		                               class="h-full w-full object-cover"
-	                                />
-                                 {/if}
+	href="/manga/{manga.sourceId}{manga.id}{selectedLang !== 'all'
+		? `?lang=${selectedLang}`
+		: ''}"
+	class="group block"
+>
+	<div
+		class="relative overflow-hidden rounded-md bg-zinc-900 ring-1 ring-black/5 dark:ring-white/5"
+	>
+		<div class="relative aspect-[3/4] w-full overflow-hidden">
+			{#if manga.cover}
+				<img
+					src={proxyImage(manga.cover, manga.sourceId)}
+					data-original={manga.cover}
+					data-source={manga.sourceId}
+					alt={manga.title}
+					loading="lazy"
+					decoding="async"
+					onerror={onCoverError}
+					class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+				/>
+			{:else}
+				<img
+					src={coverNotFound}
+					alt="Cover not found"
+					class="h-full w-full object-cover"
+				/>
+			{/if}
 
-								<!-- STATUS -->
-								<span
-									class="absolute top-1 left-1 z-20 rounded px-1 py-0.5 text-[8px] font-bold uppercase text-white sm:text-[9px]
-										{statusClass(manga.status)}"
-								>
-									{manga.status || 'ONGOING'}
-								</span>
+			{#if (manga as { fromBackup?: boolean }).fromBackup}
+				<span
+					class="absolute top-1 right-1 z-20 rounded bg-amber-500/90 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow"
+				>
+					Backup
+				</span>
+			{/if}
+
+			<span
+				class="absolute top-1 left-1 z-20 rounded px-1 py-0.5 text-[8px] font-bold uppercase text-white sm:text-[9px]
+					{statusClass(manga.status)}"
+			>
+				{manga.status || 'ONGOING'}
+			</span>
 
 								<!-- CHAPTER -->
 								{#if manga.latestChapter || (manga as any).chapter}
