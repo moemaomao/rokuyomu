@@ -130,7 +130,7 @@ export async function fallbackBrowseList(
 	sourceId: string,
 	kv?: KVNamespace | null,
 	limit = 24
-): Promise<Manga[]> {
+): Promise<(Manga & { fromBackup?: boolean })[]> {
 	const bak = await readSourceBackup(sourceId, kv);
 	if (!bak?.items?.length) return [];
 	return bak.items.slice(0, limit).map((m) => ({
@@ -142,7 +142,8 @@ export async function fallbackBrowseList(
 		status: m.status,
 		latestChapter: m.latestChapter,
 		lang: m.lang,
-		updatedAt: m.updatedAt
+		updatedAt: m.updatedAt,
+		fromBackup: true
 	}));
 }
 
