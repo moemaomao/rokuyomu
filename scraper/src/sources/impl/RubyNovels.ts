@@ -67,12 +67,6 @@ function shortChapterTitle(number: number, raw?: string): string {
 	return n > 0 ? `Chapter ${n}` : 'Chapter';
 }
 
-/**
- * Fictioneer date cell:
- *   <span class="list-view">September 30, 2026</span>
- *   <span class="grid-view">Sep 30, '26</span>
- * .text() merges both → "September 30, 2026Sep 30, '26"
- */
 function cleanChapterDate($: cheerio.CheerioAPI, li: cheerio.Cheerio<any>): string {
 	const dateRoot = li.find('.chapter-group__list-item-date, .date').first();
 	const single =
@@ -108,7 +102,16 @@ function isChapterLocked($: cheerio.CheerioAPI, a: any, li: cheerio.Cheerio<any>
 	return false;
 }
 
-/** WP authors on this site are translators, not original novel authors */
+function isPremiumHtml(html: string): boolean {
+	const h = (html || '').toLowerCase();
+	return (
+		h.includes('premium content') ||
+		h.includes('login to buy access') ||
+		h.includes('buy access to this content') ||
+		/pay\s+\d+\s*rub/i.test(html || '')
+	);
+}
+
 const SKIP_AUTHOR = /^(ruby|ruby\s*novels?|atlas\s*haven|atlas|wahab|red\s*rose|admin|martin)$/i;
 
 export class RubyNovelsSource extends BaseSource {
@@ -427,6 +430,8 @@ export class RubyNovelsSource extends BaseSource {
 
 		chapters.sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
 
+		await this.markPremiumChapters(chapters, 24);
+
 		console.log(
 			`[rubynovels] details ${path} → ${chapters.length} ch (${chapters.filter((c) => c.isLocked).length} locked)`
 		);
@@ -445,6 +450,30 @@ export class RubyNovelsSource extends BaseSource {
 			lang: 'en',
 			latestChapter: chapters[0]?.number
 		};
+	}
+
+	private async markPremiumChapters(chapters: Chapter[], limit = 24): Promise<void> {
+		const targets = chapters.filter((c) => !c.isLocked).slice(0, limit);
+		if (!targets.length) return;
+
+		const concurrency = 6;
+		for (let i = 0; i < targets.length; i += concurrency) {
+			const batch = targets.slice(i, i + concurrency);
+			await Promise.all(
+				batch.map(async (ch) => {
+					try {
+						let p = pathOnly(ch.id, this.baseUrl);
+						if (!p.startsWith('/story/')) p = `/story/${p.replace(/^\//, '')}`;
+						if (!p.endsWith('/')) p += '/';
+						const html = await this.fetchHtml(p);
+						if (isPremiumHtml(html)) {
+							ch.isLocked = true;
+						}
+					} catch {
+					}
+				})
+			);
+		}
 	}
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
@@ -466,14 +495,17 @@ export class RubyNovelsSource extends BaseSource {
 		const html = await this.fetchHtml(path);
 		const $ = cheerio.load(html);
 
+		if (isPremiumHtml(html) || $('h3').filter((_, el) => /premium content/i.test($(el).text())).length > 0) {
+			throw new Error('Chapter is locked / premium on Ruby Novels');
+		}
 		const bodyText = $('body').text().toLowerCase();
 		const hasPasswordForm =
 			$('input[type="password"], form[class*="password"], .password-note, .chapter-password')
 				.length > 0;
 		if (
 			hasPasswordForm ||
-			(/password|ruby coins|premium|subscribers only|locked chapter/i.test(bodyText) &&
-				$('#chapter-content p, .chapter__content p').length < 3)
+			(/ruby coins|subscribers only|locked chapter|login to buy/i.test(bodyText) &&
+				$('#chapter-content p, .chapter__content p').length < 5)
 		) {
 			throw new Error('Chapter is locked / premium on Ruby Novels');
 		}
