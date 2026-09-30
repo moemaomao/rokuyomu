@@ -66,41 +66,6 @@ function shortChapterTitle(number: number, raw?: string): string {
 	return n > 0 ? `Chapter ${n}` : 'Chapter';
 }
 
-/** Fictioneer date has .list-view + .grid-view → text() jadi dobel. Ambil satu saja. */
-function cleanChapterDate($: cheerio.CheerioAPI, li: cheerio.Cheerio<any>): string {
-	const dateRoot = li.find('.chapter-group__list-item-date, .date').first();
-	const single =
-		dateRoot.find('.list-view').first().text() ||
-		dateRoot.find('.grid-view').first().text() ||
-		dateRoot.find('span').first().text() ||
-		dateRoot.text();
-	let d = single.replace(/\s+/g, ' ').trim();
-	// Kalau masih dobel (LongShort), potong di batas short format
-	const dbl = d.match(
-		/^((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i
-	);
-	if (dbl) return dbl[1];
-	const short = d.match(/^([A-Z][a-z]{2}\s+\d{1,2},?\s+'?\d{2,4})/);
-	if (short) return short[1];
-	return d.slice(0, 32);
-}
-
-function isChapterLocked($: cheerio.CheerioAPI, a: any, li: cheerio.Cheerio<any>): boolean {
-	const liClass = (li.attr('class') || '') + ' ' + ($(a).attr('class') || '');
-	if (/\b_password\b|\bpassword\b|\b_locked\b|\blocked\b|\bpremium\b/i.test(liClass)) return true;
-	if (li.find('.fa-lock, .fa-solid.fa-lock, [class*="lock"]').length > 0) return true;
-	if ($(a).find('.fa-lock, [class*="lock"]').length > 0) return true;
-	// Icon di sibling / subrow
-	if (li.find('i.fa-lock, svg[class*="lock"]').length > 0) return true;
-	const dataProtected =
-		li.attr('data-password') ||
-		li.attr('data-protected') ||
-		$(a).attr('data-password') ||
-		$(a).attr('data-protected');
-	if (dataProtected && dataProtected !== '0' && dataProtected !== 'false') return true;
-	return false;
-}
-
 /** WP authors on this site are translators, not original novel authors */
 const SKIP_AUTHOR = /^(ruby|ruby\s*novels?|atlas\s*haven|atlas|wahab|red\s*rose|admin)$/i;
 
@@ -114,10 +79,17 @@ export class RubyNovelsSource extends BaseSource {
 		return this.getLatestNovels(page);
 	}
 
-	/** Hanya section "🆕 Latest Stories" di homepage — bukan /stories/ full list */
 	async getLatestNovels(page = 1): Promise<Manga[]> {
-		if (page > 1) return [];
-		return this.parseLatestStories();
+		if (page <= 1) {
+			const [p1, p2, p3] = await Promise.all([
+				this.fetchStoriesPage(1).catch(() => [] as Manga[]),
+				this.fetchStoriesPage(2).catch(() => [] as Manga[]),
+				this.fetchStoriesPage(3).catch(() => [] as Manga[])
+			]);
+			return this.dedupeById([...p1, ...p2, ...p3]).slice(0, 24);
+		}
+		const sitePage = page + 2;
+		return this.fetchStoriesPage(sitePage);
 	}
 
 	private dedupeById(items: Manga[]): Manga[] {
@@ -131,43 +103,24 @@ export class RubyNovelsSource extends BaseSource {
 		return out;
 	}
 
-	/** Parse homepage section: <h2>🆕 Latest Stories</h2> + .wuxr-card */
-	private async parseLatestStories(): Promise<Manga[]> {
+	private async fetchStoriesPage(page: number): Promise<Manga[]> {
+		const path = page <= 1 ? '/stories/' : `/stories/page/${page}/`;
 		try {
-			const html = await this.fetchHtml('/');
+			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
 			const list: Manga[] = [];
 			const seen = new Set<string>();
 
-			// Temukan heading Latest Stories, ambil section terdekat
-			let section = $('h2')
-				.filter((_, el) => /latest\s*stories/i.test($(el).text()))
-				.closest('section, .wuxr-section, div')
-				.first();
-
-			if (!section.length) {
-				// Fallback: section yang berisi wuxr-static-grid setelah teks Latest
-				$('.wuxr-section, section').each((_, el) => {
-					if (/latest\s*stories/i.test($(el).text().slice(0, 200))) {
-						section = $(el);
-						return false;
-					}
-				});
-			}
-
-			const root = section.length ? section : $.root();
-
-			root.find('.wuxr-card').each((_, el) => {
-				const item = this.parseWuxrCard($, el);
+			$('.card__body, article.card, .card').each((_, el) => {
+				const item = this.parseStoryCard($, el);
 				if (item && !seen.has(item.id)) {
 					seen.add(item.id);
 					list.push(item);
 				}
 			});
 
-			// Fallback: link di dalam section saja
-			if (list.length < 2 && section.length) {
-				section.find('a[href*="/story/"]').each((_, a) => {
+			if (list.length < 4) {
+				$('a[href*="/story/"]').each((_, a) => {
 					const href = $(a).attr('href') || '';
 					const m = href.match(/\/story\/([a-z0-9\-]+)\/?$/i);
 					if (!m) return;
@@ -175,13 +128,15 @@ export class RubyNovelsSource extends BaseSource {
 					if (seen.has(id)) return;
 					const title =
 						$(a).attr('title') ||
-						$(a).find('.wuxr-card-title').text() ||
+						$(a).find('.card__title, h2, h3').first().text() ||
 						$(a).text();
 					const t = title.replace(/\s+/g, ' ').trim();
-					if (!t || t.length < 3 || /read this story/i.test(t)) return;
+					if (!t || t.length < 3) return;
 					const img =
-						$(a).closest('.wuxr-card').find('img').attr('src') ||
+						$(a).find('img').attr('data-src') ||
 						$(a).find('img').attr('src') ||
+						$(a).closest('.card, .card__body').find('img').attr('data-src') ||
+						$(a).closest('.card, .card__body').find('img').attr('src') ||
 						'';
 					seen.add(id);
 					list.push({
@@ -195,52 +150,12 @@ export class RubyNovelsSource extends BaseSource {
 				});
 			}
 
-			console.log(`[rubynovels] Latest Stories → ${list.length}`);
+			console.log(`[rubynovels] stories page=${page} → ${list.length}`);
 			return list;
 		} catch (e) {
-			console.error('[rubynovels] parseLatestStories', e);
+			console.error('[rubynovels] fetchStoriesPage', page, e);
 			return [];
 		}
-	}
-
-	private parseWuxrCard($: cheerio.CheerioAPI, el: any): Manga | null {
-		const root = $(el);
-		const titleA = root.find('a.wuxr-card-title, a[href*="/story/"]').filter((_, a) => {
-			const h = $(a).attr('href') || '';
-			return /\/story\/[a-z0-9\-]+\/?$/i.test(h) && !/\/story\/[^/]+\/[^/]+/.test(h);
-		}).first();
-
-		const href = titleA.attr('href') || root.find('a.wuxr-card-cover-link').attr('href') || '';
-		const m = href.match(/\/story\/([a-z0-9\-]+)/i);
-		if (!m) return null;
-
-		const id = `/story/${m[1]}`;
-		const title =
-			titleA.text().replace(/\s+/g, ' ').trim() ||
-			root.find('img').attr('alt')?.trim() ||
-			m[1];
-		if (!title || title.length < 2) return null;
-
-		const img = root.find('img').first();
-		const cover =
-			img.attr('data-src') || img.attr('data-lazy-src') || img.attr('src') || '';
-
-		let latestChapter: number | undefined;
-		const chText = root.find('.wuxr-meta-ch').first().text() || '';
-		const n = parseChapterNumber(chText);
-		if (n > 0) latestChapter = n;
-
-		const badge = root.find('.wuxr-badge').first().text().trim();
-
-		return {
-			id,
-			title: title.slice(0, 200),
-			cover: absUrl(this.baseUrl, (cover || '').split('?')[0]),
-			sourceId: this.id,
-			type: badge || 'novel',
-			lang: 'en',
-			...(latestChapter != null ? { latestChapter } : {})
-		};
 	}
 
 	private parseStoryCard($: cheerio.CheerioAPI, el: any): Manga | null {
@@ -433,15 +348,26 @@ export class RubyNovelsSource extends BaseSource {
 				const number = parseChapterNumber(rawTitle, chapters.length + 1);
 
 				const li = $(a).closest('li, .chapter-group__list-item');
-				const locked = isChapterLocked($, a, li);
-				const date = cleanChapterDate($, li);
+				const liClass = (li.attr('class') || '') + ' ' + ($(a).attr('class') || '');
+				const isLocked =
+					/\b_password\b|\bpassword\b/i.test(liClass) ||
+					li.find('.fa-lock, [class*="lock"]').length > 0 ||
+					$(a).find('.fa-lock, [class*="lock"]').length > 0;
+
+				const date =
+					li
+						.find('.chapter-group__list-item-date, .date')
+						.first()
+						.text()
+						.replace(/\s+/g, ' ')
+						.trim() || '';
 
 				chapters.push({
 					id,
 					title: shortChapterTitle(number, rawTitle),
 					number,
 					date,
-					...(locked ? { isLocked: true } : {})
+					...(isLocked ? { isLocked: true } : {})
 				});
 			}
 		);
@@ -456,15 +382,17 @@ export class RubyNovelsSource extends BaseSource {
 				seen.add(id);
 				const rawTitle = $(a).text().replace(/\s+/g, ' ').trim() || cm[2];
 				const number = parseChapterNumber(rawTitle, chapters.length + 1);
-				const li = $(a).closest('li, .chapter-group__list-item');
-				const locked = isChapterLocked($, a, li);
-				const date = cleanChapterDate($, li);
+				const cls = (
+					($(a).attr('class') || '') +
+					' ' +
+					($(a).parent().attr('class') || '')
+				).toLowerCase();
+				const isLocked = /\b_password\b|\bpassword\b/.test(cls);
 				chapters.push({
 					id,
 					title: shortChapterTitle(number, rawTitle),
 					number,
-					date,
-					...(locked ? { isLocked: true } : {})
+					...(isLocked ? { isLocked: true } : {})
 				});
 			});
 		}
