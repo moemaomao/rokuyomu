@@ -6,6 +6,8 @@
 import express from 'express';
 import cors from 'cors';
 import { getSource, getSourceList } from './sources/index.js';
+import { isByparrEnabled } from './lib/byparr';
+import { cfJarStats } from './lib/cfCookieJar';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -21,7 +23,15 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+app.get('/health', (_req, res) =>
+  res.json({
+    ok: true,
+    ts: Date.now(),
+    byparr: isByparrEnabled(),
+    byparrUrl: process.env.BYPARR_URL ? '(set)' : null,
+    cfJar: cfJarStats()
+  })
+);
 
 app.get('/sources', (_req, res) => {
   try {
@@ -141,6 +151,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`[mikoroku-scraper] :${PORT}`);
+    console.log(`[mikoroku-scraper] Byparr: ${isByparrEnabled() ? 'enabled' : 'disabled'}`);
   });
 }
 

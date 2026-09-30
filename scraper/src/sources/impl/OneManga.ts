@@ -17,6 +17,7 @@
 import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types';
 import * as cheerio from 'cheerio';
+import { fetchWithCf } from '../../lib/fetchWithCf';
 
 export class OneMangaSource extends BaseSource {
 	id = 'onemanga';
@@ -39,9 +40,9 @@ export class OneMangaSource extends BaseSource {
 
 	private async getHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const res = await fetch(url, { headers: this.reqHeaders(), redirect: 'follow' });
-		if (!res.ok) throw new Error(`1Manga HTTP ${res.status} ${path}`);
-		return await res.text();
+		return fetchWithCf(url, {
+			headers: this.reqHeaders()
+		});
 	}
 
 	private absUrl(href: string): string {
@@ -395,7 +396,7 @@ export class OneMangaSource extends BaseSource {
 				if (await this.imageExists(`${basePrefix}${mid}.${ext}`)) lo = mid;
 				else bound = mid;
 			}
-		
+
 			while (await this.imageExists(`${basePrefix}${lo + 1}.${ext}`)) lo++;
 
 			const urls: string[] = [];
