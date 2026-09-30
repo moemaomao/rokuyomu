@@ -397,6 +397,17 @@
 		return map[l] || '';
 	}
 
+	function displayChapterTitle(chapter: { title?: string; number?: number | string }): string {
+		const t = String(chapter?.title ?? '').trim();
+		if (!t) {
+			const n = chapter?.number;
+			return n != null && n !== '' ? `Ch ${n}` : 'Ch ?';
+		}
+		const m = t.match(/^(?:Chapter|Ch\.?|Bab)\s*(\d+(?:\.\d+)?)\b/i);
+		if (m) return `Ch ${m[1]}`;
+		return t;
+	}
+
 	onMount(() => {
 		try {
 			const savedView = localStorage.getItem(VIEW_KEY) as typeof viewMode | null;
@@ -495,8 +506,7 @@
 			{#if fromBackup}
 					<div
 						class="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-200"
-					>
-						Source sedang down — menampilkan metadata backup. Daftar chapter tidak tersedia.
+					>.
 					</div>
 				{/if}
 				<!-- Cover + Info -->
@@ -551,12 +561,15 @@
 							<span class="detail-muted text-[12px] font-medium">{rating}</span>
 						</div>
 
-						<div class="flex w-full max-w-[120px] items-stretch gap-1.5 md:max-w-[180px]">
-							<!-- Notify — icon only, same border/height as Bookmark -->
+						<div
+							class="bookmark-group flex w-full max-w-[120px] items-stretch overflow-hidden rounded-lg border md:max-w-[180px]"
+							role="group"
+							aria-label="Notify and bookmark"
+						>
 							<button
 								type="button"
 								onclick={handleNotify}
-								class="bookmark-btn flex shrink-0 items-center justify-center rounded-lg border-2 px-2 py-1 transition md:px-2.5 md:py-2.5 {notified
+								class="bookmark-btn bookmark-btn-left flex shrink-0 items-center justify-center px-2.5 py-1.5 transition md:px-3 md:py-2.5 {notified
 									? 'bookmarked'
 									: ''}"
 								title={notified ? 'Turn off chapter notifications' : 'Enable new chapter notifications'}
@@ -568,12 +581,11 @@
 									<BellOff class="h-3.5 w-3.5 md:h-4 md:w-4" />
 								{/if}
 							</button>
-
-							<!-- Bookmark -->
+							<span class="bookmark-group-divider" aria-hidden="true"></span>
 							<button
 								type="button"
 								onclick={handleBookmark}
-								class="bookmark-btn flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-1 py-1 text-[10px] font-semibold transition md:px-3 md:py-2.5 md:text-sm {bookmarked
+								class="bookmark-btn bookmark-btn-right flex min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 py-1.5 text-[10px] font-semibold transition md:px-3 md:py-2.5 md:text-sm {bookmarked
 									? 'bookmarked'
 									: ''}"
 							>
@@ -911,7 +923,8 @@
 													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[12px]"
 												></span>
 											{/if}
-											<span class="min-w-0">{chapter.title}</span>
+											<span class="min-w-0 md:hidden">{displayChapterTitle(chapter)}</span>
+											<span class="min-w-0 hidden md:inline">{chapter.title}</span>
 										</p>
 										{#if chapter.date}
 											<p class="mt-0.5 text-[9px] text-white/80">{formatDateOnly(chapter.date)}</p>
@@ -940,7 +953,8 @@
 													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[14px]"
 												></span>
 											{/if}
-											<span class="min-w-0">{chapter.title}</span>
+											<span class="min-w-0 md:hidden">{displayChapterTitle(chapter)}</span>
+											<span class="min-w-0 hidden md:inline">{chapter.title}</span>
 										</p>
 										{#if chapter.date}
 											<p class="detail-muted mt-1 text-[10px] opacity-70">
@@ -1193,17 +1207,26 @@
 		background: rgba(255, 255, 255, 0.05);
 		color: #d4d4d8;
 	}
-	.bookmark-btn {
+	.bookmark-group {
 		background: rgba(255, 255, 255, 0.06);
 		border-color: rgba(255, 255, 255, 0.18);
+	}
+	.bookmark-group-divider {
+		width: 1px;
+		align-self: stretch;
+		background: rgba(255, 255, 255, 0.14);
+		flex-shrink: 0;
+	}
+	.bookmark-btn {
+		background: transparent;
+		border: none;
 		color: #fff;
 	}
 	.bookmark-btn:hover {
-		background: rgba(0, 0, 0, 0.25);
+		background: rgba(0, 0, 0, 0.22);
 	}
 	.bookmark-btn.bookmarked {
 		background: #ffcc00 !important;
-		border-color: #ffcc00 !important;
 		color: #000 !important;
 	}
 
@@ -1266,9 +1289,18 @@
 		background: rgba(0, 0, 0, 0.04);
 		color: #3f3f46;
 	}
-	:global(html.light) .bookmark-btn:not(.bookmarked) {
+	:global(html.light) .bookmark-group {
 		background: rgba(0, 0, 0, 0.04);
 		border-color: rgba(0, 0, 0, 0.15);
+	}
+	:global(html.light) .bookmark-group-divider {
+		background: rgba(0, 0, 0, 0.12);
+	}
+	:global(html.light) .bookmark-btn:not(.bookmarked) {
+		background: transparent;
 		color: #111;
+	}
+	:global(html.light) .bookmark-btn:not(.bookmarked):hover {
+		background: rgba(0, 0, 0, 0.06);
 	}
 </style>
