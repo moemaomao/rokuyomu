@@ -21,6 +21,7 @@
 	interface Chapter {
 		id?: string | number;
 		title?: string;
+		number?: number;
 	}
 
 	interface Props {
@@ -226,22 +227,18 @@
 		isPaused = false;
 	}
 
-	function pauseTTS() {
-		if (!browser || !('speechSynthesis' in window)) return;
-		if (isPaused) {
-			window.speechSynthesis.resume();
-			isPaused = false;
-		} else {
-			window.speechSynthesis.pause();
-			isPaused = true;
-		}
-	}
-
 	function stopTTS() {
 		if (!browser || !('speechSynthesis' in window)) return;
 		window.speechSynthesis.cancel();
 		isSpeaking = false;
 		isPaused = false;
+	}
+
+	function toggleTTS(e?: Event) {
+		e?.preventDefault();
+		e?.stopPropagation();
+		if (isSpeaking) stopTTS();
+		else speak();
 	}
 
 	async function translateChapter() {
@@ -511,79 +508,68 @@
 		style="bottom: max(5.5rem, calc(env(safe-area-inset-bottom) + 4.5rem));"
 	>
 		{#if showTools}
-			<!-- expanded tools -->
 			<div
 				class="flex flex-col items-center gap-2 rounded-2xl border p-2 shadow-xl
 					{isDark ? 'border-white/10 bg-zinc-900/95' : 'border-zinc-200 bg-white/95'}"
 			>
 				<button
 					type="button"
-					class="touch-manipulation flex h-10 w-10 items-center justify-center rounded-full active:scale-95
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
 						{isDark ? 'text-sky-400 active:bg-white/10' : 'text-sky-600 active:bg-zinc-100'}"
 					title="Scroll to top"
 					onclick={scrollToTop}
 				>
-					<ChevronsUp class="h-5 w-5" />
+					<ChevronsUp class="h-5 w-5 pointer-events-none" />
 				</button>
 
+				<!-- TTS: satu tombol saja (play ↔ stop) -->
 				<button
 					type="button"
-					class="touch-manipulation flex h-10 w-10 items-center justify-center rounded-full active:scale-95
-						{isDark ? 'text-emerald-400 active:bg-white/10' : 'text-emerald-600 active:bg-zinc-100'}"
-					title="Text to Speech"
-					onclick={() => (isSpeaking ? stopTTS() : speak())}
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
+						{isSpeaking
+							? 'bg-red-500/20 text-red-400'
+							: isDark
+								? 'text-emerald-400 active:bg-white/10'
+								: 'text-emerald-600 active:bg-zinc-100'}"
+					title={isSpeaking ? 'Stop TTS' : 'Text to Speech'}
+					aria-label={isSpeaking ? 'Stop text to speech' : 'Start text to speech'}
+					onclick={toggleTTS}
 				>
 					{#if isSpeaking}
-						<Square class="h-4 w-4" />
+						<Square class="h-4 w-4 pointer-events-none" />
 					{:else}
-						<Volume2 class="h-5 w-5" />
+						<Volume2 class="h-5 w-5 pointer-events-none" />
 					{/if}
 				</button>
 
-				{#if isSpeaking}
-					<button
-						type="button"
-						class="touch-manipulation flex h-10 w-10 items-center justify-center rounded-full active:scale-95 text-amber-400 active:bg-white/10"
-						title={isPaused ? 'Resume' : 'Pause'}
-						onclick={pauseTTS}
-					>
-						{#if isPaused}
-							<Play class="h-4 w-4" />
-						{:else}
-							<Pause class="h-4 w-4" />
-						{/if}
-					</button>
-				{/if}
-
 				<button
 					type="button"
-					class="touch-manipulation flex h-10 w-10 items-center justify-center rounded-full active:scale-95
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
 						{autoScroll
-						? 'bg-purple-600/30 text-purple-300'
-						: isDark
-							? 'text-purple-400 active:bg-white/10'
-							: 'text-purple-600 active:bg-zinc-100'}"
+							? 'bg-purple-600/30 text-purple-300'
+							: isDark
+								? 'text-purple-400 active:bg-white/10'
+								: 'text-purple-600 active:bg-zinc-100'}"
 					title="Auto scroll"
 					onclick={toggleAutoScroll}
 				>
 					{#if autoScroll}
-						<Pause class="h-4 w-4" />
+						<Pause class="h-4 w-4 pointer-events-none" />
 					{:else}
-						<Play class="h-4 w-4" />
+						<Play class="h-4 w-4 pointer-events-none" />
 					{/if}
 				</button>
 
-				<!-- AI Translate -->
 				<button
 					type="button"
-					class="touch-manipulation flex h-10 w-10 items-center justify-center rounded-full active:scale-95
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
 						{isTranslating
-						? 'bg-amber-500/20 text-amber-300'
-						: showTranslated
-							? 'bg-emerald-500/20 text-emerald-300'
-							: isDark
-								? 'text-orange-400 active:bg-white/10'
-								: 'text-orange-600 active:bg-zinc-100'}"
+							? 'bg-amber-500/20 text-amber-300'
+							: showTranslated
+								? 'bg-emerald-500/20 text-emerald-300'
+								: isDark
+									? 'text-orange-400 active:bg-white/10'
+									: 'text-orange-600 active:bg-zinc-100'}"
 					title={isTranslating
 						? 'Menerjemahkan...'
 						: showTranslated
@@ -597,13 +583,12 @@
 					{:else if showTranslated}
 						<span class="text-[10px] font-bold">{targetLang.toUpperCase()}</span>
 					{:else}
-						<Languages class="h-4 w-4" />
+						<Languages class="h-4 w-4 pointer-events-none" />
 					{/if}
 				</button>
 
-				<!-- Lang select -->
 				<select
-					class="touch-manipulation h-8 w-10 rounded-lg border-0 text-[10px] text-center outline-none cursor-pointer appearance-none
+					class="touch-manipulation h-8 w-11 rounded-lg border-0 text-[10px] text-center outline-none cursor-pointer appearance-none
 						{isDark ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-700'}"
 					value={targetLang}
 					onchange={(e) => changeLang((e.currentTarget as HTMLSelectElement).value)}
@@ -616,7 +601,7 @@
 
 				<button
 					type="button"
-					class="touch-manipulation flex h-10 w-10 items-center justify-center rounded-full active:scale-95
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
 						{isDark ? 'text-zinc-300 active:bg-white/10' : 'text-zinc-600 active:bg-zinc-100'}"
 					title="Settings"
 					onclick={() => {
@@ -624,7 +609,7 @@
 						showSettings = true;
 					}}
 				>
-					<Settings class="h-5 w-5" />
+					<Settings class="h-5 w-5 pointer-events-none" />
 				</button>
 			</div>
 		{/if}
@@ -632,7 +617,7 @@
 		<!-- Main FAB toggle -->
 		<button
 			type="button"
-			class="touch-manipulation flex h-12 w-12 items-center justify-center rounded-full shadow-lg active:scale-95 transition
+			class="touch-manipulation flex h-12 w-12 items-center justify-center rounded-full shadow-lg active:scale-95 transition select-none
 				{showTools
 				? isDark
 					? 'bg-zinc-700 text-white'
@@ -642,9 +627,9 @@
 			onclick={() => (showTools = !showTools)}
 		>
 			{#if showTools}
-				<X class="h-5 w-5" />
+				<X class="h-5 w-5 pointer-events-none" />
 			{:else}
-				<MoreVertical class="h-5 w-5" />
+				<MoreVertical class="h-5 w-5 pointer-events-none" />
 			{/if}
 		</button>
 	</div>

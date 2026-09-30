@@ -21,6 +21,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'nulltranslation',
 	'novelspyramid',
 	'fenrirealm',
+	'marinetl',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

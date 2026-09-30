@@ -125,9 +125,11 @@ import { NullTranslationSource } from './impl/NullTranslation';
 import { NovelsPyramidSource } from './impl/NovelsPyramid';
 import { FenrirRealmSource } from './impl/FenrirRealm';
 import { VioletMangaSource } from './impl/VioletManga';
+import { MarineTLSource } from './impl/MarineTL';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    marinetl: new MarineTLSource(),
     violetmanga: new VioletMangaSource(),
     fenrirealm: new FenrirRealmSource(),
     novelspyramid: new NovelsPyramidSource(),
