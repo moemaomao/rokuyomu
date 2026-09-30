@@ -6,8 +6,9 @@
  * - Homepage target: 24 titles (merge stories pages 1–3)
  * - Detail: /story/{slug}/
  * - Chapter: /story/{slug}/{chapter-slug}/
- * - Premium/password → isLocked: true
+ * - Premium/password → isLocked: true (frontend shows lock icon)
  * - Chapter title shortened to "Chapter N"
+ * - Date: only .list-view (avoid double "September 30, 2026Sep 30, '26")
  * - Content: #chapter-content
  * - WP "by" names are translators, not original authors → skip as authors
  */
@@ -66,8 +67,49 @@ function shortChapterTitle(number: number, raw?: string): string {
 	return n > 0 ? `Chapter ${n}` : 'Chapter';
 }
 
+/**
+ * Fictioneer date cell:
+ *   <span class="list-view">September 30, 2026</span>
+ *   <span class="grid-view">Sep 30, '26</span>
+ * .text() merges both → "September 30, 2026Sep 30, '26"
+ */
+function cleanChapterDate($: cheerio.CheerioAPI, li: cheerio.Cheerio<any>): string {
+	const dateRoot = li.find('.chapter-group__list-item-date, .date').first();
+	const single =
+		dateRoot.find('.list-view').first().text() ||
+		dateRoot.find('.grid-view').first().text() ||
+		dateRoot.find('span').first().text() ||
+		dateRoot.text();
+	let d = single.replace(/\s+/g, ' ').trim();
+	const long = d.match(
+		/^((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i
+	);
+	if (long) return long[1];
+	const short = d.match(/^([A-Z][a-z]{2}\s+\d{1,2},?\s+'?\d{2,4})/);
+	if (short) return short[1];
+	return d.slice(0, 32);
+}
+
+function isChapterLocked($: cheerio.CheerioAPI, a: any, li: cheerio.Cheerio<any>): boolean {
+	const liClass = `${li.attr('class') || ''} ${$(a).attr('class') || ''}`;
+	if (/\b_password\b|\bpassword\b|\b_locked\b|\blocked\b|\bpremium\b/i.test(liClass)) {
+		return true;
+	}
+	if (li.find('.fa-lock, .fa-solid.fa-lock, i[class*="lock"], svg[class*="lock"]').length > 0) {
+		return true;
+	}
+	if ($(a).find('.fa-lock, i[class*="lock"]').length > 0) return true;
+	const dataProtected =
+		li.attr('data-password') ||
+		li.attr('data-protected') ||
+		$(a).attr('data-password') ||
+		$(a).attr('data-protected');
+	if (dataProtected && dataProtected !== '0' && dataProtected !== 'false') return true;
+	return false;
+}
+
 /** WP authors on this site are translators, not original novel authors */
-const SKIP_AUTHOR = /^(ruby|ruby\s*novels?|atlas\s*haven|atlas|wahab|red\s*rose|admin)$/i;
+const SKIP_AUTHOR = /^(ruby|ruby\s*novels?|atlas\s*haven|atlas|wahab|red\s*rose|admin|martin)$/i;
 
 export class RubyNovelsSource extends BaseSource {
 	id = 'rubynovels';
@@ -313,7 +355,6 @@ export class RubyNovelsSource extends BaseSource {
 			$('meta[property="og:description"]').attr('content')?.trim() ||
 			'';
 
-		// WP "by" = translator accounts — jangan jadikan author
 		const authors: string[] = [];
 		$('a[href*="/author/"]').each((_, a) => {
 			const n = $(a).text().replace(/\s+/g, ' ').trim();
@@ -348,26 +389,15 @@ export class RubyNovelsSource extends BaseSource {
 				const number = parseChapterNumber(rawTitle, chapters.length + 1);
 
 				const li = $(a).closest('li, .chapter-group__list-item');
-				const liClass = (li.attr('class') || '') + ' ' + ($(a).attr('class') || '');
-				const isLocked =
-					/\b_password\b|\bpassword\b/i.test(liClass) ||
-					li.find('.fa-lock, [class*="lock"]').length > 0 ||
-					$(a).find('.fa-lock, [class*="lock"]').length > 0;
-
-				const date =
-					li
-						.find('.chapter-group__list-item-date, .date')
-						.first()
-						.text()
-						.replace(/\s+/g, ' ')
-						.trim() || '';
+				const locked = isChapterLocked($, a, li);
+				const date = cleanChapterDate($, li);
 
 				chapters.push({
 					id,
 					title: shortChapterTitle(number, rawTitle),
 					number,
 					date,
-					...(isLocked ? { isLocked: true } : {})
+					...(locked ? { isLocked: true } : {})
 				});
 			}
 		);
@@ -382,17 +412,15 @@ export class RubyNovelsSource extends BaseSource {
 				seen.add(id);
 				const rawTitle = $(a).text().replace(/\s+/g, ' ').trim() || cm[2];
 				const number = parseChapterNumber(rawTitle, chapters.length + 1);
-				const cls = (
-					($(a).attr('class') || '') +
-					' ' +
-					($(a).parent().attr('class') || '')
-				).toLowerCase();
-				const isLocked = /\b_password\b|\bpassword\b/.test(cls);
+				const li = $(a).closest('li, .chapter-group__list-item');
+				const locked = isChapterLocked($, a, li);
+				const date = cleanChapterDate($, li);
 				chapters.push({
 					id,
 					title: shortChapterTitle(number, rawTitle),
 					number,
-					...(isLocked ? { isLocked: true } : {})
+					date,
+					...(locked ? { isLocked: true } : {})
 				});
 			});
 		}
