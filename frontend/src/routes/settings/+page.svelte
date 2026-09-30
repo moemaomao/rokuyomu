@@ -217,8 +217,7 @@
 			{/if}
 		</span>
 	</div>
-
-	<!-- Source checklist (filtered by kind) -->
+	
 	<div class="space-y-5">
 		{#if filteredSources.length === 0}
 			<p class="py-10 text-center text-sm {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
@@ -271,6 +270,16 @@
 								{#if meta.isR18}
 									<span class="rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
 										>R18</span
+									>
+								{/if}
+								{#if meta.isGL}
+									<span class="rounded bg-pink-500 px-1.5 py-0.5 text-[9px] font-bold text-white"
+										>GL</span
+									>
+								{/if}
+								{#if meta.isBL}
+									<span class="rounded bg-sky-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
+										>BL</span
 									>
 								{/if}
 								{#if meta.isError || isBrokenSource(src.id)}

@@ -462,6 +462,12 @@
 			{#if !isMultiMode && getSourceMeta(currentSource).isR18}
 				<span class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">R18</span>
 			{/if}
+			{#if !isMultiMode && getSourceMeta(currentSource).isGL}
+				<span class="rounded bg-pink-500 px-1.5 py-0.5 text-[10px] font-bold text-white">GL</span>
+			{/if}
+			{#if !isMultiMode && getSourceMeta(currentSource).isBL}
+				<span class="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-bold text-white">BL</span>
+			{/if}
 			{#if !isMultiMode && (getSourceMeta(currentSource).isError || isBrokenSource(currentSource))}
 				<span
 					class="rounded border border-red-500/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400"
@@ -545,6 +551,20 @@
 													class="rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
 												>
 													R18
+												</span>
+											{/if}
+											{#if meta.isGL}
+												<span
+													class="rounded bg-pink-500 px-1.5 py-0.5 text-[9px] font-bold text-white"
+												>
+													GL
+												</span>
+											{/if}
+											{#if meta.isBL}
+												<span
+													class="rounded bg-sky-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
+												>
+													BL
 												</span>
 											{/if}
 											{#if meta.isError || isBrokenSource(source.id)}

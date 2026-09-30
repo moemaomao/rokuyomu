@@ -3,6 +3,8 @@ export type SourceMeta = {
 	lang: string;
 	isR18: boolean;
 	isError?: boolean;
+	isGL?: boolean;
+	isBL?: boolean;
 	color?: string;
 };
 
@@ -18,7 +20,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	vortexscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	silentquill: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	doujins: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-emerald-500' },
-	cucumbermanga: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-emerald-500' },
+	cucumbermanga: { flag: 'gb', lang: 'EN', isBL: true, isR18: true, color: 'bg-emerald-500' },
 	weebcentral: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	kaynscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	asura: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
@@ -75,7 +77,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	kiryuu: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	komikstation: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	shinigami: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
-    ainzscans: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
+	ainzscans: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	bacami: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	comicaso: { flag: 'id', lang: 'ID', isR18: false, color: 'bg-green-500' },
 	dojing: { flag: 'id', lang: 'ID', isR18: true, color: 'bg-green-500' },
@@ -116,8 +118,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	yumeneijiworks: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	brightnovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	tinytranslation: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
-	dragonholic: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
-	flenser: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-500' },
+	dragonholic: { flag: 'gb', lang: 'EN', isR18: true, isBL: true, color: 'bg-amber-500' },
+	flenser: { flag: 'gb', lang: 'EN', isR18: true, isGL: true, color: 'bg-rose-500' },
 	skydemonorder: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	cherrymist: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 	karistudio: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
@@ -134,6 +136,8 @@ export const DEFAULT_META: SourceMeta = {
 	lang: 'Other',
 	isR18: false,
 	isError: false,
+	isGL: false,
+	isBL: false,
 	color: 'bg-zinc-600'
 };
 
