@@ -128,6 +128,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'nulltranslation', name: 'Null Translation' },
 	{ id: 'novelspyramid', name: 'Novels Pyramid' },
 	{ id: 'fenrirealm', name: 'Fenrir Realm' },
+	{ id: 'violetmanga', name: 'Violet Manga' },
 ];
 
 export function getSourceList(): SourceMeta[] {

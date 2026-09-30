@@ -17,7 +17,8 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	isekaikomik: '/manga',
 	maid: '/manga',
 	sektedoujin: '/manga',
-	athreascans: '/manga'
+	athreascans: '/manga',
+	violetmanga: '/comics'
 };
 
 const NEEDS_REMOTE_MANGA_RESOLVE = new Set(['weloma', 'zonatmo']);
