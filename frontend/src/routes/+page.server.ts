@@ -65,6 +65,14 @@ function mergeByTime(lists: Manga[][], preferredOrder: string[]): Manga[] {
 	return flat;
 }
 
+function normalizeTitle(title: string): string {
+	return String(title || '')
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}\s]/gu, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
 async function fetchSourceList(
 	id: string,
 	pageNum: number,
@@ -93,7 +101,6 @@ async function fetchSourceList(
 					ensureUpdatedAt({ ...m, sourceId: m.sourceId || id }, pageNum, index)
 				);
 
-				// Refresh backup (page 1, tanpa search)
 				if (pageNum === 1 && !q && kv && mapped.length > 0) {
 					saveSourceBackup(id, listToBackupItems(mapped, id), kv).catch(() => {});
 				}
@@ -116,7 +123,6 @@ async function fetchSourceList(
 
 export const load: PageServerLoad = async ({ url, request, setHeaders, depends, locals }) => {
 	let sourceParam = url.searchParams.get('source');
-	// Restore last source from cookie when opening bare /
 	if (!sourceParam && !url.searchParams.get('q')?.trim()) {
 		const last = parseLastSourceFromCookie(request.headers.get('cookie'));
 		if (last) sourceParam = last;
@@ -202,7 +208,6 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 						)
 					);
 
-					// Refresh backup (page 1, tanpa search)
 					if (pageNum === 1 && !q && locals.kv && mapped.length > 0) {
 						saveSourceBackup(
 							sourceParam!,
@@ -240,6 +245,14 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 		const key = `${m.sourceId ?? ''}:${m.id}`;
 		if (seen.has(key)) return false;
 		seen.add(key);
+		return true;
+	});
+
+	const seenTitle = new Set<string>();
+	mangas = mangas.filter((m) => {
+		const titleKey = `${(m.sourceId ?? '').toLowerCase()}:${normalizeTitle(m.title)}`;
+		if (seenTitle.has(titleKey)) return false;
+		seenTitle.add(titleKey);
 		return true;
 	});
 
