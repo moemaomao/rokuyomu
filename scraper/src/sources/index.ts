@@ -126,9 +126,11 @@ import { NovelsPyramidSource } from './impl/NovelsPyramid';
 import { FenrirRealmSource } from './impl/FenrirRealm';
 import { VioletMangaSource } from './impl/VioletManga';
 import { MarineTLSource } from './impl/MarineTL';
+import { RubyNovelsSource } from './impl/RubyNovels';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    rubynovels: new RubyNovelsSource(),
     marinetl: new MarineTLSource(),
     violetmanga: new VioletMangaSource(),
     fenrirealm: new FenrirRealmSource(),
