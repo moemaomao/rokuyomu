@@ -1,6 +1,6 @@
 # Rokuyomu — Scraper
 
-Microservice **Node.js** (Express + Cheerio) untuk scraping source manga/comics.
+Microservice **Node.js** (Express + Cheerio) untuk scraping source manga/comics **dan novel**.
 
 Dipakai frontend Cloudflare Worker lewat HTTP JSON supaya Worker tetap di free tier (CPU kecil).
 
@@ -12,16 +12,18 @@ Repo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · package ini
 
 | Tugas | Detail |
 |-------|--------|
-| Parse HTML / API source | Cheerio + adapter per situs |
-| API JSON | Latest, search, detail, chapter pages |
+| Parse HTML / API source | Cheerio + adapter per situs (~118) |
+| API JSON | Latest, search, detail, chapter pages, **novel chapter content** |
 | Deploy | Vercel serverless (atau Render / Koyeb / Fly) |
 
-Frontend **tidak** import adapter scraper secara default. Request datang sebagai:
+Frontend **tidak** import adapter scraper secara default.  
+Request datang sebagai:
 
 ```
 GET /:sourceId/latest
 GET /:sourceId/manga/*
 GET /:sourceId/chapter/*
+GET /:sourceId/novel-chapter/*
 GET /:sourceId/manga-from-chapter?chapter=...
 ```
 
@@ -36,27 +38,18 @@ Source yang ada di `WORKER_SOURCE_IDS` (frontend) **tidak** memanggil API ini �
 | `GET` | `/health` | `{ ok: true, ts }` |
 | `GET` | `/sources` | Daftar `{ id, name }[]` |
 | `GET` | `/:sourceId/latest` | Query: `page`, `lang`, `type`, `q` (search jika `q` diisi) |
-| `GET` | `/:sourceId/manga/*` | Detail manga + chapters. Query: `lang` |
+| `GET` | `/:sourceId/manga/*` | Detail manga/novel + chapters. Query: `lang` |
 | `GET` | `/:sourceId/chapter/*` | Array URL halaman gambar |
-| `GET` | `/:sourceId/manga-from-chapter` | Query: `chapter` → `{ mangaId }` (opsional, untuk resolve) |
+| `GET` | `/:sourceId/novel-chapter/*` | Konten teks chapter novel (`title`, `content`, prev/next) |
+| `GET` | `/:sourceId/manga-from-chapter` | Query: `chapter` → `{ mangaId }` (opsional) |
 
 ### Auth (opsional)
 
-Set env `SCRAPER_API_KEY`. Client mengirim header:
+Set env `SCRAPER_API_KEY`.  
+Client mengirim header:
 
-```http
-x-api-key: <sama dengan SCRAPER_API_KEY>
 ```
-
-atau `?api_key=...`.
-
-### Contoh
-
-```bash
-curl http://localhost:3000/health
-curl "http://localhost:3000/asura/latest?page=1&lang=all&type=all"
-curl "http://localhost:3000/asura/manga/some-slug?lang=all"
-curl "http://localhost:3000/asura/chapter/some-slug/chapter-1"
+x-api-key: <SCRAPER_API_KEY>
 ```
 
 ---
@@ -68,27 +61,21 @@ scraper/
 ├── src/
 │   ├── index.ts              # Express app + routes
 │   └── sources/
-│       ├── BaseSource.ts     # fetchHtml / fetchJson helpers
-│       ├── types.ts
-│       ├── index.ts          # Registry semua adapter
-│       └── impl/             # Satu file per source (~80+)
-├── api/
-│   └── index.js              # Output esbuild (Vercel) — jangan edit manual
-├── package.json
-├── tsconfig.json
+│       ├── index.ts          # Registry + getSource / getAllSources
+│       ├── BaseSource.ts
+│       ├── types.ts          # Manga types (IMangaSource, ...)
+│       ├── types-novel.ts    # Novel types (INovelSource, NovelChapterContent, ...)
+│       └── impl/             # ~118 adapter (manga + novel)
+├── api/index.js              # esbuild bundle (Vercel) — JANGAN edit manual
 ├── vercel.json
-└── render.yaml               # Opsional Render
+├── render.yaml
+├── package.json
+└── tsconfig.json
 ```
 
 ---
 
 ## Setup lokal
-
-### Prerequisites
-
-- Node.js 20+
-
-### Install & run
 
 ```bash
 cd scraper
@@ -97,7 +84,7 @@ npx tsx src/index.ts
 # → http://localhost:3000
 ```
 
-**Disarankan** tambah script di `package.json` (saat ini hanya ada `build` / `vercel-build`):
+Atau tambah script:
 
 ```json
 "scripts": {
@@ -108,13 +95,7 @@ npx tsx src/index.ts
 }
 ```
 
-Lalu:
-
-```bash
-npm run dev
-```
-
-### Health
+Health:
 
 ```bash
 curl http://localhost:3000/health
@@ -151,6 +132,8 @@ Contoh Render Web Service:
 
 ## Menambah source baru
 
+### Manga
+
 1. Buat `src/sources/impl/NamaSource.ts` extends `BaseSource`.
 2. Implement:
    - `getLatestManga`
@@ -161,6 +144,17 @@ Contoh Render Web Service:
 3. Register di `src/sources/index.ts`.
 4. Tambah metadata id/name di **frontend** `src/lib/server/sources/index.ts`.
 5. Deploy scraper (+ frontend jika registry berubah).
+
+### Novel
+
+1. Buat adapter yang implement `INovelSource` (`types-novel.ts`):
+   - `getLatestNovels` / `searchNovels` / `getNovelDetails` / `getChapterContent`
+   - Set `kind: 'novel'`
+2. Register di `src/sources/index.ts`.
+3. Tambah ID ke frontend:
+   - light registry `sources/index.ts`
+   - `utils/novelSources.ts` → `NOVEL_SOURCE_IDS`
+4. Deploy.
 
 ### Source diblokir Vercel
 
@@ -178,8 +172,6 @@ pnpm sync-worker-sources
 Script akan otomatis copy file + generate `workerSources/index.ts`.
 
 Lihat `frontend/README.md` (hybrid) untuk detail lengkap.
-
-Contoh source yang sudah di hybrid: banyak Indo (`bacakomik`, `komikindo`, `kiryuu`, …) + `athreascans`, `rawkuma`, `flamecomics`, dll.
 
 ---
 
@@ -212,5 +204,5 @@ Jangan commit perubahan manual di `api/index.js` kecuali dari `npm run build` / 
 - CORS: `origin: true` (siap dipanggil Worker).
 - Error scraping → `500` + `{ error: "..." }` (detail di server log).
 - Frontend hybrid: source di `WORKER_SOURCE_IDS` **tidak** memanggil API ini.
-- Source baru contoh: GD Scans, KS Group Scans, Vortex Scans (sudah ada di `impl/`).
+- Novel: endpoint `/novel-chapter/*` mengembalikan teks; source harus punya `getChapterContent`.
 - Parent README: `../README.md`

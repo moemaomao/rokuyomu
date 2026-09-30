@@ -1,6 +1,6 @@
 # Rokuyomu — Frontend
 
-SvelteKit app deployed as **Cloudflare Worker**. UI + KV cache + hybrid scrape client.
+SvelteKit app deployed as **Cloudflare Worker**. UI + KV cache + hybrid scrape client (manga **&** novel).
 
 Repo root: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · package ini: `frontend/`
 
@@ -10,12 +10,12 @@ Repo root: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · packag
 
 | Tugas | Detail |
 |-------|--------|
-| UI | Browse, search, detail, reader, bookmark, history, settings |
+| UI | Browse, search, detail, image reader, **novel reader**, bookmark, history, settings, deep-search, community, notification, admin |
 | Cache | Workers KV `MIKOROKU_CACHE` |
 | Proxy data | `scraperClient.ts` → scraper Node **atau** parse lokal (hybrid) |
 | Cron | Warm / sync cache tiap 20 menit |
 
-**Tidak** menyimpan file manga. Hanya agregasi metadata + URL halaman dari source eksternal.
+**Tidak** menyimpan file manga/novel. Hanya agregasi metadata + URL halaman / teks dari source eksternal.
 
 ---
 
@@ -33,7 +33,7 @@ Browser
 Source yang diblokir outbound IP **Vercel** didaftarkan di `scripts/worker-sources.json`.  
 Source lain selalu ke microservice `scraper/` (biasanya Vercel).
 
-Saat ini ada **~29 source** di Worker (banyak Indo + beberapa internasional). Bundle membesar — pantau CPU time.
+Saat ini ada **~44 source** di Worker (banyak Indo + beberapa internasional + novel). Bundle membesar — pantau CPU time.
 
 ---
 
@@ -44,6 +44,7 @@ Saat ini ada **~29 source** di Worker (banyak Indo + beberapa internasional). Bu
 - `@sveltejs/adapter-cloudflare`
 - Cheerio (hanya untuk `workerSources`)
 - Firebase (auth / sync opsional)
+- jszip (download chapter)
 - pnpm
 
 ---
@@ -56,7 +57,7 @@ frontend/
 │   ├── lib/
 │   │   ├── components/
 │   │   ├── server/
-│   │   │   ├── sources/           # Light registry (id + name only)
+│   │   │   ├── sources/           # Light registry (id + name only, ~118)
 │   │   │   ├── workerSources/     # Hybrid adapters (blocked-on-Vercel)
 │   │   │   │   ├── index.ts       # GENERATED — jangan edit manual
 │   │   │   │   ├── BaseSource.ts
@@ -67,15 +68,19 @@ frontend/
 │   │   │   ├── warmCache.ts
 │   │   │   ├── syncSources.ts
 │   │   │   └── ...
-│   │   ├── stores/
-│   │   └── utils/
+│   │   ├── stores/                # auth, bookmark, history, preferredSources, forum, ...
+│   │   └── utils/                 # novelSources, nsfw, downloadChapter, image, ...
 │   ├── routes/
 │   │   ├── +page.*                # Home / browse
 │   │   ├── manga/[source]/[...id]/
-│   │   ├── reader/[source]/[...id]/
-│   │   ├── bookmark/ history/ settings/ report/
+│   │   ├── reader/[source]/[...id]/        # Image chapter
+│   │   ├── novel-reader/[source]/[...id]/  # Novel (teks)
+│   │   ├── deep-search/
+│   │   ├── community/             # category, thread, new
+│   │   ├── bookmark/ history/ settings/ report/ notification/
+│   │   ├── admin/
 │   │   ├── about/ privacy/
-│   │   └── api/pages | proxy | warm | cron
+│   │   └── api/                   # pages, proxy, warm, cron, novel-chapter, translate, deep-search, admin/*
 │   └── hooks.server.ts
 ├── scripts/
 │   ├── worker-sources.json        # Daftar ID source yang dijalankan di Worker
@@ -147,8 +152,6 @@ pnpm dev
 
 ## Hybrid: tambah source diblokir Vercel
 
-Cara baru (otomatis):
-
 1. Pastikan adapter sudah ada di `../scraper/src/sources/impl/` dan punya baris `id = 'namasource'`.
 2. Tambah ID ke `scripts/worker-sources.json`.
 3. Jalankan:
@@ -167,7 +170,7 @@ Script akan:
 
 > **Jangan edit manual** `workerSources/index.ts` atau file di `impl/`. Semua digenerate.
 
-**Penting:** Jaga jumlah Worker source tetap wajar. Saat ini sudah ~29 — bundle membesar dan cold-start CPU naik. Hanya daftarkan yang benar-benar gagal di Vercel.
+**Penting:** Jaga jumlah Worker source tetap wajar (~44 saat ini). Bundle membesar dan cold-start CPU naik. Hanya daftarkan yang benar-benar gagal di Vercel.
 
 ### Daftar Worker sources
 
@@ -176,6 +179,14 @@ Lihat isi file:
 ```
 scripts/worker-sources.json
 ```
+
+---
+
+## Novel
+
+- `src/lib/utils/novelSources.ts` — `NOVEL_SOURCE_IDS`, `isNovelSource()`, `chapterHref()` → `/novel-reader/...`
+- Route: `routes/novel-reader/[source]/[...id]/`
+- API: `routes/api/novel-chapter/+server.ts` (proxy ke scraper `/novel-chapter/*`)
 
 ---
 
