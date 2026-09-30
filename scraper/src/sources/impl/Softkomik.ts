@@ -406,6 +406,7 @@ export class SoftkomikSource extends BaseSource {
 				return [];
 			}
 
+			// Browser juga hit /visit sebelum imgs
 			await this.trackVisit(pageData.slug, pageData.chapter, session);
 
 			const imageList = await this.fetchImageList(pageData, session);
@@ -534,7 +535,8 @@ export class SoftkomikSource extends BaseSource {
 
 			const data: any = await response.json();
 			const token = String(data?.token || '');
-			// PENTING: pakai sign utuh (termasuk suffix |oiq&...). Memotong → API 404 / list kosong.
+			// Simpan sign utuh dari API. Saat request imgs, kita coba short dulu lalu full
+			// (server sering hanya terima SHA sebelum "|oiq&").
 			const sign = String(data?.sign || '');
 			if (!token || !sign) {
 				console.warn('[softkomik] session missing token/sign');
@@ -577,51 +579,91 @@ export class SoftkomikSource extends BaseSource {
 		}
 	}
 
+	private signVariants(sign: string): string[] {
+		const full = String(sign || '');
+		const short = full.includes('|oiq&') ? full.split('|oiq&')[0] : full;
+		// Short dulu — dari tes server, full + "|oiq&" sering 404.
+		const out: string[] = [];
+		for (const s of [short, full]) {
+			if (s && !out.includes(s)) out.push(s);
+		}
+		return out;
+	}
+
+	private chapterVariants(chapter: string): string[] {
+		const c = String(chapter || '');
+		const out: string[] = [];
+		for (const v of [c, c.replace(/^0+(?=\d)/, ''), String(parseInt(c, 10) || c)]) {
+			if (v && !out.includes(v)) out.push(v);
+		}
+		return out;
+	}
+
+	private parseImageSrc(json: any): string[] {
+		const list =
+			json?.imageSrc ||
+			json?.data?.imageSrc ||
+			json?._doc?.imageSrc ||
+			[];
+		if (!Array.isArray(list)) return [];
+		return list
+			.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+			.filter((src: string) => !this.isPromoImagePath(src));
+	}
+
 	private async fetchImageList(
 		pageData: SoftkomikPageData,
 		session: SoftkomikSession
 	): Promise<string[]> {
-		const apiUrl =
-			`${this.imageApiBase}/` +
-			`${encodeURIComponent(pageData.slug)}` +
-			`/chapter/${encodeURIComponent(pageData.chapter)}` +
-			`/imgs/${encodeURIComponent(pageData.chapterDataId)}`;
-
-		try {
-			const headers: Record<string, string> = {
-				'User-Agent': this.USER_AGENT,
-				Accept: 'application/json, text/plain, */*',
-				Origin: this.baseUrl,
-				Referer: `${this.baseUrl}/`,
-				'X-Token': session.token,
-				'X-Sign': session.sign,
-				Cookie: this.cookieHeader(session.cookies)
-			};
-			const ca = session.contentAccess;
-			if (ca?.token && ca?.sign) {
-				headers['X-Content-Token'] = String(ca.token);
-				headers['X-Content-Sign'] = String(ca.sign);
-			}
-
-			const response = await fetch(apiUrl, { headers });
-			if (!response.ok) {
-				console.warn(
-					`[softkomik] imgs API status ${response.status} → ${apiUrl}`
-				);
-				return [];
-			}
-
-			const json: any = await response.json();
-			const list = json?.imageSrc || json?.data?.imageSrc || json?._doc?.imageSrc || [];
-			if (!Array.isArray(list)) return [];
-
-			return list
-				.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
-				.filter((src: string) => !this.isPromoImagePath(src));
-		} catch (error) {
-			console.error('[softkomik] images API error:', error);
-			return [];
+		const headersBase: Record<string, string> = {
+			'User-Agent': this.USER_AGENT,
+			Accept: 'application/json, text/plain, */*',
+			Origin: this.baseUrl,
+			Referer: `${this.baseUrl}/`,
+			'X-Token': session.token,
+			Cookie: this.cookieHeader(session.cookies)
+		};
+		const ca = session.contentAccess;
+		if (ca?.token && ca?.sign) {
+			headersBase['X-Content-Token'] = String(ca.token);
+			headersBase['X-Content-Sign'] = String(ca.sign);
 		}
+
+		let lastStatus = 0;
+		let lastUrl = '';
+
+		for (const chapter of this.chapterVariants(pageData.chapter)) {
+			for (const sign of this.signVariants(session.sign)) {
+				const apiUrl =
+					`${this.imageApiBase}/` +
+					`${encodeURIComponent(pageData.slug)}` +
+					`/chapter/${encodeURIComponent(chapter)}` +
+					`/imgs/${encodeURIComponent(pageData.chapterDataId)}`;
+				lastUrl = apiUrl;
+				try {
+					const response = await fetch(apiUrl, {
+						headers: { ...headersBase, 'X-Sign': sign }
+					});
+					lastStatus = response.status;
+					if (!response.ok) {
+						continue;
+					}
+					const json: any = await response.json();
+					const list = this.parseImageSrc(json);
+					if (list.length) return list;
+				} catch (error) {
+					console.error('[softkomik] images API error:', error);
+				}
+			}
+		}
+
+		console.warn(
+			`[softkomik] imgs API status ${lastStatus} → ${lastUrl}` +
+				(lastStatus === 403
+					? ' (403: IP Vercel/scraper sering diblok Softkomik — pindahkan source ke Cloudflare Worker)'
+					: '')
+		);
+		return [];
 	}
 
 	private buildImageUrls(list: string[], pageData: SoftkomikPageData): string[] {
