@@ -178,6 +178,40 @@ export class SoulScansSource extends BaseSource {
 		return Number.isFinite(n) ? n : NaN;
 	}
 
+	/** 130.00 → "130" | 12.50 → "12.5" */
+	private formatChapterNum(n: number): string {
+		if (Number.isInteger(n)) return String(n);
+		return String(n)
+			.replace(/\.0+$/, '')
+			.replace(/(\.\d*?)0+$/, '$1');
+	}
+
+	/**
+	 * true kalau title layak ditampilkan.
+	 * false untuk slug jelek ala admin: "130_infinite_evolution"
+	 */
+	private isCleanChapterTitle(title: string, num: number): boolean {
+		if (!title) return false;
+		const t = title.trim();
+
+		// mirip slug / filename
+		if (/[_/\\]/.test(t)) return false;
+		if (/^\d+[_.-]/.test(t)) return false;
+		if (t.length > 60) return false;
+
+		// "Chapter 12" / "Ch.12" / murni angka → OK
+		if (/^(chapter|chap|ch\.?)\s*\d+/i.test(t)) return true;
+		if (/^\d+(\.\d+)?$/.test(t)) return true;
+
+		// title khusus (Prologue, Extra, dll) → biarkan
+		const hasLetter = /[a-zA-Z\u00C0-\u024F]/.test(t);
+		if (hasLetter && !t.toLowerCase().includes(String(Math.floor(num)))) {
+			return true;
+		}
+
+		return false;
+	}
+
 	private mapListFromProject(item: any): Manga | null {
 		const slug = item?.series_slug || item?.slug;
 		const title = String(item?.series_title || item?.title || '').trim();
@@ -187,7 +221,7 @@ export class SoulScansSource extends BaseSource {
 		const latestRaw = chs[0]?.number;
 		const latestNum = this.parseChapterNumber(latestRaw);
 		const latestChapter = Number.isFinite(latestNum)
-			? String(latestNum)
+			? this.formatChapterNum(latestNum)
 			: latestRaw != null
 				? String(latestRaw).replace(/\.00$/, '')
 				: undefined;
@@ -338,7 +372,7 @@ export class SoulScansSource extends BaseSource {
 					? data.alternative_titles.filter(Boolean).join(' · ')
 					: '';
 
-		// Chapters: semua ada di units[] (tidak perlu paginate)
+		// Chapters: semua ada di units[]
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 		const units = Array.isArray(data.units) ? data.units : [];
@@ -350,7 +384,12 @@ export class SoulScansSource extends BaseSource {
 
 			const number = this.parseChapterNumber(u?.number ?? u?.sort_number);
 			const num = Number.isFinite(number) ? number : chapters.length + 1;
-			const chTitle = String(u?.title || '').trim() || `Chapter ${num}`;
+
+			// Title API sering slug jelek → fallback "Chapter {n}"
+			const rawTitle = String(u?.title || '').trim();
+			const chTitle = this.isCleanChapterTitle(rawTitle, num)
+				? rawTitle
+				: `Chapter ${this.formatChapterNum(num)}`;
 
 			chapters.push({
 				id: this.toChapterId(slug, chSlug),
@@ -362,7 +401,9 @@ export class SoulScansSource extends BaseSource {
 
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 		const latestChapter =
-			chapters[0]?.number != null ? String(chapters[0].number) : undefined;
+			chapters[0]?.number != null
+				? this.formatChapterNum(chapters[0].number)
+				: undefined;
 
 		const rating =
 			data.rating_average != null && !Number.isNaN(Number(data.rating_average))
