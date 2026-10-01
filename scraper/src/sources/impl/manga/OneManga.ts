@@ -17,7 +17,7 @@
 import { BaseSource } from '../../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../../types';
 import * as cheerio from 'cheerio';
-import { fetchWithCf } from '../../lib/fetchWithCf';
+import { fetchWithCf } from '../../../lib/fetchWithCf';
 
 export class OneMangaSource extends BaseSource {
 	id = 'onemanga';
