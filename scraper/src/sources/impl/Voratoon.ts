@@ -5,7 +5,7 @@ import * as cheerio from 'cheerio';
 export class VoratoonSource extends BaseSource {
 	id = 'voratoon';
 	name = 'Voratoon';
-	baseUrl = 'https://v2.voratoon.com';
+	baseUrl = 'https://v4.voratoon.com';
 
 	private readonly PER_PAGE = 24;
 	private readonly LIST_LANG = 'id';
