@@ -3,14 +3,14 @@
  * Adjust baseUrl + CSS selectors for the real novel site you want.
  */
 import * as cheerio from 'cheerio';
-import { BaseSource } from '../BaseSource.js';
+import { BaseSource } from '../BaseSource';
 import type {
 	Novel,
 	NovelDetails,
 	NovelChapterContent,
 	INovelSource
-} from '../types-novel.js';
-import type { Manga, MangaDetails } from '../types.js';
+} from '../types-novel';
+import type { Manga, MangaDetails } from '../types';
 
 export class Noveltoon extends BaseSource implements INovelSource {
 	id = 'noveltoon';

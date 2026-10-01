@@ -7,7 +7,6 @@
  *   pnpm sync-worker-sources
  *
  * Lazy load: module adapter hanya di-import saat source tersebut benar-benar dipakai.
- * Ini menjaga CPU free tier CF Workers (< ~10ms) karena tidak load semua Cheerio adapter di cold start.
  *
  * Alur:
  *   UI → CF Worker → (worker source?) → dynamic import + parse lokal (Cheerio)
@@ -92,7 +91,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	klz9: async () => new (await import('./impl/Klz9')).Klz9Source(),
 	komikindo: async () => new (await import('./impl/Komikindo')).KomikindoSource(),
 	komikstation: async () => new (await import('./impl/KomikStation')).KomikStationSource(),
-	krakenbites: async () => new (await import('./impl/KrakenBites')).KrakenBitesSource(),
+	krakenbites: async () => new (await import('./impl/KrakenBItes')).KrakenBitesSource(),
 	lovelyblossoms: async () => new (await import('./impl/LovelyBlossoms')).LovelyBlossomsSource(),
 	lumos: async () => new (await import('./impl/Lumos')).LumosSource(),
 	luvyaa: async () => new (await import('./impl/Luvyaa')).LuvyaaSource(),
