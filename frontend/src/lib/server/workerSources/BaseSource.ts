@@ -1,10 +1,4 @@
 import type { IMangaSource, Manga, MangaDetails } from './types';
-
-/**
- * Abstract base for Worker-local source adapters.
- * Hanya source yang diblokir Vercel yang di-import di workerSources/index.ts
- * agar bundle Worker tetap kecil + CPU < 10ms untuk source remote.
- */
 export abstract class BaseSource implements IMangaSource {
 	abstract id: string;
 	abstract name: string;
@@ -54,6 +48,5 @@ export abstract class BaseSource implements IMangaSource {
 	): Promise<Manga[]>;
 
 	abstract getMangaDetails(mangaId: string, opts?: { lang?: string }): Promise<MangaDetails>;
-
 	abstract getChapterPages(chapterId: string): Promise<string[]>;
 }

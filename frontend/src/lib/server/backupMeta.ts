@@ -8,10 +8,8 @@ import type { Manga, MangaDetails } from '$lib/server/sources/types';
 import { readCache } from '$lib/server/cache';
 
 export const BACKUP_VERSION = 1;
-/** TTL panjang: 14 hari */
 export const BACKUP_TTL = 60 * 60 * 24 * 14;
 
-/** Cover thumb: lebar max 300px, webp q75 */
 const WESERV_W = 100;
 const WESERV_Q = 75;
 

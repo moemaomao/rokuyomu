@@ -101,8 +101,8 @@ import { SilentQuillSource } from './impl/SilentQuill';
 import { AreakomikSource } from './impl/Areakomik';
 import { GenzToonsSource } from './impl/GenzToons';
 import { SetsuScansSource } from './impl/SetsuScans';
-import Noveltoon from './impl/Noveltoon';
-import SakuranovelSource from './impl/Sakuranovel';
+import { Noveltoon } from './impl/Noveltoon';
+import { SakuranovelSource } from './impl/Sakuranovel';
 import { MeionovelSource } from './impl/Meionovel';
 import { BacaLightNovelSource } from './impl/BacaLightNovel';
 import { LovelyBlossomsSource } from './impl/LovelyBlossoms';
@@ -120,7 +120,7 @@ import { KariStudioSource } from './impl/KariStudio';
 import { StorySeedlingSource } from './impl/StorySeedling';
 import { AzureChroniclesSource } from './impl/AzureChronicles';
 import { NovelsHavenSource } from './impl/NovelsHaven';
-import ComicGardoSource from './impl/ComicGardo';
+import { ComicGardoSource } from './impl/ComicGardo';
 import { NullTranslationSource } from './impl/NullTranslation';
 import { NovelsPyramidSource } from './impl/NovelsPyramid';
 import { FenrirRealmSource } from './impl/FenrirRealm';
@@ -128,9 +128,11 @@ import { VioletMangaSource } from './impl/VioletManga';
 import { MarineTLSource } from './impl/MarineTL';
 import { RubyNovelsSource } from './impl/RubyNovels';
 import { KappaBeastSource } from './impl/KappaBeast';
+import { KrakenBitesSource } from './impl/KrakenBites';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    krakenbites: new KrakenBitesSource(),
     kappabeast: new KappaBeastSource(),
     rubynovels: new RubyNovelsSource(),
     marinetl: new MarineTLSource(),
