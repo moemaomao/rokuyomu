@@ -18,6 +18,10 @@
  * Path-style /series/page/N/?order=update rusak di situs
  * (semua page mengembalikan konten page 1).
  * Harus pakai query-style: /series/?order=update&page=N
+ *
+ * Catatan images (Oct 2026):
+ * ts_reader sering mengembalikan host madascans.com yang sudah down (520).
+ * Semua URL image di-rewrite ke madarascans.net.
  */
 
 import { BaseSource } from '../BaseSource';
@@ -32,6 +36,8 @@ export class MadaraScansSource extends BaseSource {
 	private readonly PER_PAGE = 24;
 	private readonly SITE_PER_PAGE = 30;
 	private readonly DEFAULT_LANG = 'en';
+
+	// ── Helpers ──────────────────────────────────────────────────────────────
 
 	private absUrl(url: string): string {
 		if (!url) return '';
@@ -72,7 +78,9 @@ export class MadaraScansSource extends BaseSource {
 			}
 			return major;
 		}
-		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i);
+		const m = String(text).match(
+			/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i
+		);
 		if (m) {
 			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
 			return parseInt(m[1], 10);
@@ -96,6 +104,20 @@ export class MadaraScansSource extends BaseSource {
 		return 'manga';
 	}
 
+	private rewriteImageHost(src: string): string {
+		return src
+			.replace(
+				/^https?:\/\/(?:www\.)?madascans\.com/i,
+				'https://madarascans.net'
+			)
+			.replace(
+				/^https?:\/\/(?:www\.)?madarascans\.org/i,
+				'https://madarascans.net'
+			);
+	}
+
+	// ── List cards ───────────────────────────────────────────────────────────
+
 	private parseCards($: cheerio.CheerioAPI): Manga[] {
 		const mangas: Manga[] = [];
 		const seen = new Set<string>();
@@ -106,7 +128,7 @@ export class MadaraScansSource extends BaseSource {
 			const $link = $card
 				.find('a[href*="/series/"]')
 				.filter((_, a) => {
-					const h = ($(a).attr('href') || '').split('?')[0];
+					const h = ($(a).attr('href') || '').split('')[0];
 					return /\/series\/[^/]+\/?$/.test(h);
 				})
 				.first();
@@ -125,7 +147,9 @@ export class MadaraScansSource extends BaseSource {
 						$card.find('.tt').first().text() ||
 						$card.find('img').attr('alt') ||
 						''
-				) || id.split('/').pop() || id;
+				) ||
+				id.split('/').pop() ||
+				id;
 
 			const $img = $card.find('img').first();
 			let cover =
@@ -148,13 +172,22 @@ export class MadaraScansSource extends BaseSource {
 			else if (/\bmanhua\b/i.test(cardText)) type = 'manhua';
 
 			let latestChapter: string | undefined;
-			const epText = $card.find('.epxs').first().text().replace(/\s+/g, ' ').trim();
+			const epText = $card
+				.find('.epxs')
+				.first()
+				.text()
+				.replace(/\s+/g, ' ')
+				.trim();
 			if (epText) {
 				const n = this.parseChapterNumber(epText);
 				if (n > 0) latestChapter = String(n);
 				else {
-					const cleaned = epText.replace(/^chapter\s*/i, '').replace(/\s*END\s*$/i, '').trim();
-					if (cleaned && cleaned !== '?' && cleaned !== '0') latestChapter = cleaned;
+					const cleaned = epText
+						.replace(/^chapter\s*/i, '')
+						.replace(/\s*END\s*$/i, '')
+						.trim();
+					if (cleaned && cleaned !== '?' && cleaned !== '0')
+						latestChapter = cleaned;
 				}
 			}
 			if (!latestChapter) {
@@ -165,9 +198,7 @@ export class MadaraScansSource extends BaseSource {
 				if (em?.[1]) latestChapter = em[1];
 			}
 			if (!latestChapter) {
-				const chHref =
-					$card.find('a[href*="-chapter-"]').attr('href') ||
-					'';
+				const chHref = $card.find('a[href*="-chapter-"]').attr('href') || '';
 				const n2 = this.parseChapterNumber('', chHref);
 				if (n2 > 0) latestChapter = String(n2);
 			}
@@ -229,7 +260,6 @@ export class MadaraScansSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		try {
-			
 			const list = await this.fetchCatalogPages((sitePage) => {
 				if (sitePage <= 1) return `/series/?order=update`;
 				return `/series/?order=update&page=${sitePage}`;
@@ -294,7 +324,9 @@ export class MadaraScansSource extends BaseSource {
 				$('h1.entry-title, h1').first().text() ||
 					$('.seriestuheader h1, .infox h1').first().text() ||
 					''
-			) || path.split('/').pop() || path;
+			) ||
+			path.split('/').pop() ||
+			path;
 
 		const $cover = $(
 			'.thumb img, .seriestucont .thumb img, .infox img, img.wp-post-image'
@@ -308,7 +340,9 @@ export class MadaraScansSource extends BaseSource {
 		cover = this.absUrl(cover);
 
 		const description =
-			$('.entry-content p, .seriestucontent .entry-content, .wd-full .entry-content')
+			$(
+				'.entry-content p, .seriestucontent .entry-content, .wd-full .entry-content'
+			)
 				.first()
 				.text()
 				.replace(/\s+/g, ' ')
@@ -419,9 +453,11 @@ export class MadaraScansSource extends BaseSource {
 	private parseTsReaderImages(html: string): string[] {
 		const images: string[] = [];
 		const seen = new Set<string>();
+
 		const push = (src: string) => {
 			src = (src || '').replace(/\\\//g, '/').trim().split('?')[0];
 			src = this.absUrl(src);
+			src = this.rewriteImageHost(src);
 			if (
 				!src ||
 				seen.has(src) ||
@@ -453,9 +489,7 @@ export class MadaraScansSource extends BaseSource {
 		}
 
 		const urls = blob.match(/https?:\/\/[^\s"'\\<>]+/g) || [];
-		for (const u of urls) {
-			push(u);
-		}
+		for (const u of urls) push(u);
 
 		return images;
 	}
@@ -481,6 +515,7 @@ export class MadaraScansSource extends BaseSource {
 					const seen = new Set<string>();
 					const push = (src: string) => {
 						src = this.absUrl((src || '').trim().split('?')[0]);
+						src = this.rewriteImageHost(src);
 						if (
 							!src ||
 							seen.has(src) ||
@@ -496,23 +531,26 @@ export class MadaraScansSource extends BaseSource {
 						images.push(src);
 					};
 
-					$('#readerarea img, .readerarea img, .rdminimal img').each((_, img) => {
-						push(
-							$(img).attr('data-src') ||
-								$(img).attr('data-lazy-src') ||
-								$(img).attr('src') ||
-								''
-						);
-					});
+					$('#readerarea img, .readerarea img, .rdminimal img').each(
+						(_, img) => {
+							push(
+								$(img).attr('data-src') ||
+									$(img).attr('data-lazy-src') ||
+									$(img).attr('src') ||
+									''
+							);
+						}
+					);
 				}
 
 				if (images.length === 0) {
 					const re =
-						/https?:\/\/(?:i\d\.wp\.com\/)?(?:madarascans\.org|madascans\.com)\/wp-content\/uploads\/[^"'\\\s<>]+/gi;
-					const found = (html.replace(/\\\//g, '/').match(re) || []);
+						/https?:\/\/(?:i\d\.wp\.com\/)?(?:madarascans\.(?:org|net)|madascans\.com)\/wp-content\/uploads\/[^"'\\\s<>]+/gi;
+					const found = html.replace(/\\\//g, '/').match(re) || [];
 					const seen = new Set<string>();
 					for (const u of found) {
-						const src = this.absUrl(u.trim().split('?')[0]);
+						let src = this.absUrl(u.trim().split('?')[0]);
+						src = this.rewriteImageHost(src);
 						if (
 							src &&
 							!seen.has(src) &&
@@ -539,7 +577,11 @@ export class MadaraScansSource extends BaseSource {
 				return images;
 			} catch (e) {
 				lastErr = e;
-				console.error(`[madarascans] getChapterPages attempt=${attempt}`, path, e);
+				console.error(
+					`[madarascans] getChapterPages attempt=${attempt}`,
+					path,
+					e
+				);
 			}
 		}
 
