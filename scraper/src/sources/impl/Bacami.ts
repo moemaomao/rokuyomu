@@ -1,8 +1,8 @@
 /**
  * BacaMi (v1.bacami.site) adapter
  *
- * List   : /  |  /page/{n}/   → hanya #project-list (Rekomendasi Update)
- * Search : /?s=QUERY
+ * List   : /  |  /page/{n}/   → #komik-list (utama) + #project-list (rekomendasi)
+ * Search : /?s=QUERY          → article.genre-card
  * Detail : /komik/{slug}/
  * Chapter: /{slug}-chapter-{n}/
  * Pages  : configReader.imageUrls di .entry-content
@@ -11,7 +11,7 @@
  *   manga   : "/komik/{slug}"
  *   chapter : "/{slug}-chapter-{n}"
  *
- * Bahasa default: Indonesian (badge homepage = ID)
+ * Bahasa default: Indonesian
  */
 
 import { BaseSource } from '../BaseSource';
@@ -65,9 +65,7 @@ export class BacamiSource extends BaseSource {
 			return major;
 		}
 
-		const m = String(text).match(
-			/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i
-		);
+		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i);
 		if (m) {
 			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
 			return parseInt(m[1], 10);
@@ -89,14 +87,42 @@ export class BacamiSource extends BaseSource {
 	}
 
 	private isBadCover(src: string): boolean {
-		return /api\d+-?\d*\.png|hot-tag|themes\/bacami\/img|logo|placeholder/i.test(
+		return /api\d+-?\d*\.png|hot-tag|themes\/bacami\/img|logo|placeholder|loaders/i.test(
 			src || ''
 		);
 	}
 
-	// ── List cards ───────────────────────────────────────────────────────────
+	private pickCover($el: cheerio.Cheerio<any>): string {
+		// prioritaskan img di dalam link cover (bukan hot-tag)
+		const candidates = [
+			$el.find('.manga-cover a img, .genre-cover a img').attr('data-src'),
+			$el.find('.manga-cover a img, .genre-cover a img').attr('src'),
+			$el.find('a[href*="/komik/"] img').attr('data-src'),
+			$el.find('a[href*="/komik/"] img').attr('src')
+		].filter(Boolean) as string[];
 
-	private parseCards($: cheerio.CheerioAPI, root?: cheerio.Cheerio<any>): Manga[] {
+		for (const c of candidates) {
+			if (c && !this.isBadCover(c)) return this.absUrl(c.split('?')[0]);
+		}
+
+		// fallback scan semua img
+		let found = '';
+		$el.find('img').each((_, img) => {
+			if (found) return;
+			const s =
+				(img as any).attribs?.['data-src'] ||
+				(img as any).attribs?.src ||
+				'';
+			if (s && /bmcdn\.my\.id|cdn\.bmcdn/i.test(s) && !this.isBadCover(s)) {
+				found = s;
+			}
+		});
+		return found ? this.absUrl(found.split('?')[0]) : '';
+	}
+
+	// ── List cards (homepage / page-n) ───────────────────────────────────────
+
+	private parseMangaCards($: cheerio.CheerioAPI, root?: cheerio.Cheerio<any>): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();
 		const scope = root && root.length ? root : $.root();
@@ -124,31 +150,9 @@ export class BacamiSource extends BaseSource {
 			);
 			if (!title) return;
 
-			let cover =
-				$el.find('.manga-cover a img').attr('data-src') ||
-				$el.find('.manga-cover a img').attr('src') ||
-				'';
-
-			if (!cover || this.isBadCover(cover)) {
-				cover = '';
-				$el.find('.manga-cover img').each((__, img) => {
-					if (cover) return;
-					const s = $(img).attr('data-src') || $(img).attr('src') || '';
-					if (
-						s &&
-						/bmcdn\.my\.id|cdn\.bmcdn/i.test(s) &&
-						!this.isBadCover(s)
-					) {
-						cover = s;
-					}
-				});
-			}
-
 			let latestChapter: number | undefined;
 			const chLink = $el
-				.find(
-					'.chapter-details .chapter-link a, .chapter-link a, a[href*="-chapter-"]'
-				)
+				.find('.chapter-details .chapter-link a, .chapter-link a, a[href*="-chapter-"]')
 				.first();
 			if (chLink.length) {
 				const n = this.parseChapterNumber(
@@ -162,7 +166,63 @@ export class BacamiSource extends BaseSource {
 				id,
 				sourceId: this.id,
 				title,
-				cover: this.absUrl((cover || '').split('?')[0]),
+				cover: this.pickCover($el),
+				type: this.detectType($el),
+				status: 'Ongoing',
+				latestChapter,
+				lang: this.DEFAULT_LANG
+			} as Manga & { lang?: string });
+		});
+
+		return out;
+	}
+
+	// ── Search cards (genre-card) ────────────────────────────────────────────
+
+	private parseSearchCards($: cheerio.CheerioAPI): Manga[] {
+		const out: Manga[] = [];
+		const seen = new Set<string>();
+
+		$('article.genre-card, .genre-card').each((_, el) => {
+			const $el = $(el);
+
+			const a =
+				$el.find('a.genre-title[href*="/komik/"]').first().length
+					? $el.find('a.genre-title[href*="/komik/"]').first()
+					: $el.find('.genre-cover a[href*="/komik/"]').first().length
+						? $el.find('.genre-cover a[href*="/komik/"]').first()
+						: $el.find('a[href*="/komik/"]').first();
+
+			const href = a.attr('href') || '';
+			const id = this.cleanId(href);
+			if (!/^\/komik\/[^/]+$/i.test(id) || seen.has(id)) return;
+			seen.add(id);
+
+			const title = this.normalizeTitle(
+				$el.find('a.genre-title').text() ||
+					a.attr('title') ||
+					$el.find('img').attr('alt') ||
+					''
+			);
+			if (!title) return;
+
+			let latestChapter: number | undefined;
+			const chLink = $el
+				.find('.genre-chapter-link a, a[href*="-chapter-"]')
+				.first();
+			if (chLink.length) {
+				const n = this.parseChapterNumber(
+					chLink.text(),
+					this.cleanId(chLink.attr('href') || '')
+				);
+				if (n > 0) latestChapter = n;
+			}
+
+			out.push({
+				id,
+				sourceId: this.id,
+				title,
+				cover: this.pickCover($el),
 				type: this.detectType($el),
 				status: 'Ongoing',
 				latestChapter,
@@ -176,58 +236,50 @@ export class BacamiSource extends BaseSource {
 	// ── Catalog ──────────────────────────────────────────────────────────────
 
 	async getLatestManga(
-	page: number,
-	_opts?: { lang?: string; type?: string }
-): Promise<Manga[]> {
-	try {
-		const p = Math.max(1, Number(page) || 1);
-		const siteStart = (p - 1) * 3 + 1;
-		const paths: string[] = [];
-		for (let i = 0; i < 3; i++) {
-			const n = siteStart + i;
-			paths.push(n <= 1 ? '/' : `/page/${n}/`);
-		}
+		page: number,
+		_opts?: { lang?: string; type?: string }
+	): Promise<Manga[]> {
+		try {
+			const p = Math.max(1, Number(page) || 1);
+			const path = p <= 1 ? '/' : `/page/${p}/`;
 
-		const seen = new Set<string>();
-		const merged: Manga[] = [];
+			const html = await this.fetchHtml(path);
+			if (!html || html.length < 500) {
+				console.warn(`[bacami] empty html: ${path}`);
+				return [];
+			}
 
-		for (const path of paths) {
-			if (merged.length >= this.PER_PAGE) break;
+			const $ = cheerio.load(html);
 
-			try {
-				const html = await this.fetchHtml(path);
-				if (!html || html.length < 500) {
-					console.warn(`[bacami] empty html: ${path}`);
-					continue;
-				}
+			// Prioritas: #komik-list (list utama) → fallback semua .manga-card
+			const komikList = $('#komik-list');
+			let list = this.parseMangaCards(
+				$,
+				komikList.length ? komikList : undefined
+			);
 
-				const $ = cheerio.load(html);
+			// Kalau masih kosong / sedikit, gabung project-list juga
+			if (list.length < 8) {
 				const projectList = $('#project-list');
-				const batch = this.parseCards(
+				const extra = this.parseMangaCards(
 					$,
 					projectList.length ? projectList : undefined
 				);
-
-				console.log(`[bacami] ${path} → ${batch.length} items`);
-
-				for (const m of batch) {
+				const seen = new Set(list.map((m) => m.id));
+				for (const m of extra) {
 					if (seen.has(m.id)) continue;
 					seen.add(m.id);
-					merged.push(m);
-					if (merged.length >= this.PER_PAGE) break;
+					list.push(m);
 				}
-			} catch (e) {
-				console.warn(`[bacami] fail fetch ${path}`, e);
 			}
-		}
 
-		console.log(`[bacami] latest page=${p} → ${merged.length}`);
-		return merged.slice(0, this.PER_PAGE);
-	} catch (e) {
-		console.error('[bacami] getLatestManga', e);
-		return [];
+			console.log(`[bacami] latest page=${p} → ${list.length}`);
+			return list.slice(0, this.PER_PAGE);
+		} catch (e) {
+			console.error('[bacami] getLatestManga', e);
+			return [];
+		}
 	}
-}
 
 	async searchManga(
 		query: string,
@@ -242,10 +294,19 @@ export class BacamiSource extends BaseSource {
 				page <= 1
 					? `/?s=${encodeURIComponent(q)}`
 					: `/page/${page}/?s=${encodeURIComponent(q)}`;
+
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
-			let list = this.parseCards($);
 
+			// Search pakai .genre-card
+			let list = this.parseSearchCards($);
+
+			// Fallback: manga-card (kalau suatu saat berubah)
+			if (!list.length) {
+				list = this.parseMangaCards($);
+			}
+
+			// Fallback terakhir: scan semua link /komik/
 			if (!list.length) {
 				const seen = new Set<string>();
 				$('a[href*="/komik/"]').each((_, el) => {
@@ -257,18 +318,11 @@ export class BacamiSource extends BaseSource {
 						$(el).attr('title') || $(el).text() || ''
 					);
 					if (!title || title.length < 2) return;
-					let cover =
-						$(el).find('img').attr('data-src') ||
-						$(el).find('img').attr('src') ||
-						$(el).closest('article, div').find('img[data-src]').attr('data-src') ||
-						'';
-					if (this.isBadCover(cover)) cover = '';
-
 					list.push({
 						id,
 						sourceId: this.id,
 						title,
-						cover: this.absUrl((cover || '').split('?')[0]),
+						cover: '',
 						type: 'manga',
 						status: 'Ongoing',
 						lang: this.DEFAULT_LANG
@@ -290,9 +344,7 @@ export class BacamiSource extends BaseSource {
 		let path = this.cleanId(mangaId);
 
 		if (/-chapter-/i.test(path) && !path.startsWith('/komik/')) {
-			const slug = path
-				.replace(/^\//, '')
-				.replace(/-chapter-[\d.]+.*$/i, '');
+			const slug = path.replace(/^\//, '').replace(/-chapter-[\d.]+.*$/i, '');
 			if (slug) path = `/komik/${slug}`;
 		}
 
@@ -392,11 +444,8 @@ export class BacamiSource extends BaseSource {
 				this.parseChapterNumber(chapterTitle, id) || chapters.length + 1;
 
 			const date =
-				$(el)
-					.find('.ch-date, .update-time, time')
-					.text()
-					.replace(/\s+/g, ' ')
-					.trim() || '';
+				$(el).find('.ch-date, .update-time, time').text().replace(/\s+/g, ' ').trim() ||
+				'';
 
 			chapters.push({ id, title: chapterTitle, number, date });
 		});
