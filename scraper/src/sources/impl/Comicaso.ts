@@ -60,7 +60,7 @@ private getCookie(): string {
 
 	const cookie =
 		(typeof process !== 'undefined' ? process.env?.COMICASO_COOKIE : '') ||
-		'comicaso_public_sid=730cb5b9e07c8b8f86f815ef7b5fd4f0; comicaso_human=eyJraW5kIjoiaHVtYW4iLCJleHAiOjE3OTA3NTE2MTYsImN0eCI6IjUzNjE4MzIwZTIyN2QyODQwZGExOWY1Y2MwNGM1YTZiZjRjN2UwZTIzOTI1ZGNkMjc5NzE1NzgwMjVmZWE4ODYiLCJjdHh2IjoicHMxIn0.60000394cd60df14962452fbdfdab22a8cb097c52ee82f7fccde718da1a2c410';
+		'comicaso_public_sid=730cb5b9e07c8b8f86f815ef7b5fd4f0; comicaso_human=eyJraW5kIjoiaHVtYW4iLCJleHAiOjE3OTA4NDU2MTIsImN0eCI6IjUzNjE4MzIwZTIyN2QyODQwZGExOWY1Y2MwNGM1YTZiZjRjN2UwZTIzOTI1ZGNkMjc5NzE1NzgwMjVmZWE4ODYiLCJjdHh2IjoicHMxIn0.071f5ad2c7e9479aafcdf6ec05a5aff963d8059addc787a168c183e3dd9c1343';
 
 	const headers: Record<string, string> = {
 		'User-Agent':
