@@ -91,7 +91,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	klz9: async () => new (await import('./impl/Klz9')).Klz9Source(),
 	komikindo: async () => new (await import('./impl/Komikindo')).KomikindoSource(),
 	komikstation: async () => new (await import('./impl/KomikStation')).KomikStationSource(),
-	krakenbites: async () => new (await import('./impl/KrakenBItes')).KrakenBitesSource(),
+	krakenbites: async () => new (await import('./impl/KrakenBites')).KrakenBitesSource(),
 	lovelyblossoms: async () => new (await import('./impl/LovelyBlossoms')).LovelyBlossomsSource(),
 	lumos: async () => new (await import('./impl/Lumos')).LumosSource(),
 	luvyaa: async () => new (await import('./impl/Luvyaa')).LuvyaaSource(),
