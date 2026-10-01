@@ -129,9 +129,11 @@ import { MarineTLSource } from './impl/MarineTL';
 import { RubyNovelsSource } from './impl/RubyNovels';
 import { KappaBeastSource } from './impl/KappaBeast';
 import { KrakenBitesSource } from './impl/KrakenBites';
+import { LazyGirlTranslationsSource } from './impl/LazyGirlTranslations';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    lazygirltranslations: new LazyGirlTranslationsSource(),
     krakenbites: new KrakenBitesSource(),
     kappabeast: new KappaBeastSource(),
     rubynovels: new RubyNovelsSource(),

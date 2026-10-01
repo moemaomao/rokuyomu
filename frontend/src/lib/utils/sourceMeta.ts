@@ -133,7 +133,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	marinetl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	rubynovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-500' },
 	kappabeast: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
-	krakenbites: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' }
+	krakenbites: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
+	lazygirltranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {

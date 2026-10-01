@@ -132,7 +132,9 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'marinetl', name: 'MarineTL' },
 	{ id: 'rubynovels', name: 'Ruby Novels' },
 	{ id: 'kappabeast', name: 'KappaBeast' },
-	{ id: 'krakenbites', name: 'KrakenBites' }
+	{ id: 'krakenbites', name: 'KrakenBites' },
+	{ id: 'lazygirltranslations', name: 'LazyGirlTranslations' }
+
 ];
 
 export function getSourceList(): SourceMeta[] {
