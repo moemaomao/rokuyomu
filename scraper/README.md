@@ -259,7 +259,7 @@ Jangan andalkan scraper Vercel untuk source itu. Di frontend:
 3. Jalankan di folder frontend:
 
 ```bash
-cd ../frontend
+cd frontend
 pnpm sync-worker-sources
 ```
 
