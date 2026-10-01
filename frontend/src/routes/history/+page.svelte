@@ -4,6 +4,7 @@
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import { History, Trash2, BookOpen, Clock, RefreshCw } from 'lucide-svelte';
 	import { getHistory, clearHistory, removeFromHistory, type ReadingEntry } from '$lib/stores/history';
+    import { proxyImage } from '$lib/utils/image';
 
 	let history = $state<ReadingEntry[]>([]);
 	let refreshing = $state(false);
@@ -128,13 +129,14 @@
                         class="relative aspect-[3/4] w-full overflow-hidden bg-zinc-800"
                     >
                         {#if entry.cover}
-                            <img
-                                src="/api/proxy?url={encodeURIComponent(entry.cover)}&source={entry.sourceId}"
-								onerror={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0'; }}
-                                alt={entry.mangaTitle}
-                                class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                            />
-                        {:else}
+                      <img
+                              src={proxyImage(entry.cover, entry.sourceId, 200)}
+                              onerror={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0'; }}
+                              alt={entry.mangaTitle}
+                              class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                              loading="lazy"
+                          />
+                       {:else}
                             <div class="flex h-full w-full items-center justify-center">
                                 <BookOpen class="h-8 w-8 text-zinc-700" />
                             </div>

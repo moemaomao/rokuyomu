@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getBookmarks, removeBookmark, type BookmarkEntry } from '$lib/stores/bookmark.svelte';
 	import { Trash2, BookOpen, RefreshCw } from 'lucide-svelte';
+    import { proxyImage } from '$lib/utils/image';
 
 	let bookmarks = $state<BookmarkEntry[]>([]);
 	let refreshing = $state(false);
@@ -103,16 +104,16 @@
                         class="relative aspect-[3/4] w-full overflow-hidden bg-zinc-800"
                     >
                         {#if bm.cover}
-                            <img
-                                src={proxyCover(bm.cover, bm.sourceId)}
-                                data-original={bm.cover}
-                                data-source={bm.sourceId}
-                                alt={bm.mangaTitle}
-                                class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                                loading="lazy"
-                                onerror={onCoverError}
-                            />
-                        {:else}
+	            <img
+		                src={proxyImage(bm.cover, bm.sourceId, 200)}
+		                data-original={bm.cover}
+		                data-source={bm.sourceId}
+		                alt={bm.mangaTitle}
+		                class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+		                loading="lazy"
+		                onerror={onCoverError}
+	                />
+                {:else}
                             <div class="flex h-full w-full items-center justify-center">
                                 <BookOpen class="h-8 w-8 text-zinc-700" />
                             </div>

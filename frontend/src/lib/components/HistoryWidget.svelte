@@ -8,6 +8,7 @@
 		type ReadingEntry
 	} from '$lib/stores/history';
 	import { browser } from '$app/environment';
+	import { proxyImage } from '$lib/utils/image';
 
 	let {
 		open = $bindable(true),
@@ -69,15 +70,9 @@
 	}
 
 	function proxyCover(entry: ReadingEntry): string {
-	   if (!entry.cover) return '';
-	   let u = String(entry.cover).trim();
-	   if (!u) return '';
-	   if (u.startsWith('//')) u = 'https:' + u;
-	   if (/^https?:\/\//i.test(u)) {
-		return `/api/proxy?url=${encodeURIComponent(u)}&source=${entry.sourceId}`;
-	    }
-	   return '';
-    }
+  if (!entry.cover) return '';
+  return proxyImage(entry.cover, entry.sourceId, 100);
+}
 
 	onMount(() => {
 		loadHistory();
