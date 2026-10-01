@@ -132,6 +132,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	violetmanga: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-500' },
 	marinetl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	rubynovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-500' },
+	kappabeast: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

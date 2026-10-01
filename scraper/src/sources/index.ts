@@ -127,9 +127,11 @@ import { FenrirRealmSource } from './impl/FenrirRealm';
 import { VioletMangaSource } from './impl/VioletManga';
 import { MarineTLSource } from './impl/MarineTL';
 import { RubyNovelsSource } from './impl/RubyNovels';
+import { KappaBeastSource } from './impl/KappaBeast';
 import type { IMangaSource } from './types';
 
 const sources: Record<string, IMangaSource> = {
+    kappabeast: new KappaBeastSource(),
     rubynovels: new RubyNovelsSource(),
     marinetl: new MarineTLSource(),
     violetmanga: new VioletMangaSource(),

@@ -131,6 +131,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'violetmanga', name: 'Violet Manga' },
 	{ id: 'marinetl', name: 'MarineTL' },
 	{ id: 'rubynovels', name: 'Ruby Novels' },
+	{ id: 'kappabeast', name: 'KappaBeast' },
 ];
 
 export function getSourceList(): SourceMeta[] {

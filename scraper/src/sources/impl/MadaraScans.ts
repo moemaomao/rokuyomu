@@ -14,13 +14,6 @@
  *
  * Bahasa default: English
  *
- * Catatan pagination:
- *   Path-style /series/page/N/ selalu mengembalikan konten page 1.
- *   WAJIB query-style: /series/?order=update&page=N
- *
- * Catatan images (Oct 2026):
- *   ts_reader sering pakai host madascans.com (down, 520).
- *   Semua URL image di-rewrite ke madarascans.net.
  */
 
 import { BaseSource } from '../BaseSource';
