@@ -24,14 +24,9 @@ export function isCloudflareChallenge(status: number, html: string): boolean {
 
 export type FetchWithCfOptions = {
 	headers?: Record<string, string>;
-	/** Kalau true, Byparr return HTML langsung (skip second fetch) */
 	preferSolverBody?: boolean;
 };
 
-/**
- * fetch HTML dengan auto CF solve + cookie jar.
- * Dipakai BaseSource.fetchHtml dan adapter custom (OneManga.getHtml, dll).
- */
 export async function fetchWithCf(
 	url: string,
 	opts: FetchWithCfOptions = {}
@@ -59,7 +54,6 @@ export async function fetchWithCf(
 		return html;
 	}
 
-	// Challenge — perlu solve
 	if (!isByparrEnabled()) {
 		throw new Error(
 			`Cloudflare challenge on ${url} (Byparr disabled; set BYPARR_URL)`
@@ -76,12 +70,10 @@ export async function fetchWithCf(
 
 	setCfSession(url, solved.cookieHeader, solved.userAgent);
 
-	// Opsi A: pakai HTML dari Byparr (lebih cepat, 1 round-trip)
 	if (opts.preferSolverBody !== false && solved.html && !isCloudflareChallenge(200, solved.html)) {
 		return solved.html;
 	}
 
-	// Opsi B: fetch ulang dengan cookie (pastikan sama path/query)
 	const retryHeaders: Record<string, string> = {
 		...baseHeaders,
 		Cookie: solved.cookieHeader,
