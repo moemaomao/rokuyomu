@@ -18,6 +18,7 @@ import type { IMangaSource } from './types';
 
 export const WORKER_SOURCE_IDS = new Set([
 	'ainzscans',
+	'areakomik',
 	'athreascans',
 	'bacakomik',
 	'bacami',
@@ -46,6 +47,7 @@ export const WORKER_SOURCE_IDS = new Set([
 	'ngomik',
 	'novelshaven',
 	'noveltoon',
+	'onemanga',
 	'pixhentai',
 	'rawkuma',
 	'sakuranovel',
@@ -59,6 +61,7 @@ export const WORKER_SOURCE_IDS = new Set([
 	'softkomik',
 	'storyseedling',
 	'tinytranslation',
+	'voratoon',
 	'weebcentral',
 	'yumeneijiworks'
 ]);
@@ -67,6 +70,7 @@ const instanceCache = new Map<string, IMangaSource>();
 
 const loaders: Record<string, () => Promise<IMangaSource>> = {
 	ainzscans: async () => new (await import('./impl/AinzScans')).AinzScansSource(),
+	areakomik: async () => new (await import('./impl/Areakomik')).AreakomikSource(),
 	athreascans: async () => new (await import('./impl/AthreaScans')).AthreaScansSource(),
 	bacakomik: async () => new (await import('./impl/Bacakomik')).BacaKomikSource(),
 	bacami: async () => new (await import('./impl/Bacami')).BacamiSource(),
@@ -95,6 +99,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	ngomik: async () => new (await import('./impl/Ngomik')).NgomikSource(),
 	novelshaven: async () => new (await import('./impl/NovelsHaven')).NovelsHavenSource(),
 	noveltoon: async () => new (await import('./impl/Noveltoon')).Noveltoon(),
+	onemanga: async () => new (await import('./impl/OneManga')).OneMangaSource(),
 	pixhentai: async () => new (await import('./impl/PixHentai')).PixHentaiSource(),
 	rawkuma: async () => new (await import('./impl/Rawkuma')).RawkumaSource(),
 	sakuranovel: async () => new (await import('./impl/Sakuranovel')).SakuranovelSource(),
@@ -108,6 +113,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	softkomik: async () => new (await import('./impl/Softkomik')).SoftkomikSource(),
 	storyseedling: async () => new (await import('./impl/StorySeedling')).StorySeedlingSource(),
 	tinytranslation: async () => new (await import('./impl/TinyTranslation')).TinyTranslationSource(),
+	voratoon: async () => new (await import('./impl/Voratoon')).VoratoonSource(),
 	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
 	yumeneijiworks: async () => new (await import('./impl/YumeNeijiWorks')).YumeNeijiWorksSource(),
 };
