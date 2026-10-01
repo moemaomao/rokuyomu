@@ -2,8 +2,8 @@
  * MadaraScans adapter (https://madarascans.org)
  *
  * Theme: Themesia / WordPress mangareader
- * Series list  : /series/  |  /series/?order=update&page={n}
- * Search       : /?s={q}   |  /?s={q}&page={n}
+ * Series list  : /series/?order=update  |  /series/?order=update&page={n}
+ * Search       : /?s={q}                |  /?s={q}&page={n}
  * Detail       : /series/{slug}/
  * Chapter      : /{slug}-chapter-{n}/
  * Pages        : ts_reader.run({ sources:[{ images:[...] }] })
@@ -14,14 +14,13 @@
  *
  * Bahasa default: English
  *
- * Catatan pagination (Sep 2026):
- * Path-style /series/page/N/?order=update rusak di situs
- * (semua page mengembalikan konten page 1).
- * Harus pakai query-style: /series/?order=update&page=N
+ * Catatan pagination:
+ *   Path-style /series/page/N/ selalu mengembalikan konten page 1.
+ *   WAJIB query-style: /series/?order=update&page=N
  *
  * Catatan images (Oct 2026):
- * ts_reader sering mengembalikan host madascans.com yang sudah down (520).
- * Semua URL image di-rewrite ke madarascans.net.
+ *   ts_reader sering pakai host madascans.com (down, 520).
+ *   Semua URL image di-rewrite ke madarascans.net.
  */
 
 import { BaseSource } from '../BaseSource';
@@ -34,7 +33,6 @@ export class MadaraScansSource extends BaseSource {
 	baseUrl = 'https://madarascans.org';
 
 	private readonly PER_PAGE = 24;
-	private readonly SITE_PER_PAGE = 30;
 	private readonly DEFAULT_LANG = 'en';
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
@@ -128,7 +126,7 @@ export class MadaraScansSource extends BaseSource {
 			const $link = $card
 				.find('a[href*="/series/"]')
 				.filter((_, a) => {
-					const h = ($(a).attr('href') || '').split('')[0];
+					const h = ($(a).attr('href') || '').split('?')[0];
 					return /\/series\/[^/]+\/?$/.test(h);
 				})
 				.first();
@@ -186,8 +184,9 @@ export class MadaraScansSource extends BaseSource {
 						.replace(/^chapter\s*/i, '')
 						.replace(/\s*END\s*$/i, '')
 						.trim();
-					if (cleaned && cleaned !== '?' && cleaned !== '0')
+					if (cleaned && cleaned !== '?' && cleaned !== '0') {
 						latestChapter = cleaned;
+					}
 				}
 			}
 			if (!latestChapter) {
@@ -223,34 +222,15 @@ export class MadaraScansSource extends BaseSource {
 		appPage: number
 	): Promise<Manga[]> {
 		const p = Math.max(1, Number(appPage) || 1);
-		const start = (p - 1) * this.PER_PAGE;
-		const siteStart = Math.floor(start / this.SITE_PER_PAGE) + 1;
-		const offsetInFirst = start % this.SITE_PER_PAGE;
 
-		const merged: Manga[] = [];
-		const seen = new Set<string>();
-
-		for (
-			let sp = siteStart;
-			sp <= siteStart + 2 && merged.length < offsetInFirst + this.PER_PAGE;
-			sp++
-		) {
-			try {
-				const html = await this.fetchHtml(buildPath(sp));
-				const list = this.parseCards(cheerio.load(html));
-				for (const m of list) {
-					if (seen.has(m.id)) continue;
-					seen.add(m.id);
-					merged.push(m);
-				}
-				if (list.length === 0) break;
-			} catch (e) {
-				console.error('[madarascans] catalog page', sp, e);
-				break;
-			}
+		try {
+			const html = await this.fetchHtml(buildPath(p));
+			const list = this.parseCards(cheerio.load(html));
+			return list.slice(0, this.PER_PAGE);
+		} catch (e) {
+			console.error('[madarascans] catalog page', p, e);
+			return [];
 		}
-
-		return merged.slice(offsetInFirst, offsetInFirst + this.PER_PAGE);
 	}
 
 	// ── Catalog ──────────────────────────────────────────────────────────────
@@ -284,9 +264,7 @@ export class MadaraScansSource extends BaseSource {
 		try {
 			const list = await this.fetchCatalogPages((sitePage) => {
 				const params = new URLSearchParams({ s: q });
-				if (sitePage > 1) {
-					params.set('page', String(sitePage));
-				}
+				if (sitePage > 1) params.set('page', String(sitePage));
 				return `/?${params.toString()}`;
 			}, page);
 
