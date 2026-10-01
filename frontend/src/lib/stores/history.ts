@@ -95,6 +95,8 @@ if (browser) {
 			ready = true;
 		}
 
+		window.dispatchEvent(new CustomEvent('history-changed'));
+
 		window.addEventListener('history-changed', async () => {
 			historyCache = await idbGetHistory();
 		});
@@ -156,6 +158,24 @@ export function getHistory(): ReadingEntry[] {
 export function isHistoryReady(): boolean {
 	return ready;
 }
+
+export function whenHistoryReady(): Promise<void> {
+	if (ready) return Promise.resolve();
+	return new Promise((resolve) => {
+		const onReady = () => {
+			if (ready) {
+				window.removeEventListener('history-changed', onReady);
+				resolve();
+			}
+		};
+		window.addEventListener('history-changed', onReady);
+		if (ready) {
+			window.removeEventListener('history-changed', onReady);
+			resolve();
+		}
+	});
+}
+
 
 export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	if (!browser) return;

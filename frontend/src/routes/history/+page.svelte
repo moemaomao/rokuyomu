@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import { History, Trash2, BookOpen, Clock, RefreshCw } from 'lucide-svelte';
-	import { getHistory, clearHistory, removeFromHistory, type ReadingEntry } from '$lib/stores/history';
+	import { getHistory, clearHistory, removeFromHistory, whenHistoryReady, type ReadingEntry } from '$lib/stores/history';
     import { proxyImage } from '$lib/utils/image';
 
 	let history = $state<ReadingEntry[]>([]);
@@ -24,9 +24,16 @@
 	}
 
 	onMount(() => {
-		loadHistory();
+		let cancelled = false;
+		(async () => {
+			await whenHistoryReady();
+			if (!cancelled) loadHistory();
+		})();
 		window.addEventListener('history-changed', loadHistory);
-		return () => window.removeEventListener('history-changed', loadHistory);
+		return () => {
+			cancelled = true;
+			window.removeEventListener('history-changed', loadHistory);
+		};
 	});
 
 	async function handleClear() {

@@ -1,6 +1,6 @@
 # Rokuyomu (Mikoroku v2)
 
-Multi-source **manga, comics & novel** reader — **SvelteKit** on **Cloudflare Workers**, scraping via **Node microservice** (+ hybrid untuk source yang diblokir Vercel).
+Multi-source **manga, comics & novel** reader — **SvelteKit** on **Cloudflare Workers**, scraping via **Node microservice** (+ hybrid untuk source yang diblokir Vercel) + **Byparr** untuk bypass Cloudflare.
 
 Aggregates latest updates and search from many sources (manga, manhwa, manhua, doujin, hentai, light novel, dll.) in one place.
 
@@ -26,6 +26,7 @@ Aggregates latest updates and search from many sources (manga, manhwa, manhua, d
 - Report broken source / chapter
 - Admin panel (health, sources, backup snapshot)
 - **Hybrid scrape:** source yang diblokir outbound IP Vercel dijalankan langsung di Cloudflare Worker (Cheerio)
+- **Byparr:** bypass Cloudflare challenge di scraper (cookie jar + auto-retry)
 
 ---
 
@@ -37,13 +38,15 @@ UI
       ├─ KV cache (browse / manga / pages / novel)
       └─ scraperClient (hybrid)
            ├─ source ∈ WORKER_SOURCE_IDS  → parse lokal di Worker (Cheerio)
-           └─ source lainnya              → HTTP JSON ke scraper Node (Vercel)
+           └─ source lainnya              → HTTP JSON ke scraper Node (Vercel/Render)
+                └─ fetchWithCf → Byparr (jika CF challenge)
 ```
 
 | Layer | Role | Deploy |
 |-------|------|--------|
 | **frontend/** | UI + thin proxy + KV + hybrid Worker sources | Cloudflare Workers |
-| **scraper/** | Express + Cheerio, **~118** source adapters (manga + novel) | Vercel (atau Render/Koyeb/Fly) |
+| **scraper/** | Express + Cheerio, **~118** source adapters (manga + novel) + Byparr client | Vercel (atau Render/Koyeb/Fly) |
+| **Byparr** | Anti-bot solver (Camoufox) — opsional, self-hosted | Docker / lokal (port 8191) |
 
 Worker free tier tetap aman selama mayoritas request hanya `fetch()` JSON. Cheerio di Worker **hanya** untuk source yang gagal dari IP Vercel.
 
@@ -57,6 +60,7 @@ Worker free tier tetap aman selama mayoritas request hanya `fetch()` JSON. Cheer
 - **Tailwind CSS** v4
 - **Cloudflare Workers** + Workers KV + Cron Triggers
 - **Express** + **Cheerio** (scraper microservice)
+- **Byparr** (FlareSolverr-compatible anti-bot bypass)
 - **Firebase** (auth / sync opsional)
 - **jszip** (download chapter)
 - **pnpm** (frontend) · **npm** (scraper)
@@ -105,10 +109,14 @@ rokuyomu/
 │
 └── scraper/                          # Node microservice
     ├── src/
-    │   ├── index.ts                  # Express API (+ novel-chapter)
+    │   ├── index.ts                  # Express API (+ novel-chapter + Byparr health)
+    │   ├── lib/
+    │   │   ├── byparr.ts             # Client ke Byparr /v1
+    │   │   ├── cfCookieJar.ts        # Cookie jar per-domain (TTL)
+    │   │   └── fetchWithCf.ts        # Fetch + deteksi CF challenge → Byparr
     │   └── sources/
     │       ├── index.ts              # Full registry (~118 adapters)
-    │       ├── BaseSource.ts
+    │       ├── BaseSource.ts         # fetchHtml → fetchWithCf
     │       ├── types.ts              # Manga types
     │       ├── types-novel.ts        # Novel types (INovelSource, ...)
     │       └── impl/                 # Semua adapter manga + novel
@@ -127,16 +135,75 @@ rokuyomu/
 - npm (scraper)
 - Cloudflare account (Workers + KV)
 - Akun Vercel / Render (scraper)
+- **(Opsional)** Docker — untuk Byparr (bypass Cloudflare)
 
 ---
 
 ## Development
+
+### 0. Byparr (opsional, terminal 0) — bypass Cloudflare
+
+Byparr = self-hosted anti-bot solver (drop-in FlareSolverr). Scraper memanggil `BYPARR_URL` kalau ketemu Cloudflare challenge.
+
+**Docker (paling gampang):**
+
+```bash
+docker run -d --name byparr -p 8191:8191 ghcr.io/thephaseless/byparr:latest
+```
+
+Docs API: `http://localhost:8191/docs`
+
+**Lokal (tanpa Docker):**
+
+```bash
+# install uv dulu: https://docs.astral.sh/uv/
+git clone https://github.com/ThePhaseless/Byparr
+cd Byparr
+uv run main.py
+# → http://localhost:8191
+```
+
+Setelah Byparr hidup, set env di scraper:
+
+```bash
+export BYPARR_URL=http://localhost:8191
+# opsional: CF_COOKIE_TTL_MS=900000   # default 15 menit
+```
+
+Health scraper akan menampilkan `byparr: true` kalau env ter-set:
+
+```bash
+curl http://localhost:3000/health
+# { "ok": true, "byparr": true, "byparrUrl": "(set)", "cfJar": { "size": 0, "alive": 0 }, ... }
+```
+
+> Tanpa `BYPARR_URL`, source yang kena CF challenge akan error: `Cloudflare challenge ... (Byparr disabled; set BYPARR_URL)`.
 
 ### 1. Scraper (terminal 1)
 
 ```bash
 cd scraper
 npm install
+```
+
+**Linux / macOS / Git Bash:**
+
+```bash
+# dengan Byparr:
+BYPARR_URL=http://localhost:8191 npx tsx src/index.ts
+# tanpa Byparr:
+npx tsx src/index.ts
+# → http://localhost:3000
+```
+
+**Windows PowerShell:**
+
+```powershell
+# dengan Byparr:
+$env:BYPARR_URL="http://localhost:8191"
+npx tsx src/index.ts
+
+# tanpa Byparr:
 npx tsx src/index.ts
 # → http://localhost:3000
 ```
@@ -190,10 +257,29 @@ pnpm dev
 
 ## Production deploy
 
-### Scraper → Vercel
+### Byparr (self-hosted)
+
+Jalankan Byparr di VPS / home server (Docker), lalu set `BYPARR_URL` di env scraper (Render/Koyeb/Fly — **bukan** Vercel serverless, karena Byparr butuh long-running browser).
+
+```bash
+docker run -d --name byparr -p 8191:8191 --restart unless-stopped ghcr.io/thephaseless/byparr:latest
+```
+
+Contoh env scraper (Render):
+
+```
+BYPARR_URL=http://IP-VPS-KAMU:8191
+# atau internal network: http://byparr:8191
+CF_COOKIE_TTL_MS=900000
+```
+
+> Vercel serverless **tidak cocok** untuk Byparr (cold start + no persistent cookie jar). Kalau banyak source kena CF, deploy scraper ke Render/Koyeb/Fly + Byparr di sampingnya.
+
+### Scraper → Vercel (tanpa Byparr) / Render (dengan Byparr)
 
 - Root directory: `scraper`
-- Build: `npm run vercel-build` (esbuild → `api/index.js`)
+- Build: `npm run vercel-build` (esbuild → `api/index.js`) — Vercel
+- Atau Render: start `npx tsx src/index.ts`, env `BYPARR_URL=...`
 - Catat URL, contoh: `https://rokuyomu.vercel.app`
 
 ### Frontend → Cloudflare
@@ -223,7 +309,7 @@ Beberapa situs memblokir outbound IP Vercel. Source tersebut dijalankan langsung
 
 ```
 source ∈ WORKER_SOURCE_IDS  → Cheerio di CF Worker
-source lainnya              → scraper Vercel
+source lainnya              → scraper Vercel/Render (+ Byparr jika CF)
 ```
 
 Daftar ID disimpan di:
@@ -279,7 +365,7 @@ Source novel punya `kind: 'novel'` dan implement `getChapterContent` (bukan `get
 
 | Endpoint | Keterangan |
 |----------|------------|
-| `GET /health` | Health check |
+| `GET /health` | Health check (+ status Byparr & CF cookie jar) |
 | `GET /sources` | Daftar source |
 | `GET /:sourceId/latest?page&lang&type&q` | Latest / search |
 | `GET /:sourceId/manga/*` | Detail manga/novel |
@@ -288,6 +374,16 @@ Source novel punya `kind: 'novel'` dan implement `getChapterContent` (bukan `get
 | `GET /:sourceId/manga-from-chapter?chapter=...` | Resolve mangaId dari chapter (opsional) |
 
 Header opsional: `x-api-key` jika `SCRAPER_API_KEY` di-set.
+
+### Env scraper (Byparr)
+
+| Variable | Default | Keterangan |
+|----------|---------|------------|
+| `BYPARR_URL` | (kosong) | URL Byparr, contoh `http://localhost:8191`. Kosong = Byparr off |
+| `CF_COOKIE_TTL_MS` | `900000` (15 mnt) | TTL cookie CF di jar per-domain |
+| `PORT` | `3000` | Port lokal / Render |
+| `SCRAPER_API_KEY` | (kosong) | Opsional; wajib match frontend |
+| `VERCEL` | (platform) | Skip `app.listen` di Vercel |
 
 ---
 
@@ -299,6 +395,7 @@ Header opsional: `x-api-key` jika `SCRAPER_API_KEY` di-set.
 - Frontend source registry = metadata only; scraping penuh di scraper atau `workerSources`.
 - Source baru ditambahkan di scraper; register juga di frontend light registry (`src/lib/server/sources/index.ts`).
 - Beberapa source berisi konten R18 — gunakan secara bertanggung jawab sesuai hukum setempat.
+- **Byparr** tidak menjamin 100% bypass; success rate naik kalau egress IP “bersih”. Cookie di-cache per domain biar tidak solve ulang tiap request.
 
 ---
 

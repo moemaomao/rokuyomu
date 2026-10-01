@@ -6,6 +6,8 @@ Dipakai frontend Cloudflare Worker lewat HTTP JSON supaya Worker tetap di free t
 
 Repo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · package ini: `scraper/`
 
+**Byparr** terintegrasi untuk bypass Cloudflare challenge (cookie jar + auto-retry).
+
 ---
 
 ## Role
@@ -14,6 +16,7 @@ Repo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · package ini
 |-------|--------|
 | Parse HTML / API source | Cheerio + adapter per situs (~118) |
 | API JSON | Latest, search, detail, chapter pages, **novel chapter content** |
+| CF bypass | `fetchWithCf` → Byparr (`BYPARR_URL`) + cookie jar per-domain |
 | Deploy | Vercel serverless (atau Render / Koyeb / Fly) |
 
 Frontend **tidak** import adapter scraper secara default.  
@@ -35,7 +38,7 @@ Source yang ada di `WORKER_SOURCE_IDS` (frontend) **tidak** memanggil API ini �
 
 | Method | Path | Keterangan |
 |--------|------|------------|
-| `GET` | `/health` | `{ ok: true, ts }` |
+| `GET` | `/health` | `{ ok, ts, byparr, byparrUrl, cfJar }` |
 | `GET` | `/sources` | Daftar `{ id, name }[]` |
 | `GET` | `/:sourceId/latest` | Query: `page`, `lang`, `type`, `q` (search jika `q` diisi) |
 | `GET` | `/:sourceId/manga/*` | Detail manga/novel + chapters. Query: `lang` |
@@ -59,10 +62,14 @@ x-api-key: <SCRAPER_API_KEY>
 ```
 scraper/
 ├── src/
-│   ├── index.ts              # Express app + routes
+│   ├── index.ts              # Express app + routes (+ Byparr di /health)
+│   ├── lib/
+│   │   ├── byparr.ts         # Client POST {BYPARR_URL}/v1 (cmd: request.get)
+│   │   ├── cfCookieJar.ts    # Cookie jar per-domain (TTL default 15 mnt)
+│   │   └── fetchWithCf.ts    # Deteksi CF challenge → solve Byparr → retry
 │   └── sources/
 │       ├── index.ts          # Registry + getSource / getAllSources
-│       ├── BaseSource.ts
+│       ├── BaseSource.ts     # fetchHtml → fetchWithCf
 │       ├── types.ts          # Manga types (IMangaSource, ...)
 │       ├── types-novel.ts    # Novel types (INovelSource, NovelChapterContent, ...)
 │       └── impl/             # ~118 adapter (manga + novel)
@@ -75,11 +82,95 @@ scraper/
 
 ---
 
+## Byparr (Cloudflare bypass)
+
+Byparr = self-hosted anti-bot solver ([ThePhaseless/Byparr](https://github.com/ThePhaseless/Byparr)), kompatibel API FlareSolverr.
+
+Alur di scraper:
+
+1. `BaseSource.fetchHtml` → `fetchWithCf`
+2. Kalau response kena CF challenge (marker / 403+cf-ray) → panggil Byparr
+3. Simpan cookie + UA di `cfCookieJar` (per domain, TTL)
+4. Pakai body dari solver atau retry dengan cookie
+
+### Hidupin Byparr
+
+**Docker (disarankan):**
+
+```bash
+docker run -d --name byparr -p 8191:8191 --restart unless-stopped ghcr.io/thephaseless/byparr:latest
+```
+
+**Lokal:**
+
+```bash
+# butuh uv: https://docs.astral.sh/uv/
+git clone https://github.com/ThePhaseless/Byparr
+cd Byparr
+uv run main.py
+# → http://localhost:8191
+```
+
+Docs: `http://localhost:8191/docs`
+
+### Env scraper
+
+| Variable | Default | Keterangan |
+|----------|---------|------------|
+| `BYPARR_URL` | (kosong) | Contoh `http://localhost:8191`. Kosong = Byparr **off** |
+| `CF_COOKIE_TTL_MS` | `900000` | TTL cookie CF di jar (15 menit) |
+| `PORT` | `3000` | Port lokal / Render |
+| `SCRAPER_API_KEY` | (kosong) | Opsional |
+| `VERCEL` | (platform) | Skip `app.listen` di Vercel |
+
+Tanpa `BYPARR_URL`, source yang kena CF akan throw:
+
+```
+Cloudflare challenge on <url> (Byparr disabled; set BYPARR_URL)
+```
+
+### Cek status
+
+```bash
+curl http://localhost:3000/health
+```
+
+Contoh response:
+
+```json
+{
+  "ok": true,
+  "ts": 1727800000000,
+  "byparr": true,
+  "byparrUrl": "(set)",
+  "cfJar": { "size": 2, "alive": 2 }
+}
+```
+
+---
+
 ## Setup lokal
 
 ```bash
+# 1) (opsional) Byparr dulu
+docker run -d --name byparr -p 8191:8191 ghcr.io/thephaseless/byparr:latest
+
+# 2) Scraper
 cd scraper
 npm install
+```
+
+**Linux / macOS / Git Bash:**
+
+```bash
+BYPARR_URL=http://localhost:8191 npx tsx src/index.ts
+# → http://localhost:3000
+```
+
+**Windows PowerShell:**
+
+```powershell
+$env:BYPARR_URL="http://localhost:8191"
 npx tsx src/index.ts
 # → http://localhost:3000
 ```
@@ -105,7 +196,7 @@ curl http://localhost:3000/health
 
 ## Deploy
 
-### Vercel (default)
+### Vercel (default, tanpa Byparr)
 
 - Root directory: `scraper`
 - Build command: `npm run vercel-build`
@@ -118,15 +209,16 @@ Setelah live, set di frontend:
 SCRAPER_BASE_URL=https://rokuyomu.vercel.app
 ```
 
-### Render / Koyeb / Fly (alternatif)
+> Vercel serverless **tidak cocok** untuk Byparr (tidak persistent + cold start). Pakai Render/Koyeb/Fly kalau butuh CF bypass.
 
-Jika IP Vercel diblokir banyak source, deploy scraper yang sama ke host lain dan arahkan frontend ke URL itu (atau hybrid dual-URL).
+### Render / Koyeb / Fly (dengan Byparr)
 
-Contoh Render Web Service:
-
-- Build: `npm install`
-- Start: `npx tsx src/index.ts` (atau `npm start`)
-- Free tier bisa sleep → ping `/health` berkala
+1. Deploy Byparr di VPS / container terpisah (port 8191).
+2. Deploy scraper:
+   - Build: `npm install`
+   - Start: `npx tsx src/index.ts` (atau `npm start`)
+   - Env: `BYPARR_URL=http://IP-atau-hostname-byparr:8191`
+3. Free tier bisa sleep → ping `/health` berkala.
 
 ---
 
@@ -144,6 +236,8 @@ Contoh Render Web Service:
 3. Register di `src/sources/index.ts`.
 4. Tambah metadata id/name di **frontend** `src/lib/server/sources/index.ts`.
 5. Deploy scraper (+ frontend jika registry berubah).
+
+`BaseSource.fetchHtml` sudah lewat `fetchWithCf` — source yang kena CF otomatis pakai Byparr (kalau `BYPARR_URL` set).
 
 ### Novel
 
@@ -196,6 +290,8 @@ Jangan commit perubahan manual di `api/index.js` kecuali dari `npm run build` / 
 | `PORT` | Default `3000` (lokal / Render) |
 | `SCRAPER_API_KEY` | Opsional; wajib match frontend |
 | `VERCEL` | Di-set platform; skip `app.listen` di Vercel |
+| `BYPARR_URL` | URL Byparr (contoh `http://localhost:8191`). Kosong = off |
+| `CF_COOKIE_TTL_MS` | TTL cookie CF di jar (default 900000 = 15 menit) |
 
 ---
 
@@ -205,4 +301,5 @@ Jangan commit perubahan manual di `api/index.js` kecuali dari `npm run build` / 
 - Error scraping → `500` + `{ error: "..." }` (detail di server log).
 - Frontend hybrid: source di `WORKER_SOURCE_IDS` **tidak** memanggil API ini.
 - Novel: endpoint `/novel-chapter/*` mengembalikan teks; source harus punya `getChapterContent`.
+- Byparr tidak 100% guarantee; cookie di-cache per domain biar tidak solve ulang tiap request.
 - Parent README: `../README.md`

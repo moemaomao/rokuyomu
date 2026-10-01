@@ -5,6 +5,7 @@
 	import {
 		getHistory,
 		removeFromHistory,
+		whenHistoryReady,
 		type ReadingEntry
 	} from '$lib/stores/history';
 	import { browser } from '$app/environment';
@@ -75,9 +76,18 @@
 }
 
 	onMount(() => {
-		loadHistory();
+		let cancelled = false;
+
+		(async () => {
+			await whenHistoryReady();
+			if (!cancelled) loadHistory();
+		})();
+
 		window.addEventListener('history-changed', loadHistory);
-		return () => window.removeEventListener('history-changed', loadHistory);
+		return () => {
+			cancelled = true;
+			window.removeEventListener('history-changed', loadHistory);
+		};
 	});
 </script>
 
