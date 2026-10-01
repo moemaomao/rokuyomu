@@ -27,7 +27,6 @@ function absUrl(base: string, href: string | undefined): string {
 	}
 }
 
-/** Normalisasi domain wordpress.com → custom domain, path only */
 function pathOnly(href: string): string {
 	try {
 		const u = new URL(
@@ -35,7 +34,6 @@ function pathOnly(href: string): string {
 				? href
 				: `https://yumeneijiworks.com${href.startsWith('/') ? '' : '/'}${href}`
 		);
-		// samakan wordpress.com mirror ke custom domain path
 		return u.pathname.replace(/\/$/, '') || '/';
 	} catch {
 		return href.startsWith('/') ? href : `/${href}`;
@@ -117,25 +115,21 @@ export class YumeNeijiWorksSource extends BaseSource {
 		return out;
 	}
 
-	/** Homepage: daftar judul novel + status */
 	private async parseHome(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Link ke category atau intro post
 		$('a[href*="/category/"], a[href*="chapter"], a[href]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			const p = pathOnly(href);
 			if (BLOCKED_PATH.test(p) || p === '/' || p.length < 6) return;
 
-			// Prefer category path sebagai novel id
 			let id = p;
 			if (p.includes('/category/')) {
-				id = p; // /category/slug
+				id = p;
 			} else if (/chapter/i.test(p) || /\/\d{4}\/\d{2}\/\d{2}\//.test(p)) {
-				// skip pure chapter links di home
 				return;
 			}
 
@@ -167,7 +161,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 		return list;
 	}
 
-	/** /translated-novels/ — punya cover + synopsis */
 	private async parseTranslatedNovels(page: number): Promise<Manga[]> {
 		const path =
 			page <= 1 ? '/translated-novels/' : `/translated-novels/${page}/`;
@@ -176,7 +169,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Jetpack layout grid: image + title + status + read more link
 		$('.wp-block-jetpack-layout-grid, .wp-block-group, article, .entry-content > *').each(
 			(_, block) => {
 				const $b = $(block);
@@ -186,7 +178,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 					'';
 				const cover = img && !img.startsWith('data:') ? absUrl(this.baseUrl, img.split('?')[0]) : '';
 
-				// "Read more" / judul link
 				const links = $b.find('a[href]');
 				let novelHref = '';
 				let title = '';
@@ -203,11 +194,9 @@ export class YumeNeijiWorksSource extends BaseSource {
 					}
 				});
 
-				// Status text
 				const blockText = $b.text();
 				const status = extractStatus(blockText) || 'Ongoing';
 
-				// Title dari strong/bold di block
 				if (!title) {
 					title = decodeEntities(
 						$b.find('strong, b, h2, h3').first().text().replace(/\s+/g, ' ').trim()
@@ -217,10 +206,8 @@ export class YumeNeijiWorksSource extends BaseSource {
 				if (!title || title.length < 4) return;
 				if (/^(web novel|translations?|status|synopsis)/i.test(title)) return;
 
-				// Derive category id dari title slug-ish atau dari read-more URL
 				let id = novelHref;
 				if (!id || BLOCKED_PATH.test(id)) {
-					// fallback: buat id dari title
 					id = '/category/' + title
 						.toLowerCase()
 						.replace(/[^a-z0-9]+/g, '-')
@@ -228,13 +215,11 @@ export class YumeNeijiWorksSource extends BaseSource {
 						.slice(0, 80);
 				}
 
-				// Prefer /category/ path jika ada di site
 				if (!id.includes('/category/') && novelHref.includes('/category/')) {
 					id = novelHref;
 				}
 
 				if (seen.has(id)) {
-					// update cover jika kosong
 					const existing = list.find((x) => x.id === id);
 					if (existing && !existing.cover && cover) existing.cover = cover;
 					return;
@@ -253,7 +238,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 			}
 		);
 
-		// Fallback: semua strong + link di entry-content
 		if (!list.length) {
 			$('.entry-content a[href], .entry-content strong').each((_, el) => {
 				const $el = $(el);
@@ -310,7 +294,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 			);
 			if (!title || title.length < 3) return;
 
-			// Map chapter → category jika memungkinkan
 			let id = p;
 			const cat = $el.find('a[href*="/category/"]').attr('href');
 			if (cat) id = pathOnly(cat);
@@ -332,10 +315,8 @@ export class YumeNeijiWorksSource extends BaseSource {
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-		// Normalisasi ke category URL
 		let path = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
 		if (!path.includes('/category/')) {
-			// coba treat sebagai slug
 			const slug = path.replace(/^\//, '').replace(/\/$/, '');
 			path = `/category/${slug}/`;
 		}
@@ -344,7 +325,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 		const html = await this.fetchHtml(path);
 		const $ = cheerio.load(html);
 
-		// Title dari category header
 		let title = decodeEntities(
 			$('h1').first().text().replace(/^Category:\s*/i, '').trim() ||
 				$('.page-title, .entry-title').first().text().replace(/^Category:\s*/i, '').trim() ||
@@ -355,14 +335,12 @@ export class YumeNeijiWorksSource extends BaseSource {
 			throw new Error('Novel not found (empty title)');
 		}
 
-		// Cover: coba dari first image di page / og
 		let cover =
 			$('meta[property="og:image"]').attr('content') ||
 			$('article img, .entry-content img').first().attr('src') ||
 			'';
 		cover = (cover || '').split('?')[0];
 
-		// Description: excerpt chapter pertama atau meta
 		let description =
 			$('meta[property="og:description"]').attr('content') ||
 			$('article .entry-content p').first().text().replace(/\s+/g, ' ').trim() ||
@@ -392,7 +370,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 		};
 	}
 
-	/** Ambil semua chapter dari category (multi-page) */
 	private async fetchAllChapters(
 		categoryPath: string,
 		$first: cheerio.CheerioAPI
@@ -430,7 +407,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 
 		ingest($first);
 
-		// Pagination: /category/slug/page/2/
 		let maxPage = 1;
 		$first('.nav-links a, .pagination a, a.page-numbers, .nav-previous a, .nav-next a').each(
 			(_, el) => {
@@ -453,7 +429,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 							const html = await this.fetchHtml(`${base}/page/${p}/`);
 							ingest(cheerio.load(html));
 						} catch {
-							/* skip */
 						}
 					})()
 				);
@@ -498,7 +473,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 				)
 				.remove();
 
-			// Buang baris navigasi "Previous ⚜ Table of Contents ⚜ Next"
 			clone.find('p, div').each((_, node) => {
 				const t = $(node).text().replace(/\s+/g, ' ').trim();
 				if (
@@ -527,7 +501,6 @@ export class YumeNeijiWorksSource extends BaseSource {
 			}
 		}
 
-		// Prev / Next dari post-navigation atau link text
 		const prevHref =
 			$('a[rel="prev"]').attr('href') ||
 			$('.nav-previous a, .post-navigation .nav-previous a').attr('href') ||
