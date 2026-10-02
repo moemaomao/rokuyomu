@@ -296,12 +296,13 @@ export class WeTriedTLsSource extends BaseSource {
 	private async collectChapters(slug: string): Promise<Chapter[]> {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
+		const byNumber = new Map<number, Chapter>();
 		let page = 1;
 		let lastPage = 1;
 
-		while (page <= lastPage && page <= 50) {
+		while (page <= lastPage && page <= 80) {
 			const res = await this.fetchApi<{
-				meta?: { last_page?: number };
+				meta?: { last_page?: number; total?: number };
 				data?: ApiChapterRow[];
 			}>(`/chapters/${encodeURIComponent(slug)}?page=${page}`);
 
@@ -319,21 +320,61 @@ export class WeTriedTLsSource extends BaseSource {
 				const number =
 					parseChapterNumber(row.index || '', 0) ||
 					parseChapterNumber(row.chapter_name || chSlug, 0) ||
-					out.length + 1;
+					0;
+				if (!number) continue;
 
 				const isLocked =
 					(typeof row.price === 'number' && row.price > 0) ||
 					row.public === false;
 
-				out.push({
+				const ch: Chapter = {
 					id,
 					title: `Chapter ${number}`,
 					number,
 					date: row.created_at || row.updated_at,
-					...(isLocked ? { isLocked: true } : {})
-				});
+					...(isLocked ? { isLocked: false } : {})
+				};
+				out.push(ch);
+				byNumber.set(number, ch);
 			}
 			page++;
+		}
+
+		try {
+			const detail = await this.fetchApi<{
+				first_chapter?: { chapter_slug?: string };
+				last_chapter?: { chapter_slug?: string };
+			}>(`/series/${encodeURIComponent(slug)}`);
+
+			const firstN = parseChapterNumber(
+				detail.first_chapter?.chapter_slug || '',
+				0
+			);
+			const lastN = parseChapterNumber(
+				detail.last_chapter?.chapter_slug || '',
+				0
+			);
+
+			if (lastN > 0) {
+				const start = firstN > 0 ? firstN : 1;
+				for (let n = start; n <= lastN; n++) {
+					if (byNumber.has(n)) continue;
+					const chSlug = `chapter-${n}`;
+					const id = `/series/${slug}/${chSlug}`;
+					if (seen.has(id)) continue;
+					seen.add(id);
+					const ch: Chapter = {
+						id,
+						title: `Chapter ${n}`,
+						number: n,
+						isLocked: true
+					};
+					out.push(ch);
+					byNumber.set(n, ch);
+				}
+			}
+		} catch (e) {
+			console.error('[wetriedtls] fill paid chapters failed', e);
 		}
 
 		out.sort((a, b) => (a.number || 0) - (b.number || 0));
@@ -350,7 +391,6 @@ export class WeTriedTLsSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-		
 		const parts = chapterId.replace(/\/$/, '').split('/').filter(Boolean);
 		let seriesSlug = '';
 		let chapterSlug = '';

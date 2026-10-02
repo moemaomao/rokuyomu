@@ -127,16 +127,67 @@ export class KaysTLsSource extends BaseSource {
 	}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
-		// Catalog di /browse/ (+ page/N jika ada)
-		const path =
-			page <= 1 ? '/browse/' : `/browse/page/${page}/`;
+		const path = page <= 1 ? '/' : `/page/${page}/`;
 		const html = await this.fetchHtml(path);
-		const fromBrowse = this.parseSeriesFromHtml(html);
-		if (fromBrowse.length) return fromBrowse;
+		const fromHome = this.parseLatestFromHome(html);
+		if (fromHome.length) return fromHome;
+		if (page <= 1) {
+			const browse = await this.fetchHtml('/browse/');
+			return this.parseSeriesFromHtml(browse);
+		}
+		return [];
+	}
 
-		// Fallback homepage
-		const home = await this.fetchHtml('/');
-		return this.parseSeriesFromHtml(home);
+	private parseLatestFromHome(html: string): Manga[] {
+		const $ = cheerio.load(html);
+		const list: Manga[] = [];
+		const seen = new Set<string>();
+
+		$('a[href*="chapter-"]').each((_, a) => {
+			const href = $(a).attr('href') || '';
+			const chPath = pathOnly(href);
+			if (!isChapterPath(chPath)) return;
+
+			const parts = chPath.split('/').filter(Boolean);
+			if (parts.length < 2) return;
+			const seriesId = `/${parts[0]}`;
+			if (seen.has(seriesId) || !isSeriesPath(seriesId)) return;
+			seen.add(seriesId);
+
+			const number = parseChapterNumber(chPath, 0);
+			let title = cleanText($(a).attr('title') || '');
+			// Prefer series title from nearby heading / parent article
+			const $art = $(a).closest('article, .post, .entry, li');
+			const seriesLink = $art
+				.find('a[href]')
+				.filter((__, x) => isSeriesPath(pathOnly($(x).attr('href') || '')))
+				.first();
+			if (seriesLink.length) {
+				title = cleanText(seriesLink.attr('title') || seriesLink.text()) || title;
+			}
+			if (!title || title.length < 3 || /chapter\s*\d/i.test(title)) {
+				title = parts[0].replace(/-/g, ' ');
+				title = title.replace(/\w/g, (c) => c.toUpperCase());
+			}
+
+			const cover =
+				$art.find('img').attr('src') ||
+				$art.find('img').attr('data-src') ||
+				'';
+
+			list.push({
+				id: seriesId,
+				title: title.slice(0, 200),
+				cover: absUrl((cover || '').split('?')[0]),
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				status: 'Ongoing',
+				...(number > 0 ? { latestChapter: number } : {})
+			});
+		});
+
+		return list;
 	}
 
 	private parseSeriesFromHtml(html: string): Manga[] {
@@ -144,19 +195,15 @@ export class KaysTLsSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Kumpulkan series dari link + latest chapter di sekitarnya
 		const latestBySeries = new Map<string, number>();
-
 		$('a[href]').each((_, a) => {
-			const href = $(a).attr('href') || '';
-			const id = pathOnly(href);
-			if (isChapterPath(id)) {
-				const seriesId = id.split('/').slice(0, 2).join('/'); // /slug
-				const n = parseChapterNumber(id, 0);
-				if (n > 0) {
-					const prev = latestBySeries.get(seriesId) || 0;
-					if (n > prev) latestBySeries.set(seriesId, n);
-				}
+			const id = pathOnly($(a).attr('href') || '');
+			if (!isChapterPath(id)) return;
+			const seriesId = '/' + id.split('/').filter(Boolean)[0];
+			const n = parseChapterNumber(id, 0);
+			if (n > 0) {
+				const prev = latestBySeries.get(seriesId) || 0;
+				if (n > prev) latestBySeries.set(seriesId, n);
 			}
 		});
 
@@ -360,7 +407,6 @@ export class KaysTLsSource extends BaseSource {
 			if (rel === 'next' || /next|newer|»/i.test(text)) nextChapterId = id;
 		});
 
-		// Fallback next/prev by chapter number
 		if (!prevChapterId || !nextChapterId) {
 			const num = parseChapterNumber(path, 0);
 			const series = path.split('/').slice(0, 2).join('/');
