@@ -138,7 +138,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	curspe: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	foxaholic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	redpandatranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
-	skynovelvault: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
+	skynovelvault: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
+	mochistar: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {

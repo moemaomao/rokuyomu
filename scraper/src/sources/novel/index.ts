@@ -28,9 +28,11 @@ import { CurspeSource } from '../impl/novel/Curspe';
 import { FoxaholicSource } from '../impl/novel/Foxaholic';
 import { RedPandaTranslationsSource } from '../impl/novel/RedPandaTranslations';
 import { SkyNovelVaultSource } from '../impl/novel/SkyNovelVault';
+import { MochiStarSource } from '../impl/novel/MochiStar';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	mochistar: new MochiStarSource(),
 	skynovelvault: new SkyNovelVaultSource(),
 	redpandatranslations: new RedPandaTranslationsSource(),
 	foxaholic: new FoxaholicSource(),

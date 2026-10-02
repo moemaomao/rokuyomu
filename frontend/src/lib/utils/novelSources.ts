@@ -28,7 +28,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'curspe',
 	'foxaholic',
 	'redpandatranslations',
-	'skynovelvault'
+	'skynovelvault',
+	'mochistar'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

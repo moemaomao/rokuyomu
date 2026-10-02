@@ -36,10 +36,8 @@ function pathOnly(href: string): string {
 	}
 }
 
-/** Novel path harus: /.../category/{genre}/{slug}  (bukan cuma genre) */
 function isNovelPath(href: string): boolean {
 	const p = pathOnly(href);
-	// /index.php/category/fantasy/zero-soul-mage  OR  /category/fantasy/zero-soul-mage
 	return /\/category\/[^/]+\/[^/]+$/.test(p);
 }
 
@@ -134,7 +132,6 @@ export class GoldenNovelSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Hanya .np-novel-card (bukan .np-genre-card)
 		$('.np-novel-card').each((_, el) => {
 			const a =
 				$(el).find('a.np-novel-card__cover[href*="/category/"]').first().length > 0
@@ -155,7 +152,6 @@ export class GoldenNovelSource extends BaseSource {
 				a.text().trim();
 			if (!title || title.length < 2) return;
 
-			// Cover: .np-cover-img di dalam .np-cover / .np-novel-card__cover
 			const cover =
 				$(el).find('img.np-cover-img').attr('data-src') ||
 				$(el).find('img.np-cover-img').attr('src') ||
@@ -188,7 +184,6 @@ export class GoldenNovelSource extends BaseSource {
 			});
 		});
 
-		// Latest Updates: baris novel + chapter (bukan genre)
 		$('.np-chapter-row__novel a[href*="/category/"], .np-latest a[href*="/category/"]').each(
 			(_, el) => {
 				const href = $(el).attr('href') || '';
@@ -317,7 +312,6 @@ export class GoldenNovelSource extends BaseSource {
 		$('a[href*="/category/"]').each((_, a) => {
 			const href = $(a).attr('href') || '';
 			const p = pathOnly(href);
-			// genre only: /category/{genre}
 			if (/\/category\/[^/]+$/.test(p)) {
 				const g = $(a).text().trim();
 				if (g && g.length < 40 && !/novel list|home/i.test(g) && !genres.includes(g)) {
@@ -354,7 +348,6 @@ export class GoldenNovelSource extends BaseSource {
 		const out: Chapter[] = [];
 
 		const ingest = ($: cheerio.CheerioAPI) => {
-			// struktur: li.np-toc__item > a.np-toc__link
 			$('li.np-toc__item a.np-toc__link, a.np-toc__link, .np-toc a[href*="chapter-"]').each(
 				(_, el) => {
 					const href = $(el).attr('href') || '';
@@ -459,7 +452,6 @@ export class GoldenNovelSource extends BaseSource {
 			if (parts.length) contentHtml = parts.join('\n');
 		}
 
-		// Prev / Next — NovelPress
 		const prevHref =
 			$('a.np-chapter__nav-btn--prev').attr('href') ||
 			$('.np-chapter__nav a[href*="chapter-"]').filter((_, a) =>
