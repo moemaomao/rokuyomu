@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Search, Loader2, X, Tag } from 'lucide-svelte';
 	import type { Manga } from '$lib/server/sources/types';
+	import { isNovelSource } from '$lib/utils/novelSources';
 
 	const TAG_OPTIONS = [
 		'Action',
@@ -33,12 +34,15 @@
 		'Hentai'
 	] as const;
 
+	type TypeFilter = 'all' | 'manga' | 'novel';
+
 	let query = $state('');
 	let selectedTags = $state<string[]>([]);
+	let typeFilter = $state<TypeFilter>('all');
 	let results = $state<Manga[]>([]);
 	let loading = $state(false);
 	let error = $state('');
-	let meta = $state<{ returned?: number; sourcesTried?: number } | null>(null);
+	let meta = $state<{ returned?: number; sourcesTried?: number; type?: string } | null>(null);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let showTags = $state(true);
 
@@ -48,6 +52,11 @@
 		} else {
 			selectedTags = [...selectedTags, tag];
 		}
+		scheduleSearch();
+	}
+
+	function setType(t: TypeFilter) {
+		typeFilter = t;
 		scheduleSearch();
 	}
 
@@ -73,8 +82,9 @@
 			const params = new URLSearchParams();
 			if (q) params.set('q', q);
 			if (selectedTags.length) params.set('tags', selectedTags.join(','));
-			params.set('limit', '36');
-			params.set('per', '5');
+			params.set('limit', '48');
+			params.set('per', '8');
+			params.set('type', typeFilter);
 
 			const res = await fetch(`/api/deep-search?${params.toString()}`);
 			if (!res.ok) {
@@ -86,7 +96,7 @@
 			}
 			const data = (await res.json()) as {
 				results: Manga[];
-				meta?: { returned?: number; sourcesTried?: number };
+				meta?: { returned?: number; sourcesTried?: number; type?: string };
 			};
 			results = data.results || [];
 			meta = data.meta || null;
@@ -106,6 +116,7 @@
 	function clearAll() {
 		query = '';
 		selectedTags = [];
+		typeFilter = 'all';
 		results = [];
 		meta = null;
 		error = '';
@@ -128,6 +139,13 @@
 		const img = e.currentTarget as HTMLImageElement;
 		img.style.display = 'none';
 	}
+
+	function itemType(m: Manga): 'novel' | 'manga' {
+		const t = String(m.type || '').toLowerCase();
+		if (t === 'novel') return 'novel';
+		if (isNovelSource(m.sourceId)) return 'novel';
+		return 'manga';
+	}
 </script>
 
 <div class="mx-auto max-w-6xl px-4 py-6">
@@ -138,7 +156,7 @@
 			<h1 class="text-xl font-bold">Deep Search</h1>
 		</div>
 
-		{#if query || selectedTags.length}
+		{#if query || selectedTags.length || typeFilter !== 'all'}
 			<button
 				type="button"
 				onclick={clearAll}
@@ -150,25 +168,41 @@
 		{/if}
 	</div>
 
-<!-- Search Input -->
-<div class="relative mb-4">
-	<input
-	type="search"
-	bind:value={query}
-	oninput={onInput}
-	placeholder="Search manga title..."
-	class="theme-input w-full rounded-xl border border-zinc-700 bg-zinc-900/80 py-3 pr-12 pl-4 text-sm outline-none transition focus:border-violet-500"
-/>
-	{#if loading}
-		<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2">
-			<Loader2 class="h-5 w-5 animate-spin text-violet-400" />
-		</span>
-	{:else}
-		<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-zinc-500">
-			<Search class="h-5 w-5" />
-		</span>
-	{/if}
-</div>
+	<!-- Search Input -->
+	<div class="relative mb-4">
+		<input
+			type="search"
+			bind:value={query}
+			oninput={onInput}
+			placeholder="Search manga / novel title..."
+			class="theme-input w-full rounded-xl border border-zinc-700 bg-zinc-900/80 py-3 pr-12 pl-4 text-sm outline-none transition focus:border-violet-500"
+		/>
+		{#if loading}
+			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2">
+				<Loader2 class="h-5 w-5 animate-spin text-violet-400" />
+			</span>
+		{:else}
+			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-zinc-500">
+				<Search class="h-5 w-5" />
+			</span>
+		{/if}
+	</div>
+
+	<!-- Type filter -->
+	<div class="mb-4 flex flex-wrap gap-2">
+		{#each (['all', 'manga', 'novel'] as const) as t}
+			<button
+				type="button"
+				onclick={() => setType(t)}
+				class="rounded-full border px-3 py-1 text-xs font-medium capitalize transition
+					{typeFilter === t
+					? 'border-violet-500 bg-violet-600/30 text-violet-200'
+					: 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}"
+			>
+				{t === 'all' ? 'All types' : t}
+			</button>
+		{/each}
+	</div>
 
 	<!-- Tags -->
 	<div class="mb-6">
@@ -213,6 +247,9 @@
 	{#if meta && !loading}
 		<p class="mb-4 text-xs text-zinc-500">
 			{meta.returned ?? 0} results · {meta.sourcesTried ?? 0} sources
+			{#if meta.type && meta.type !== 'all'}
+				· type: {meta.type}
+			{/if}
 			<span class="opacity-70">(worker = KV only)</span>
 		</p>
 	{/if}
@@ -221,6 +258,7 @@
 	{#if results.length > 0}
 		<div class="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each results as m (m.sourceId + ':' + m.id)}
+				{@const kind = itemType(m)}
 				<a
 					href={mangaHref(m)}
 					class="group overflow-hidden rounded-xl bg-zinc-900/10 transition hover:bg-zinc-800/80"
@@ -236,11 +274,21 @@
 							/>
 						{/if}
 
-						<!-- Badge Source (transparent purple) -->
+						<!-- Source badge -->
 						<span
-							class="absolute top-2 left-2 rounded-md bg-violet-600/40 px-2 py-0.5 text-[10px] font-bold capitalize text-violet-100 backdrop-blur-md"
+							class="absolute top-2 left-2 max-w-[70%] truncate rounded-md bg-violet-600/40 px-2 py-0.5 text-[10px] font-bold capitalize text-violet-100 backdrop-blur-md"
 						>
 							{m.sourceId}
+						</span>
+
+						<!-- Type badge -->
+						<span
+							class="absolute top-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase backdrop-blur-md
+								{kind === 'novel'
+								? 'bg-amber-500/50 text-amber-50'
+								: 'bg-emerald-600/50 text-emerald-50'}"
+						>
+							{kind}
 						</span>
 					</div>
 
@@ -259,7 +307,8 @@
 		</div>
 	{:else if !loading && (query.length >= 2 || selectedTags.length)}
 		<p class="text-center text-sm text-zinc-500">
-			No results found (worker sources are KV cache only).
+			No results found. Coba kata kunci lebih spesifik, atau pastikan novel source sudah di-cache /
+			scraper hidup.
 		</p>
 	{:else if !loading}
 		<p class="text-center text-sm text-zinc-500">
