@@ -71,6 +71,7 @@ function seriesPathFromHref(href: string): string | null {
 	if (m && !/\/series\/?(list-mode|page|feed)?$/i.test(id)) {
 		return `/series/${m[1]}`;
 	}
+	// chapter URL → series: /{slug}-ch{n}/ → /series/{slug}
 	const ch = id.match(/^\/(.+)-ch[\d.]+(?:-[\d.]+)?(?:-.*)?$/i);
 	if (ch) return `/series/${ch[1]}`;
 	return null;
@@ -108,6 +109,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 		return this.parseSeriesArchive(page);
 	}
 
+	/** Homepage — section Latest Release (.utao styletree) */
 	private async parseLatestReleaseHome(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
@@ -151,7 +153,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			imgEl.attr('data-lazy-src') ||
 			imgEl.attr('src') ||
 			'';
-
 		const coverRaw = (img || '').startsWith('data:') ? '' : img;
 
 		const title =
@@ -524,18 +525,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			'Chapter';
 		const number = parseChapterNumber(rawTitle || path);
 		const title = shortChapterTitle(number > 0 ? number : 0) || rawTitle;
-
-		let content = '';
-
-		const stripNoise = ($root: any) => {
-			$root
-				.find(
-					'script, style, noscript, iframe, .ads, .ad, .code-block, nav, .sharedaddy, .misc, .socials, .tts__listent_content, [class*="tts_"], .navpost, .headpost, .chapter-nav'
-				)
-				.remove();
-			return $root;
-		};
-
 		const cleanInline = (htmlStr: string) =>
 			htmlStr
 				.replace(/\s*style="([^"]*)"/gi, (_m, style: string) => {
@@ -552,32 +541,29 @@ export class RedPandaTranslationsSource extends BaseSource {
 		const textLen = (htmlStr: string) =>
 			htmlStr.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
 
-		const ep = $('.epcontent').first();
-		if (ep.length) {
-			stripNoise(ep);
-			content = cleanInline(ep.html() || '');
+		let content = '';
+
+		const wrapper = $('[class*="tts_content_wrapper"]').first();
+		if (wrapper.length) {
+			wrapper.find('script, style, noscript, iframe, .ads, .ad').remove();
+			content = cleanInline(wrapper.html() || '');
 		}
 
 		if (textLen(content) < 80) {
-			for (const sel of [
-				'[class*="tts_content_wrapper"]',
-				'article .entry-content',
-				'.postbody .entry-content',
-				'#content .entry-content',
-				'.reader-area',
-				'#readerarea'
-			]) {
-				const el = $(sel).first();
-				if (!el.length) continue;
-				stripNoise(el);
-				const h = cleanInline(el.html() || '');
-				if (textLen(h) > textLen(content)) content = h;
+			const ep = $('.epcontent').first().clone();
+			if (ep.length) {
+				ep
+					.find(
+						'script, style, noscript, iframe, .ads, .ad, .code-block, .tts__listent_content'
+					)
+					.remove();
+				content = cleanInline(ep.html() || '');
 			}
 		}
 
 		if (textLen(content) < 80) {
 			const ps: string[] = [];
-			$('.epcontent p, article p, .postbody p, .entry-content p').each((_, p) => {
+			$('.epcontent p').each((_, p) => {
 				const t = cleanText($(p).text());
 				if (t.length > 5) {
 					ps.push(
@@ -589,49 +575,22 @@ export class RedPandaTranslationsSource extends BaseSource {
 		}
 
 		if (textLen(content) < 80) {
-			const epRe = /<div[^>]*class="[^"]*epcontent[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
-			const m = html.match(epRe);
+			const m = html.match(
+				/<div[^>]*class="[^"]*epcontent[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<div/i
+			);
 			if (m && m[1]) {
 				let raw = m[1]
 					.replace(/<script[\s\S]*?<\/script>/gi, '')
 					.replace(/<style[\s\S]*?<\/style>/gi, '')
-					.replace(/<div[^>]*class="[^"]*tts[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
+					.replace(/<div[^>]*class="[^"]*tts__listent[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
 				raw = cleanInline(raw);
 				if (textLen(raw) > textLen(content)) content = raw;
 			}
 		}
 
-		if (textLen(content) < 80) {
-			const plain =
-				$('.epcontent').text() ||
-				$('article').text() ||
-				$('.postbody').text() ||
-				'';
-			const cleaned = plain.replace(/\s+/g, ' ').trim();
-			const cut = cleaned.replace(
-				/^[\s\S]{0,200}?(Chapter\s+\d+[^\n]*?)(?=\s+[A-Z])/i,
-				'$1'
-			);
-			if (cut.length >= 80) {
-				content = cut
-					.split(/\.\s+(?=[A-Z])/)
-					.map((p) => p.trim())
-					.filter((p) => p.length > 20)
-					.slice(0, 80)
-					.map((p) => {
-						const s = p.endsWith('.') ? p : p + '.';
-						return `<p>${s
-							.replace(/&/g, '&amp;')
-							.replace(/</g, '&lt;')
-							.replace(/>/g, '&gt;')}</p>`;
-					})
-					.join('\n');
-			}
-		}
-
 		if (textLen(content) < 40) {
 			throw new Error(
-				`Chapter empty: ${path} (html=${html.length}b, hasEp=${$('.epcontent').length})`
+				`Chapter empty: ${path} (html=${html.length}b, hasEp=${$('.epcontent').length}, hasWrapper=${$('[class*="tts_content_wrapper"]').length})`
 			);
 		}
 
