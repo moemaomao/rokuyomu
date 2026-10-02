@@ -9,14 +9,12 @@
  *   Search   : /?s={q}&post_type=wp-manga
  *   List     : /novel/?m_orderby=latest  |  /novel/page/{n}/?m_orderby=latest
  *
- * CF challenge → wajib hybrid Worker / Byparr (fetchWithCf).
  * Konten = text novel → getChapterPages() = []
  * Chapter title dibersihkan jadi "Chapter N" saja (tanpa judul panjang).
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../types-manga';
-import { fetchWithCf } from '../../../server/fetchWithCf';
 
 const BASE = 'https://www.foxaholic.com';
 const PER_PAGE = 24;
@@ -110,18 +108,6 @@ export class FoxaholicSource extends BaseSource {
 		Referer: `${BASE}/`
 	};
 
-	protected async fetchHtml(path: string): Promise<string> {
-		const url = path.startsWith('http')
-			? path
-			: `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
-		return fetchWithCf(url, {
-			headers: {
-				...this.headers,
-				Referer: this.baseUrl + '/'
-			}
-		});
-	}
-
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		if (page <= 1) {
@@ -139,7 +125,6 @@ export class FoxaholicSource extends BaseSource {
 
 		const list: Manga[] = [];
 		const seen = new Set<string>();
-
 		const latestSection = $(
 			'.c-page__content .page-content-listing, .c-blog-post, .slider__container, .manga-slider, .widget_recent_entries, .latest-releases, [class*="latest"]'
 		);
@@ -416,7 +401,7 @@ export class FoxaholicSource extends BaseSource {
 				if (n && n.length < 80 && !authors.includes(n)) authors.push(n);
 			}
 		);
-
+	
 		if (!authors.length) {
 			$('.post-content_item').each((_, el) => {
 				const label = cleanText($(el).find('.summary-heading, h5').text()).toLowerCase();
@@ -512,7 +497,7 @@ export class FoxaholicSource extends BaseSource {
 
 				chapters.push({
 					id,
-					title: shortChapterTitle(number),
+					title: shortChapterTitle(number), // bersih: "Chapter N" saja
 					number,
 					date
 				});
@@ -556,7 +541,6 @@ export class FoxaholicSource extends BaseSource {
 			return [];
 		}
 	}
-
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
@@ -626,6 +610,7 @@ export class FoxaholicSource extends BaseSource {
 			});
 			const idx = ids.findIndex((id) => id === currentPath || currentPath.startsWith(id));
 			if (idx >= 0) {
+		
 				if (!nextChapterId && idx > 0) nextChapterId = ids[idx - 1];
 				if (!prevChapterId && idx < ids.length - 1) prevChapterId = ids[idx + 1];
 			}
