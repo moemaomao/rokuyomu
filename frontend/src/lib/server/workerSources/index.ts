@@ -13,7 +13,7 @@
  *                  → (else)           → fetch JSON ke scraper Vercel/Render
  */
 
-import type { IMangaSource } from './types';
+import type { IMangaSource } from './types-manga';
 
 export const WORKER_SOURCE_IDS = new Set([
 	'ainzscans',
@@ -27,6 +27,7 @@ export const WORKER_SOURCE_IDS = new Set([
 	'dragonholic',
 	'fenrirealm',
 	'flamecomics',
+	'foxaholic',
 	'hentairead',
 	'holodek',
 	'ikiru',
@@ -78,6 +79,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	dragonholic: async () => new (await import('./impl/Dragonholic')).DragonholicSource(),
 	fenrirealm: async () => new (await import('./impl/FenrirRealm')).FenrirRealmSource(),
 	flamecomics: async () => new (await import('./impl/FlameComics')).FlameComicsSource(),
+	foxaholic: async () => new (await import('./impl/Foxaholic')).FoxaholicSource(),
 	hentairead: async () => new (await import('./impl/Hentairead')).HentaireadSource(),
 	holodek: async () => new (await import('./impl/Holodek')).HolodekSource(),
 	ikiru: async () => new (await import('./impl/Ikiru')).IkiruSource(),

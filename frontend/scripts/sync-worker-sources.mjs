@@ -90,31 +90,67 @@ function scanScraperSources() {
 function rewriteImportsForWorker(content) {
 	let out = content;
 
+	// BaseSource: scraper ../../BaseSource → worker ../BaseSource
 	out = out
 		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
 		.replace(/from\s+['"]\.\.\/\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
-		.replace(/from\s+['"]\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
-	
-		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
-        .replace(/from\s+['"]\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
-        .replace(/from\s+['"]\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
+		.replace(/from\s+['"]\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'");
 
+	// types-manga (harus sebelum `types` generic supaya tidak match parsial)
+	out = out
+		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types-manga(?:\.js)?['"]/g, "from '../types-manga'")
+		.replace(/from\s+['"]\.\.\/\.\.\/types-manga(?:\.js)?['"]/g, "from '../types-manga'")
+		.replace(/from\s+['"]\.\.\/types-manga(?:\.js)?['"]/g, "from '../types-manga'");
+
+	// types (alias manga types di scraper)
+	out = out
+		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
+		.replace(/from\s+['"]\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
+		.replace(/from\s+['"]\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'");
+
+	// types-novel
+	out = out
 		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'")
 		.replace(/from\s+['"]\.\.\/\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'")
 		.replace(/from\s+['"]\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'");
 
+	// fetchWithCf:
+	// scraper path : ../../../lib/fetchWithCf  (dari impl/novel|manga)
+	// worker target: frontend/src/lib/server/fetchWithCf.ts
+	// dari workerSources/impl/ → ../../fetchWithCf
+	// Juga rewrite path salah lama (../../../lib/server/...) agar re-sync memperbaiki semua source
 	out = out
 		.replace(
+			/from\s+['"]\.\.\/\.\.\/\.\.\/lib\/server\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/\.\.\/server\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
+		)
+		.replace(
 			/from\s+['"]\.\.\/\.\.\/\.\.\/lib\/fetchWithCf(?:\.js)?['"]/g,
-			"from '../../../lib/server/fetchWithCf'"
+			"from '../../fetchWithCf'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/lib\/server\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
 		)
 		.replace(
 			/from\s+['"]\.\.\/\.\.\/lib\/fetchWithCf(?:\.js)?['"]/g,
-			"from '../../../lib/server/fetchWithCf'"
+			"from '../../fetchWithCf'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/server\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
 		)
 		.replace(
 			/from\s+['"]\.\.\/lib\/fetchWithCf(?:\.js)?['"]/g,
-			"from '../../../lib/server/fetchWithCf'"
+			"from '../../fetchWithCf'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
 		);
 
 	return out;

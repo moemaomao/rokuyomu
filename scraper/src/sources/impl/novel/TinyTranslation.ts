@@ -176,10 +176,6 @@ export class TinyTranslationSource extends BaseSource {
 		return list;
 	}
 
-	/**
-	 * /latest-releases/ (+ page/N)
-	 * Page 2+ TIDAK punya link /series/ — chapter URL: /{slug}/{slug}-xxx/
-	 */
 	private async parseLatestReleases(page: number): Promise<Manga[]> {
 		const path =
 			page <= 1 ? '/latest-releases/' : `/latest-releases/page/${page}/`;
@@ -257,7 +253,6 @@ export class TinyTranslationSource extends BaseSource {
 			}
 		});
 
-		// Page 1: merge link /series/
 		$('a[href*="/series/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			if (!href || !/\/series\/[^/]+\/?$/.test(pathOnly(href))) return;

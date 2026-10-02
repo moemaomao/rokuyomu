@@ -25,9 +25,11 @@ import { RubyNovelsSource } from '../impl/novel/RubyNovels';
 import { KrakenBitesSource } from '../impl/novel/KrakenBItes';
 import { LazyGirlTranslationsSource } from '../impl/novel/lazygirltranslations';
 import { CurspeSource } from '../impl/novel/Curspe';
+import { FoxaholicSource } from '../impl/novel/Foxaholic';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	foxaholic: new FoxaholicSource(),
 	curspe: new CurspeSource(),
 	rubynovels: new RubyNovelsSource(),
 	marinetl: new MarineTLSource(),
