@@ -143,7 +143,7 @@ export class SkyNovelVaultSource extends BaseSource {
 					parseChapterNumber(pathOnly(chA.attr('href') || ''));
 				if (n > 0) latestChapter = n;
 			}
-		
+	
 			if (latestChapter == null) {
 				const batch = cleanText(root.find('.sn-update-batch').text());
 				const m = batch.match(/ch\.?\s*(\d+)\s*[-–]\s*(\d+)/i);
@@ -209,7 +209,6 @@ export class SkyNovelVaultSource extends BaseSource {
 		return list;
 	}
 
-	
 	private async parseCatalog(page: number): Promise<Manga[]> {
 		const path = page <= 1 ? '/' : `/`;
 		try {
@@ -352,7 +351,7 @@ export class SkyNovelVaultSource extends BaseSource {
 				}
 			});
 		}
-		
+	
 		if (!cover || cover.startsWith('data:')) {
 			$('img').each((_, img) => {
 				if (cover && !cover.startsWith('data:')) return;
@@ -396,6 +395,7 @@ export class SkyNovelVaultSource extends BaseSource {
 			const g = cleanText($(a).text());
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
+	
 		const pathParts = path.split('/').filter(Boolean);
 		if (pathParts[1] && !genres.map((g) => g.toLowerCase()).includes(pathParts[1])) {
 			genres.unshift(pathParts[1].replace(/-/g, ' '));
@@ -408,13 +408,62 @@ export class SkyNovelVaultSource extends BaseSource {
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
+		const parseDate = (raw: string): string | undefined => {
+			const t = cleanText(raw);
+			if (!t) return undefined;
+	
+			const d = Date.parse(t);
+			if (!Number.isNaN(d)) return new Date(d).toISOString().slice(0, 10);
+			return t;
+		};
+
 		const collectChapters = ($page: cheerio.CheerioAPI) => {
+	
+			const articles = $page('article.type-post, article.hentry, article.post');
+			if (articles.length) {
+				articles.each((_, el) => {
+					const root = $page(el);
+					const a = root.find('a[href*="/chapter-"]').first();
+					const href = a.attr('href') || '';
+					const id = pathOnly(href);
+					if (!id || seen.has(id) || !/\/chapter-\d+/i.test(id)) return;
+					seen.add(id);
+
+					const rawTitle =
+						cleanText(root.find('.sn-chapter-title-text').attr('title') || '') ||
+						cleanText(root.find('.sn-chapter-title-text').text()) ||
+						cleanText(a.attr('title') || a.text());
+					const number = parseChapterNumber(rawTitle || id);
+
+					const isFree = root.find('.sn-free-badge').length > 0;
+					const dateRaw =
+						cleanText(root.find('.published, [itemprop="datePublished"], time').first().text()) ||
+						root.find('time').attr('datetime') ||
+						'';
+
+					const ch: Chapter = {
+						id,
+						title: shortChapterTitle(number > 0 ? number : 0),
+						number: number > 0 ? number : chapters.length + 1
+					};
+			
+					(ch as any).locked = !isFree;
+					const date = parseDate(dateRaw);
+					if (date) {
+						(ch as any).date = date;
+						(ch as any).uploaded = date;
+						(ch as any).releaseDate = date;
+					}
+					chapters.push(ch);
+				});
+				return;
+			}
+
 			$page('a[href*="/chapter-"]').each((_, a) => {
 				const href = $page(a).attr('href') || '';
 				const id = pathOnly(href);
 				if (!id || seen.has(id) || !/\/chapter-\d+/i.test(id)) return;
 				seen.add(id);
-
 				const number = parseChapterNumber(
 					cleanText($page(a).attr('title') || $page(a).text()) || id
 				);
@@ -503,6 +552,7 @@ export class SkyNovelVaultSource extends BaseSource {
 			/permanently unlock it using/i.test(bodyText) ||
 			(/Spirit Stone Exclusive/i.test(bodyText) &&
 				/Unlock Current Chapter/i.test(bodyText));
+
 
 		const main = $('.sn-reading-main').first().length
 			? $('.sn-reading-main').first()
