@@ -72,6 +72,7 @@ function isSeriesPath(path: string): boolean {
 function isChapterPath(path: string): boolean {
 	const p = path.replace(/\/$/, '');
 	if (/^\/series\//.test(p)) return false;
+	// /slug-123 or /slug-123p2
 	return /^\/[a-z0-9-]+-\d+(?:p\d+)?$/i.test(p);
 }
 
@@ -80,14 +81,30 @@ export class DobyTranslationsSource extends BaseSource {
 	name = 'DobyTranslations';
 	baseUrl = BASE;
 
+	/**
+	 * Latest — section "Latest Release" di homepage + series order=update.
+	 * Target 24 judul + badge chapter.
+	 */
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		if (page <= 1) {
-			const [home, s1, s2] = await Promise.all([
-				this.parseHomeLatest().catch(() => [] as Manga[]),
-				this.fetchSeriesPage(1).catch(() => [] as Manga[]),
-				this.fetchSeriesPage(2).catch(() => [] as Manga[])
+			const results = await Promise.allSettled([
+				this.parseHomeLatest(),
+				this.fetchSeriesPage(1),
+				this.fetchSeriesPage(2)
 			]);
-			return this.dedupeById([...home, ...s1, ...s2]).slice(0, 24);
+			const merged: Manga[] = [];
+			const errors: string[] = [];
+			for (const r of results) {
+				if (r.status === 'fulfilled') merged.push(...r.value);
+				else errors.push(String(r.reason?.message || r.reason));
+			}
+			const list = this.dedupeById(merged).slice(0, 24);
+			if (!list.length) {
+				throw new Error(
+					`DobyTranslations latest empty. ${errors.join(' | ') || 'No parseable cards (CF/selector?)'}`
+				);
+			}
+			return list;
 		}
 		return this.fetchSeriesPage(page);
 	}
@@ -103,8 +120,23 @@ export class DobyTranslationsSource extends BaseSource {
 		return out;
 	}
 
+	private assertNotCf(html: string): void {
+		const low = html.slice(0, 3000).toLowerCase();
+		if (
+			(low.includes('just a moment') ||
+				low.includes('cf-browser-verification') ||
+				low.includes('challenge-platform') ||
+				low.includes('turnstile')) &&
+			html.length < 40000
+		) {
+			throw new Error('Cloudflare blocked dobytranslations.com — enable Byparr or add to WORKER_SOURCE_IDS');
+		}
+	}
+
+	/** Section Latest Release (.listupd .utao / .epic-card) */
 	private async parseHomeLatest(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
+		this.assertNotCf(html);
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
@@ -115,17 +147,56 @@ export class DobyTranslationsSource extends BaseSource {
 			list.push(item);
 		};
 
-		$('.listupd .utao, .listupd .epic-card, .utao.styletree, .excstf .utao').each((_, el) => {
+		// Latest Release cards (berbagai layout Themesia / custom epic)
+		const cardSel = [
+			'.listupd .utao',
+			'.listupd .epic-card',
+			'.utao.styletree',
+			'.excstf .utao',
+			'.listupd .bs',
+			'.listupd .bsx',
+			'div.utao',
+			'div.epic-card'
+		].join(', ');
+		$(cardSel).each((_, el) => {
 			push(this.parseLatestCard($, el));
 		});
 
+		// Fallback agresif: semua link /series/slug yang valid
 		if (list.length < 12) {
-			$('a.series-cover-link, a[href*="/series/"]').each((_, el) => {
+			$('a[href*="/series/"]').each((_, el) => {
 				const href = $(el).attr('href') || '';
 				const id = pathOnly(href);
 				if (!isSeriesPath(id) || seen.has(id)) return;
-				const parent = $(el).closest('.utao, .epic-card, .bs, .bsx, div');
-				push(this.parseLatestCard($, parent.length ? parent.get(0) : el));
+
+				const title =
+					$(el).attr('title') ||
+					$(el).find('.epic-title, .tt, img').attr('alt') ||
+					$(el).text().replace(/\s+/g, ' ').trim();
+				if (!title || title.length < 2) return;
+				if (/view all|series list|feed|list mode/i.test(title)) return;
+
+				const parent = $(el).closest('.utao, .epic-card, .bs, .bsx, .luf, li, article, div');
+				const cover =
+					parent.find('img').attr('src') ||
+					parent.find('img').attr('data-src') ||
+					$(el).find('img').attr('src') ||
+					'';
+				const chText =
+					parent.find('.chapter-link, .chapter-row a, a.chap-text').first().text() ||
+					parent.find('a').filter((_, a) => isChapterPath(pathOnly($(a).attr('href') || ''))).first().text() ||
+					'';
+				const latestChapter = extractChapterNum(chText);
+
+				push({
+					id,
+					title: title.replace(/\s+/g, ' ').trim(),
+					cover: absUrl((cover || '').split('?')[0]),
+					sourceId: this.id,
+					type: 'novel',
+					lang: 'en',
+					...(latestChapter != null ? { latestChapter } : {})
+				});
 			});
 		}
 
@@ -133,17 +204,12 @@ export class DobyTranslationsSource extends BaseSource {
 	}
 
 	private parseLatestCard($: cheerio.CheerioAPI, el: any): Manga | null {
-		const seriesA =
-			$(el).find('a.series-cover-link, a[href*="/series/"]').filter((_, x) => {
-				return isSeriesPath(pathOnly($(x).attr('href') || ''));
-			}).first().length
-				? $(el)
-						.find('a.series-cover-link, a[href*="/series/"]')
-						.filter((_, x) => isSeriesPath(pathOnly($(x).attr('href') || '')))
-						.first()
-				: $(el).find('a.series-link, h3 a, .epic-title').closest('a').first();
+		const seriesA = $(el)
+			.find('a.series-cover-link, a.series-link, a[href*="/series/"]')
+			.filter((_, x) => isSeriesPath(pathOnly($(x).attr('href') || '')))
+			.first();
 
-		const href = seriesA.attr('href') || $(el).find('a[href*="/series/"]').first().attr('href') || '';
+		const href = seriesA.attr('href') || '';
 		if (!href) return null;
 		const id = pathOnly(href);
 		if (!isSeriesPath(id)) return null;
@@ -162,22 +228,24 @@ export class DobyTranslationsSource extends BaseSource {
 
 		const chText =
 			$(el).find('.chapter-link, .chapter-row a, a.chap-text, .nchapter a').first().text() ||
-			$(el).find('a[href*="-"]').filter((_, a) => isChapterPath(pathOnly($(a).attr('href') || ''))).first().text() ||
+			$(el)
+				.find('a')
+				.filter((_, a) => isChapterPath(pathOnly($(a).attr('href') || '')))
+				.first()
+				.text() ||
 			'';
 		const latestChapter = extractChapterNum(chText);
 
 		const statusText =
 			$(el).find('.epic-status, .status').first().text().replace(/\s+/g, ' ').trim() || undefined;
-		const typeText =
-			$(el).find('.epic-badge, .badge-yuri, .badge-male, .typez').first().text().replace(/\s+/g, ' ').trim() ||
-			'novel';
 
 		return {
 			id,
 			title,
 			cover: absUrl((cover || '').split('?')[0]),
 			sourceId: this.id,
-			type: typeText || 'novel',
+			// Selalu 'novel' agar filter Novel di frontend tidak mengosongkan list
+			type: 'novel',
 			lang: 'en',
 			...(statusText && /ongoing|completed|hiatus|complete/i.test(statusText)
 				? { status: statusText.match(/ongoing|completed|hiatus|complete/i)?.[0] }
@@ -187,16 +255,19 @@ export class DobyTranslationsSource extends BaseSource {
 	}
 
 	private async fetchSeriesPage(page: number): Promise<Manga[]> {
+		// Pagination: ?page=N (bukan /series/page/N/ — path itu mengembalikan page 1)
 		const path =
 			page <= 1
 				? '/series/?status=&type=&order=update'
 				: `/series/?page=${page}&status=&type=&order=update`;
 		const html = await this.fetchHtml(path);
+		this.assertNotCf(html);
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		$('.listupd .bs, .listupd .bsx, .bs .bsx, .utao, article, .leftseries').each((_, el) => {
+		$('.listupd .bs, .listupd .bsx, .bs .bsx, .utao, article, .leftseries, .listupd > div').each(
+			(_, el) => {
 			const a = $(el)
 				.find('a[href*="/series/"]')
 				.filter((_, x) => isSeriesPath(pathOnly($(x).attr('href') || '')))
@@ -209,7 +280,7 @@ export class DobyTranslationsSource extends BaseSource {
 
 			const title =
 				a.attr('title') ||
-				$(el).find('.tt, h2, h3, .ntt').first().text().replace(/\s+/g, ' ').trim() ||
+				$(el).find('.tt, h2, h3, .ntt, .epic-title').first().text().replace(/\s+/g, ' ').trim() ||
 				a.text().replace(/\s+/g, ' ').trim();
 			if (!title || title.length < 2) return;
 
@@ -279,6 +350,7 @@ export class DobyTranslationsSource extends BaseSource {
 				});
 			});
 
+			// Fallback links
 			if (!list.length) {
 				$('a[href*="/series/"]').each((_, el) => {
 					const href = $(el).attr('href') || '';
@@ -357,6 +429,7 @@ export class DobyTranslationsSource extends BaseSource {
 		let published = '';
 		let typeLabel = 'novel';
 
+		// Themesia info table (.infox .spe span / .sertoinfo)
 		$('.infox .spe span, .sertoinfo span, .info-left span, .fmed').each((_, el) => {
 			const raw = $(el).text().replace(/\s+/g, ' ').trim();
 			const label = $(el).find('b, strong').first().text().toLowerCase().trim() || raw.split(':')[0]?.toLowerCase() || '';
@@ -405,6 +478,7 @@ export class DobyTranslationsSource extends BaseSource {
 
 		if (!authors.length && artists.length) authors.push(...artists);
 
+		// Status badge
 		const statusBadge = $('.epic-status, .status, .hot').first().text().replace(/\s+/g, ' ').trim();
 		if (/completed|complete/i.test(statusBadge)) status = 'Completed';
 		else if (/hiatus/i.test(statusBadge)) status = 'Hiatus';
@@ -440,6 +514,7 @@ export class DobyTranslationsSource extends BaseSource {
 		return details;
 	}
 
+	/** eplister chapter list — short titles; coin-price-pill / premium = locked */
 	private parseChapters($: cheerio.CheerioAPI): Chapter[] {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
@@ -450,6 +525,7 @@ export class DobyTranslationsSource extends BaseSource {
 			if (!href) return;
 			const id = pathOnly(href);
 			if (seen.has(id)) return;
+			// Accept root chapter paths
 			if (!isChapterPath(id) && !/-\d+(?:p\d+)?\/?$/i.test(id)) return;
 			seen.add(id);
 
@@ -478,6 +554,7 @@ export class DobyTranslationsSource extends BaseSource {
 			});
 		});
 
+		// Fallback
 		if (!out.length) {
 			$('a[href]').each((i, el) => {
 				const href = $(el).attr('href') || '';
@@ -516,6 +593,7 @@ export class DobyTranslationsSource extends BaseSource {
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
 
+		// Paywall detection
 		const bodyText = $('.epcontent, .entry-content, main').text();
 		if (
 			$('.coin-price-pill, .premium-star, #unlock-selected-btn, .dg-popup').length &&
@@ -532,6 +610,7 @@ export class DobyTranslationsSource extends BaseSource {
 			$('meta[property="og:title"]').attr('content')?.split(/[|\-–]/)[0].trim() ||
 			'Chapter';
 
+		// Prefer clean content wrapper, lalu epcontent
 		let contentRoot = $('.ln-clean-content').first();
 		if (!contentRoot.length) {
 			contentRoot = $('.epcontent.entry-content, .epcontent, .entry-content, .reader-content').first();
@@ -544,6 +623,7 @@ export class DobyTranslationsSource extends BaseSource {
 			)
 			.remove();
 
+		// Bangun HTML <p> agar reader punya spasi antar paragraf (sama seperti site asli)
 		const parts: string[] = [];
 		clone.find('p').each((_, p) => {
 			const t = $(p).text().replace(/\s+/g, ' ').trim();
@@ -554,6 +634,7 @@ export class DobyTranslationsSource extends BaseSource {
 
 		let content = parts.join('\n');
 		if (!content || content.length < 40) {
+			// Fallback: split plain text by double newlines / long lines
 			const raw = clone.text().replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
 			const chunks = raw
 				.split(/\n\s*\n/)
@@ -566,6 +647,7 @@ export class DobyTranslationsSource extends BaseSource {
 			}
 		}
 
+		// Prev / next
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
