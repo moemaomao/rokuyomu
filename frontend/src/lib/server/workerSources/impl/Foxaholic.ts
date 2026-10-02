@@ -8,9 +8,6 @@
  *   Chapter  : /novel/{slug}/{chapter-slug}/
  *   Search   : /?s={q}&post_type=wp-manga
  *   List     : /novel/?m_orderby=latest  |  /novel/page/{n}/?m_orderby=latest
- *
- * Konten = text novel → getChapterPages() = []
- * Chapter title dibersihkan jadi "Chapter N" saja (tanpa judul panjang).
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
