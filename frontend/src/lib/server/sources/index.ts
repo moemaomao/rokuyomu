@@ -133,7 +133,8 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'rubynovels', name: 'Ruby Novels' },
 	{ id: 'kappabeast', name: 'KappaBeast' },
 	{ id: 'krakenbites', name: 'KrakenBites' },
-	{ id: 'lazygirltranslations', name: 'LazyGirlTranslations' }
+	{ id: 'lazygirltranslations', name: 'LazyGirlTranslations' },
+	{ id: 'curspe', name: 'Curspe' }
 
 ];
 

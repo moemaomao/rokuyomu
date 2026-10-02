@@ -24,9 +24,11 @@ import { MarineTLSource } from '../impl/novel/MarineTL';
 import { RubyNovelsSource } from '../impl/novel/RubyNovels';
 import { KrakenBitesSource } from '../impl/novel/KrakenBItes';
 import { LazyGirlTranslationsSource } from '../impl/novel/lazygirltranslations';
+import { CurspeSource } from '../impl/novel/Curspe';
 import type { IMangaSource } from '../types';
 
 const novelSources: Record<string, IMangaSource> = {
+	curspe: new CurspeSource(),
 	rubynovels: new RubyNovelsSource(),
 	marinetl: new MarineTLSource(),
 	fenrirealm: new FenrirRealmSource(),

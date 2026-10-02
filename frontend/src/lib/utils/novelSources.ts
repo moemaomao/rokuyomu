@@ -24,7 +24,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'marinetl',
 	'rubynovels',
 	'krakenbites',
-	'lazygirltranslations'
+	'lazygirltranslations',
+	'curspe'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
