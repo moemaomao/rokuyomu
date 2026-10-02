@@ -32,9 +32,11 @@ import { MochiStarSource } from '../impl/novel/MochiStar';
 import { DobyTranslationsSource } from '../impl/novel/DobyTranslations';
 import { RaysVaultSource } from '../impl/novel/RaysVault';
 import { HarishTranslationSource } from '../impl/novel/HarishTranslation';
+import { NomadTranslationsSource } from '../impl/novel/NomadTranslations';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	nomadtranslations: new NomadTranslationsSource(),
 	dobytranslations: new DobyTranslationsSource(),
 	harishtranslation: new HarishTranslationSource(),
 	mochistar: new MochiStarSource(),

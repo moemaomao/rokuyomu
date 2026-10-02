@@ -142,7 +142,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	mochistar: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	dobytranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	raysvault: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
-	harishtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
+	harishtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
+	nomadtranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {
