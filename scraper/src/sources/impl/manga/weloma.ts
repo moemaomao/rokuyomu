@@ -1,3 +1,11 @@
+/**
+ * WeLoMa (weloma.net) — manga raw
+ * Path: scraper/src/sources/impl/manga/Weloma.ts
+ *
+ * Fix:
+ *  - Search: /app/manga/controllers/search.single.php?q=  (bukan /search?s=)
+ *  - Alt title: li "Other names" → altTitles[]
+ */
 import { BaseSource } from '../../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 import * as cheerio from 'cheerio';
@@ -68,7 +76,7 @@ export class WelomaSource extends BaseSource {
 		return t.replace(/\s*[-|]\s*Weloma.*$/i, '').trim();
 	}
 
-	private extractCover($el: ReturnType<cheerio.CheerioAPI>): string {
+	private extractCover($el: cheerio.Cheerio<any>): string {
 		const dataBg = $el.find('[data-bg]').attr('data-bg');
 		if (dataBg) return this.absUrl(dataBg);
 
@@ -84,7 +92,7 @@ export class WelomaSource extends BaseSource {
 		return this.absUrl(img);
 	}
 
-	private extractDate($el: ReturnType<cheerio.CheerioAPI>): string {
+	private extractDate($el: cheerio.Cheerio<any>): string {
 		const $t = $el.find('.timeago, .chapter-time, time, .time').first();
 		if (!$t.length) return '';
 		return (
@@ -120,7 +128,6 @@ export class WelomaSource extends BaseSource {
 			const title = this.normalizeTitle(rawTitle);
 			if (!title) return;
 
-			// ── Latest chapter ─────────────────────────────
 			const chText =
 				$el.find('.chapter-title a').attr('title') ||
 				$el.find('.chapter-title a').text() ||
@@ -208,40 +215,78 @@ export class WelomaSource extends BaseSource {
 		return all.slice(offsetInWindow, offsetInWindow + need);
 	}
 
-	async searchManga(query: string): Promise<Manga[]> {
-		const q = encodeURIComponent((query || '').trim());
+	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
+		const q = (query || '').trim();
 		if (!q) return [];
+		const page = Math.max(1, opts?.page ?? 1);
 
-		const html = await this.fetchHtml(`/search?s=${q}`);
-		const $ = cheerio.load(html);
-		let mangas = this.parseCards($);
+		try {
+			const apiPath = `/app/manga/controllers/search.single.php?q=${encodeURIComponent(q)}`;
+			const raw = await this.fetchHtml(apiPath);
+			const json = JSON.parse(raw) as Array<{
+				data?: Array<{
+					primary?: string;
+					secondary?: string;
+					image?: string;
+					url?: string;
+				}>;
+			}>;
 
-		if (mangas.length === 0) {
+			const list: Manga[] = [];
 			const seen = new Set<string>();
-			$('a[href*="/m/"]').each((_, el) => {
-				const href = $(el).attr('href') || '';
+			const rows = json?.[0]?.data || [];
+
+			for (const row of rows) {
+				const href = row.url || '';
+				if (!href) continue;
 				const id = this.cleanId(href);
-				if (!/\/m\/[A-Za-z0-9]+/.test(id) || seen.has(id)) return;
+				if (!/\/m\/[A-Za-z0-9]+/.test(id) || seen.has(id)) continue;
 				seen.add(id);
 
-				const title = this.normalizeTitle(
-					(($(el).attr('title') || $(el).text()) as string).trim()
-				);
-				if (title) {
-					mangas.push({
-						id,
-						title,
-						cover: '',
-						sourceId: this.id,
-						status: 'Ongoing',
-						type: 'manga',
-						lang: this.DEFAULT_LANG
-					});
-				}
-			});
+				const title = this.normalizeTitle(row.primary || '');
+				if (!title) continue;
+
+				const chMatch = (row.secondary || '').match(/(\d+(?:\.\d+)?)/);
+				const latestChapter = chMatch ? parseFloat(chMatch[1]) : undefined;
+
+				list.push({
+					id,
+					title,
+					cover: this.absUrl(row.image || ''),
+					sourceId: this.id,
+					status: 'Ongoing',
+					type: 'manga',
+					lang: this.DEFAULT_LANG,
+					...(latestChapter != null && !Number.isNaN(latestChapter)
+						? { latestChapter }
+						: {})
+				});
+			}
+
+			if (list.length) {
+				if (page <= 1) return list.slice(0, this.PER_PAGE);
+			}
+		} catch (e) {
+			console.error('[weloma] search ajax failed', e);
 		}
 
-		return mangas.slice(0, this.PER_PAGE);
+		try {
+			const path =
+				page <= 1
+					? `/l/0OYCn?name=${encodeURIComponent(q)}`
+					: `/l/0OYCn?name=${encodeURIComponent(q)}&page=${page}`;
+			const html = await this.fetchHtml(path);
+			const $ = cheerio.load(html);
+			let mangas = this.parseCards($);
+			const qLower = q.toLowerCase();
+			const filtered = mangas.filter((m) => m.title.toLowerCase().includes(qLower));
+			if (filtered.length) mangas = filtered;
+
+			return mangas.slice(0, this.PER_PAGE);
+		} catch (e) {
+			console.error('[weloma] search html failed', e);
+			return [];
+		}
 	}
 
 	// ── Details ──────────────────────────────────────────────────────────────
@@ -282,14 +327,12 @@ export class WelomaSource extends BaseSource {
 
 		title = this.normalizeTitle(title);
 
-		// ── COVER ────────────────────────────────────────────────────────────
 		let cover =
 			$('.info-cover img.thumbnail, .info-cover img').first().attr('src') ||
 			$('meta[property="og:image"]').attr('content') ||
 			'';
 		cover = this.absUrl(cover);
 
-		// ── SYNOPSIS ─────────────────────────────────────────────────────────
 		const description =
 			$('.summary-content, .series-summary .summary-content, .summary')
 				.first()
@@ -297,7 +340,6 @@ export class WelomaSource extends BaseSource {
 				.replace(/\s+/g, ' ')
 				.trim() || '';
 
-		// ── STATUS ───────────────────────────────────────────────────────────
 		const statusRaw =
 			$(
 				'.manga-info a[href*="manga-on-going"], .manga-info a[href*="manga-completed"], .manga-info a.btn-success, .manga-info a.btn-danger'
@@ -307,40 +349,65 @@ export class WelomaSource extends BaseSource {
 				.toLowerCase() || '';
 		const status = /complete|end|finish/.test(statusRaw) ? 'Completed' : 'Ongoing';
 
-		// ── AUTHORS ──────────────────────────────────────────────────────────
 		const authors: string[] = [];
-		$('.manga-info li').each((_, li) => {
+		const artists: string[] = [];
+		const altTitles: string[] = [];
+		const genres: string[] = [];
+
+		$('.manga-info li, ul.manga-info li').each((_, li) => {
 			const $li = $(li);
-			const label = $li.find('b').first().text().toLowerCase();
-			if (!label.includes('author') && !label.includes('artist')) return;
-			$li.find('a').each((__, a) => {
-				const t = $(a).text().trim();
-				if (t && !authors.includes(t)) authors.push(t);
-			});
-			const text = $li
+			const label = $li.find('b').first().text().toLowerCase().replace(/\s+/g, ' ').trim();
+			const valueText = $li
 				.clone()
-				.children()
+				.children('b, i, svg')
 				.remove()
 				.end()
 				.text()
 				.replace(/^[:\s]+/, '')
+				.replace(/\s+/g, ' ')
 				.trim();
-			if (text && !authors.includes(text)) authors.push(text);
-		});
 
-		// ── GENRES ───────────────────────────────────────────────────────────
-		const genres: string[] = [];
-		$('.manga-info li').each((_, li) => {
-			const $li = $(li);
-			const label = $li.find('b').first().text().toLowerCase();
-			if (!label.includes('genre')) return;
+			const links: string[] = [];
 			$li.find('a').each((__, a) => {
 				const t = $(a).text().trim();
-				if (t && !genres.includes(t)) genres.push(t);
+				if (t) links.push(t);
 			});
+
+			if (label.includes('other name') || label.includes('alternative') || label.includes('aka')) {
+				const raw = valueText || links.join(', ');
+				if (raw) {
+					for (const part of raw.split(/[,;|/]/)) {
+						const t = part.trim();
+						if (t && t.length < 120 && !altTitles.includes(t)) altTitles.push(t);
+					}
+				}
+				return;
+			}
+
+			if (label.includes('author')) {
+				const names = links.length ? links : valueText ? [valueText] : [];
+				for (const n of names) {
+					if (n && !authors.includes(n)) authors.push(n);
+				}
+				return;
+			}
+
+			if (label.includes('artist')) {
+				const names = links.length ? links : valueText ? [valueText] : [];
+				for (const n of names) {
+					if (n && !artists.includes(n)) artists.push(n);
+				}
+				return;
+			}
+
+			if (label.includes('genre')) {
+				for (const t of links.length ? links : valueText ? valueText.split(/[,]/) : []) {
+					const g = t.trim();
+					if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
+				}
+			}
 		});
 
-		// ── CHAPTERS ─────────────────────────────────────────────────────────
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -382,7 +449,10 @@ export class WelomaSource extends BaseSource {
 
 		chapters.sort((a, b) => a.number - b.number);
 
-		return {
+		const details: MangaDetails & {
+			artists?: string[];
+			altTitles?: string[];
+		} = {
 			id: path,
 			sourceId: this.id,
 			title,
@@ -398,34 +468,37 @@ export class WelomaSource extends BaseSource {
 				? chapters[chapters.length - 1].number
 				: undefined
 		};
+
+		if (artists.length) details.artists = artists;
+		if (altTitles.length) details.altTitles = altTitles;
+
+		return details;
 	}
 
-async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
-	const path = this.cleanId(
-		chapterId.startsWith('/c/')
-			? chapterId
-			: chapterId.startsWith('http')
+	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+		const path = this.cleanId(
+			chapterId.startsWith('/c/')
 				? chapterId
-				: `/c/${chapterId.replace(/^\//, '')}`
-	);
-	try {
-		const html = await this.fetchHtml(path);
-		const $ = cheerio.load(html);
-		const href =
-			$('a[href*="/m/"]').first().attr('href') ||
-			html.match(/href="(\/m\/[A-Za-z0-9]+)"/i)?.[1] ||
-			'';
-		if (!href) return null;
-		const m = href.match(/\/m\/[A-Za-z0-9]+/i);
-		return m ? m[0] : null;
-	} catch (e) {
-		console.error('[weloma] resolveMangaIdFromChapter failed:', e);
-		return null;
+				: chapterId.startsWith('http')
+					? chapterId
+					: `/c/${chapterId.replace(/^\//, '')}`
+		);
+		try {
+			const html = await this.fetchHtml(path);
+			const $ = cheerio.load(html);
+			const href =
+				$('a[href*="/m/"]').first().attr('href') ||
+				html.match(/href="(\/m\/[A-Za-z0-9]+)"/i)?.[1] ||
+				'';
+			if (!href) return null;
+			const m = href.match(/\/m\/[A-Za-z0-9]+/i);
+			return m ? m[0] : null;
+		} catch (e) {
+			console.error('[weloma] resolveMangaIdFromChapter failed:', e);
+			return null;
+		}
 	}
-}
 
-
-	// ── Pages ────────────────────────────────────────────────────────────────
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		const path = this.cleanId(
@@ -467,3 +540,5 @@ async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
 		return images;
 	}
 }
+
+export default WelomaSource;
