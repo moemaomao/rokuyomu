@@ -109,6 +109,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 		return this.parseSeriesArchive(page);
 	}
 
+	/** Homepage — section Latest Release */
 	private async parseLatestReleaseHome(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
@@ -117,11 +118,13 @@ export class RedPandaTranslationsSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
+		// Themesia: .bixbox.releases.latesthome .utao / .listupd .bsx
 		const root =
 			$('.bixbox.releases.latesthome, .releases.latesthome, .bixbox.releases').first().length > 0
 				? $('.bixbox.releases.latesthome, .releases.latesthome, .bixbox.releases').first()
 				: $('body');
 
+		// Style tree: .utao.styletree
 		root.find('.utao, .uta, .bsx, .bs').each((_, el) => {
 			const item = this.parseCard($, el);
 			if (item && !seen.has(item.id)) {
@@ -130,6 +133,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 			}
 		});
 
+		// Fallback: any /series/ link in latest area
 		if (list.length < 8) {
 			root.find('a[href*="/series/"]').each((_, a) => {
 				const seriesId = seriesPathFromHref($(a).attr('href') || '');
@@ -160,6 +164,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 		return list;
 	}
 
+	/** /series/?order=update (+ page) */
 	private async parseSeriesArchive(page: number): Promise<Manga[]> {
 		const path =
 			page <= 1
@@ -225,6 +230,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 		let href = a.attr('href') || root.find('a[href*="/series/"]').first().attr('href') || '';
 		let seriesId = seriesPathFromHref(href);
 
+		// styletree: kadang hanya ada chapter link, series di-derive dari -ch URL
 		if (!seriesId) {
 			const chHref =
 				root.find('a[href*="-ch"]').first().attr('href') ||
@@ -234,26 +240,34 @@ export class RedPandaTranslationsSource extends BaseSource {
 		}
 		if (!seriesId) return null;
 
+		const imgEl = root.find('img').first();
+		const img =
+			imgEl.attr('data-src') ||
+			imgEl.attr('data-lazy-src') ||
+			imgEl.attr('src') ||
+			'';
+
 		const title =
 			cleanText(a.attr('title') || '') ||
 			cleanText(root.find('.ntitle, .tt, .title, h2, h3, a.series').first().text()) ||
+			cleanText(imgEl.attr('alt') || '') ||
 			cleanText(a.text());
 		if (!title || title.length < 2) return null;
 
-		const img =
-			root.find('img').first().attr('data-src') ||
-			root.find('img').first().attr('data-lazy-src') ||
-			root.find('img').first().attr('src') ||
-			'';
-
+		// Latest chapter: "Ch. 340" di list .luf / a[href*="-ch"]
 		let latestChapter: number | undefined;
-		const chLinks = root.find('a[href*="-ch"]');
+		const chLinks = root.find('.luf a[href*="-ch"], a[href*="-ch"]');
 		if (chLinks.length) {
-			const first = chLinks.first();
-			const fromText = parseChapterNumber(cleanText(first.text()));
-			const fromHref = parseChapterNumber(pathOnly(first.attr('href') || ''));
-			const n = fromText > 0 ? fromText : fromHref;
-			if (n > 0) latestChapter = n;
+			let best = 0;
+			chLinks.each((_, link) => {
+				const t = cleanText($(link).text());
+				const fromText = parseChapterNumber(t);
+				const fromHref = parseChapterNumber(pathOnly($(link).attr('href') || ''));
+				const n = fromText > 0 ? fromText : fromHref;
+				// ambil chapter pertama di list (paling baru di styletree)
+				if (n > 0 && best === 0) best = n;
+			});
+			if (best > 0) latestChapter = best;
 		}
 		if (latestChapter == null) {
 			const chText = cleanText(root.find('.nchapter, .chapter, .epx, .luf li').first().text());
@@ -367,6 +381,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 			'';
 		if (description.length > 4000) description = description.slice(0, 4000) + '…';
 
+		// Metadata rows: .serl > .sername + .serval
 		const authors: string[] = [];
 		const genres: string[] = [];
 		let status = 'Ongoing';
@@ -414,9 +429,11 @@ export class RedPandaTranslationsSource extends BaseSource {
 			}
 		});
 
+		// Status badge
 		const badge = cleanText($('.sertostat, .status-value, .status').first().text());
 		if (badge) status = normalizeStatus(badge);
 
+		// Genres from links
 		$('a[href*="/genre/"], a[href*="/genres/"]').each((_, a) => {
 			const g = cleanText($(a).text());
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
@@ -429,6 +446,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 			description = (description ? description + '\n\n' : '') + metaExtra.join('\n');
 		}
 
+		// Chapters — .eplister
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -436,6 +454,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 			const href = $(a).attr('href') || '';
 			const id = pathOnly(href);
 			if (!id || seen.has(id)) return;
+			// chapter path: /{slug}-ch{n}/
 			if (!/-ch[\d.]+/i.test(id) && !/\/chapter/i.test(id)) return;
 			seen.add(id);
 
@@ -454,6 +473,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 			});
 		});
 
+		// Fallback: any -ch link on page
 		if (!chapters.length) {
 			$('a[href*="-ch"]').each((_, a) => {
 				const href = $(a).attr('href') || '';
@@ -501,7 +521,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-		
 		let path = String(chapterId || '').trim();
 		if (!path.startsWith('/')) path = `/${path}`;
 		path = pathOnly(path);
@@ -519,51 +538,121 @@ export class RedPandaTranslationsSource extends BaseSource {
 		const number = parseChapterNumber(rawTitle || path);
 		const title = shortChapterTitle(number > 0 ? number : 0) || rawTitle;
 
-		const contentEl = $('.epcontent').first().length
-			? $('.epcontent').first()
-			: $('#readerarea, .reader-area, .epcontent.entry-content').first();
+		// ── extract content (beberapa fallback) ──
+		let content = '';
 
-		if (!contentEl.length) {
-			throw new Error(`Chapter content not found: ${path}`);
+		const stripNoise = ($root: any) => {
+			$root
+				.find(
+					'script, style, noscript, iframe, .ads, .ad, .code-block, nav, .sharedaddy, .misc, .socials, .tts__listent_content, [class*="tts_"], .navpost, .headpost, .chapter-nav'
+				)
+				.remove();
+			return $root;
+		};
+
+		const cleanInline = (htmlStr: string) =>
+			htmlStr
+				.replace(/\s*style="([^"]*)"/gi, (_m, style: string) => {
+					const cleaned = String(style)
+						.replace(/color\s*:\s*[^;]+;?/gi, '')
+						.replace(/background(-color)?\s*:\s*[^;]+;?/gi, '')
+						.trim()
+						.replace(/;\s*;/g, ';')
+						.replace(/^;|;$/g, '');
+					return cleaned ? ` style="${cleaned}"` : '';
+				})
+				.trim();
+
+		const textLen = (htmlStr: string) =>
+			htmlStr.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+
+		// 1) .epcontent (Themesia)
+		const ep = $('.epcontent').first();
+		if (ep.length) {
+			stripNoise(ep);
+			content = cleanInline(ep.html() || '');
 		}
 
-		contentEl
-			.find(
-				'script, style, noscript, iframe, .ads, .ad, .code-block, nav, .sharedaddy, .misc, .socials, .tts__listent_content, [class*="tts_"]'
-			)
-			.remove();
-
-		let content = contentEl.html() || '';
-		content = content
-			.replace(/\s*style="([^"]*)"/gi, (_m, style: string) => {
-				const cleaned = String(style)
-					.replace(/color\s*:\s*[^;]+;?/gi, '')
-					.replace(/background(-color)?\s*:\s*[^;]+;?/gi, '')
-					.trim()
-					.replace(/;\s*;/g, ';')
-					.replace(/^;|;$/g, '');
-				return cleaned ? ` style="${cleaned}"` : '';
-			})
-			.trim();
-
-		const textLen = content.replace(/<[^>]+>/g, '').trim().length;
-		if (textLen < 40) {
-			const plain = contentEl.text().replace(/\s+/g, ' ').trim();
-			if (plain.length < 40) {
-				throw new Error(`Chapter empty: ${path}`);
+		// 2) .tts_content_wrapper / entry-content di dalam article
+		if (textLen(content) < 80) {
+			for (const sel of [
+				'[class*="tts_content_wrapper"]',
+				'article .entry-content',
+				'.postbody .entry-content',
+				'#content .entry-content',
+				'.reader-area',
+				'#readerarea'
+			]) {
+				const el = $(sel).first();
+				if (!el.length) continue;
+				stripNoise(el);
+				const h = cleanInline(el.html() || '');
+				if (textLen(h) > textLen(content)) content = h;
 			}
-			content = plain
-				.split(/\n+/)
-				.map((p) => p.trim())
-				.filter((p) => p.length > 0)
-				.map(
-					(p) =>
-						`<p>${p
+		}
+
+		// 3) Kumpulkan semua <p> di dalam post
+		if (textLen(content) < 80) {
+			const ps: string[] = [];
+			$('.epcontent p, article p, .postbody p, .entry-content p').each((_, p) => {
+				const t = cleanText($(p).text());
+				if (t.length > 5) {
+					ps.push(
+						`<p>${t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`
+					);
+				}
+			});
+			if (ps.length) content = ps.join('\n');
+		}
+
+		// 4) Regex fallback dari raw HTML (kalau cheerio gagal / konten di-obfuscate)
+		if (textLen(content) < 80) {
+			const epRe = /<div[^>]*class="[^"]*epcontent[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
+			const m = html.match(epRe);
+			if (m && m[1]) {
+				let raw = m[1]
+					.replace(/<script[\s\S]*?<\/script>/gi, '')
+					.replace(/<style[\s\S]*?<\/style>/gi, '')
+					.replace(/<div[^>]*class="[^"]*tts[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
+				raw = cleanInline(raw);
+				if (textLen(raw) > textLen(content)) content = raw;
+			}
+		}
+
+		// 5) Plain text terakhir
+		if (textLen(content) < 80) {
+			const plain =
+				$('.epcontent').text() ||
+				$('article').text() ||
+				$('.postbody').text() ||
+				'';
+			const cleaned = plain.replace(/\s+/g, ' ').trim();
+			// potong meta chrome di depan
+			const cut = cleaned.replace(
+				/^[\s\S]{0,200}?(Chapter\s+\d+[^\n]*?)(?=\s+[A-Z])/i,
+				'$1'
+			);
+			if (cut.length >= 80) {
+				content = cut
+					.split(/\.\s+(?=[A-Z])/)
+					.map((p) => p.trim())
+					.filter((p) => p.length > 20)
+					.slice(0, 80)
+					.map((p) => {
+						const s = p.endsWith('.') ? p : p + '.';
+						return `<p>${s
 							.replace(/&/g, '&amp;')
 							.replace(/</g, '&lt;')
-							.replace(/>/g, '&gt;')}</p>`
-				)
-				.join('\n');
+							.replace(/>/g, '&gt;')}</p>`;
+					})
+					.join('\n');
+			}
+		}
+
+		if (textLen(content) < 40) {
+			throw new Error(
+				`Chapter empty: ${path} (html=${html.length}b, hasEp=${$('.epcontent').length})`
+			);
 		}
 
 		// Next / Prev

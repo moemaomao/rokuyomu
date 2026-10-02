@@ -10,7 +10,7 @@ import type {
 	NovelChapterContent,
 	INovelSource
 } from '../../types-novel.js';
-import type { Manga, MangaDetails } from '../../types.js';
+import type { Manga, MangaDetails } from '../../types-manga.js';
 
 export class Noveltoon extends BaseSource implements INovelSource {
 	id = 'noveltoon';
