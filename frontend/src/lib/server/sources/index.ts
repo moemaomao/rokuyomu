@@ -139,7 +139,8 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'skynovelvault', name: 'SkyNovelVault' },
 	{ id: 'redpandatranslations', name: 'Red Panda Translations' },
 	{ id: 'mochistar', name: 'MochiStar' },
-	{ id: 'dobytranslations', name: 'Doby Translations' }
+	{ id: 'dobytranslations', name: 'Doby Translations' },
+	{ id: 'raysvault', name: 'RaysVault' }
 ];
 
 export function getSourceList(): SourceMeta[] {
