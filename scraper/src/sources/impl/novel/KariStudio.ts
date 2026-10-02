@@ -18,7 +18,7 @@
  *   GET /wp-json/wp/v2/posts?slug={novel-slug}&_embed=1  → cover via featured media
  */
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const PAGE_SIZE = 24;
 const WP = '/wp-json/wp/v2';

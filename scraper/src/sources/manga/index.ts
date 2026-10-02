@@ -96,7 +96,7 @@ import { SetsuScansSource } from '../impl/manga/SetsuScans';
 import ComicGardoSource from '../impl/manga/ComicGardo';
 import { VioletMangaSource } from '../impl/manga/VioletManga';
 import { KappaBeastSource } from '../impl/manga/KappaBeast';
-import type { IMangaSource } from '../types';
+import type { IMangaSource } from '../types-manga';
 
 const mangaSources: Record<string, IMangaSource> = {
 	kappabeast: new KappaBeastSource(),

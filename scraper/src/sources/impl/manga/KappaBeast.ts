@@ -19,7 +19,7 @@
  */
 
 import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types';
+import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 
 export class KappaBeastSource extends BaseSource {
 	id = 'kappabeast';

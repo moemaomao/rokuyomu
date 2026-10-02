@@ -8,7 +8,7 @@
  */
 
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails } from '../../types';
+import type { Manga, MangaDetails } from '../../types-manga';
 import https from 'node:https';
 
 export class ImhentaiSource extends BaseSource {

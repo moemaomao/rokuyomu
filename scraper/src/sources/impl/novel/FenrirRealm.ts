@@ -26,7 +26,7 @@
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const BASE = 'https://fenrirealm.com';
 const API = `${BASE}/api/new/v2`;

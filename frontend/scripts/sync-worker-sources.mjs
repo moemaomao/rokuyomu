@@ -95,9 +95,9 @@ function rewriteImportsForWorker(content) {
 		.replace(/from\s+['"]\.\.\/\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
 		.replace(/from\s+['"]\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
 	
-		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types'")
-		.replace(/from\s+['"]\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types'")
-		.replace(/from\s+['"]\.\.\/types(?:\.js)?['"]/g, "from '../types'")
+		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
+        .replace(/from\s+['"]\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
+        .replace(/from\s+['"]\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'")
 
 		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'")
 		.replace(/from\s+['"]\.\.\/\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'")
@@ -156,7 +156,7 @@ function generateIndex(ids, sourceMap) {
  *                  → (else)           → fetch JSON ke scraper Vercel/Render
  */
 
-import type { IMangaSource } from './types';
+import type { IMangaSource } from './types-manga';
 
 export const WORKER_SOURCE_IDS = new Set([
 ${idsLiteral}

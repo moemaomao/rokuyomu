@@ -4,7 +4,7 @@
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../types';
+import type { Manga, MangaDetails, Chapter } from '../types-manga';
 
 const BLOCKED_PATH =
 	/\/(library|genre|tag|author|page|wp-|category|about|forum|patreon|discord|recruitment|login|sign-?up|contact|privacy|terms|tos|search|home|feed|rss|sitemap|cart|checkout|account|profile|membership|support|ko-fi|kofi)(\/|$)/i;

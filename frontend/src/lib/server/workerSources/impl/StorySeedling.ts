@@ -15,7 +15,7 @@
  * TOC post hash & content nonce tampak global di site (fallback hardcoded).
  */
 import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../types';
+import type { Manga, MangaDetails, Chapter } from '../types-manga';
 
 const PAGE_SIZE = 24;
 const TOC_POST_HASH = 'e8c4f5fd2f';

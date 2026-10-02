@@ -19,7 +19,7 @@
 
 import { createHmac, randomBytes } from 'crypto';
 import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types';
+import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 
 export class KumopoiSource extends BaseSource {
 	id = 'kumopoi';

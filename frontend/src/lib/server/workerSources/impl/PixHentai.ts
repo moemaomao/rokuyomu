@@ -15,7 +15,7 @@
  */
 
 import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
 import * as cheerio from 'cheerio';
 
 export class PixHentaiSource extends BaseSource {

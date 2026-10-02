@@ -11,7 +11,7 @@ import {
 	hasNovelSource,
 	NOVEL_SOURCE_IDS
 } from './novel';
-import type { IMangaSource } from './types';
+import type { IMangaSource } from './types-manga';
 
 /**
  * @throws Error if source not found

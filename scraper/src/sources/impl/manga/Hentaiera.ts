@@ -10,7 +10,7 @@
  */
 
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails } from '../../types';
+import type { Manga, MangaDetails } from '../../types-manga';
 
 export class HentaieraSource extends BaseSource {
 	id = 'hentaiera';

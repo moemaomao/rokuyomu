@@ -17,7 +17,7 @@
  *   GET /wp-json/wp/v2/ac_novel?slug={slug}
  */
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const PAGE_SIZE = 20;
 const API = '/wp-json/azurechronicles/v2';

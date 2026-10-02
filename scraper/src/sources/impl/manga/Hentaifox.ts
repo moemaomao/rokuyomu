@@ -12,7 +12,7 @@
  */
 
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails } from '../../types';
+import type { Manga, MangaDetails } from '../../types-manga';
 import * as cheerio from 'cheerio';
 
 export class HentaifoxSource extends BaseSource {

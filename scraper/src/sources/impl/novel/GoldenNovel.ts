@@ -10,7 +10,7 @@
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 function absUrl(base: string, href: string | undefined): string {
 	if (!href) return '';

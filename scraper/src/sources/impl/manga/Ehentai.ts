@@ -16,7 +16,7 @@
  */
 
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 import * as cheerio from 'cheerio';
 
 export class EhentaiSource extends BaseSource {

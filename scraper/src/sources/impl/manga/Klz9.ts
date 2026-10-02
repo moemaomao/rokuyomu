@@ -13,7 +13,7 @@
  */
 
 import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types';
+import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 
 export class Klz9Source extends BaseSource {
 	id = 'klz9';

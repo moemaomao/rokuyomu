@@ -16,7 +16,7 @@
  */
 
 import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
 export class AinzScansSource extends BaseSource {
 	id = 'ainzscans';

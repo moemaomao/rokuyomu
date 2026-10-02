@@ -25,7 +25,7 @@ import { RubyNovelsSource } from '../impl/novel/RubyNovels';
 import { KrakenBitesSource } from '../impl/novel/KrakenBItes';
 import { LazyGirlTranslationsSource } from '../impl/novel/lazygirltranslations';
 import { CurspeSource } from '../impl/novel/Curspe';
-import type { IMangaSource } from '../types';
+import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
 	curspe: new CurspeSource(),

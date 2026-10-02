@@ -12,7 +12,7 @@
  * Novel text → getChapterPages() = []
  */
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const API = 'https://dragonholictranslations.com/wp-json/wp/v2';
 const PER_PAGE = 24;

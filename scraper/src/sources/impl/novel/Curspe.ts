@@ -21,7 +21,7 @@
 
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types';
+import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 
 const BASE = 'https://curspe.com';
 const PER_PAGE = 24;

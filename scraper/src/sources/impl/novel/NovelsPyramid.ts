@@ -21,7 +21,7 @@
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types';
+import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const BASE = 'https://novelspyramid.com';
 const AJAX = `${BASE}/wp-admin/admin-ajax.php`;
