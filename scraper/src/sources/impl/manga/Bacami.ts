@@ -26,6 +26,25 @@ export class BacamiSource extends BaseSource {
 	private readonly PER_PAGE = 24;
 	private readonly DEFAULT_LANG = 'id';
 
+	protected headers: Record<string, string> = {
+		'User-Agent':
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+		Accept:
+			'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+		'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+		'Accept-Encoding': 'gzip, deflate, br',
+		'Cache-Control': 'no-cache',
+		Pragma: 'no-cache',
+		'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+		'Sec-Ch-Ua-Mobile': '?0',
+		'Sec-Ch-Ua-Platform': '"Windows"',
+		'Sec-Fetch-Dest': 'document',
+		'Sec-Fetch-Mode': 'navigate',
+		'Sec-Fetch-Site': 'none',
+		'Sec-Fetch-User': '?1',
+		'Upgrade-Insecure-Requests': '1'
+	};
+
 	// ── Helpers ──────────────────────────────────────────────────────────────
 
 	private absUrl(url: string): string {
@@ -93,7 +112,6 @@ export class BacamiSource extends BaseSource {
 	}
 
 	private pickCover($el: cheerio.Cheerio<any>): string {
-		// prioritaskan img di dalam link cover (bukan hot-tag)
 		const candidates = [
 			$el.find('.manga-cover a img, .genre-cover a img').attr('data-src'),
 			$el.find('.manga-cover a img, .genre-cover a img').attr('src'),
@@ -105,7 +123,6 @@ export class BacamiSource extends BaseSource {
 			if (c && !this.isBadCover(c)) return this.absUrl(c.split('?')[0]);
 		}
 
-		// fallback scan semua img
 		let found = '';
 		$el.find('img').each((_, img) => {
 			if (found) return;
@@ -251,14 +268,12 @@ export class BacamiSource extends BaseSource {
 
 			const $ = cheerio.load(html);
 
-			// Prioritas: #komik-list (list utama) → fallback semua .manga-card
 			const komikList = $('#komik-list');
 			let list = this.parseMangaCards(
 				$,
 				komikList.length ? komikList : undefined
 			);
 
-			// Kalau masih kosong / sedikit, gabung project-list juga
 			if (list.length < 8) {
 				const projectList = $('#project-list');
 				const extra = this.parseMangaCards(
@@ -267,6 +282,17 @@ export class BacamiSource extends BaseSource {
 				);
 				const seen = new Set(list.map((m) => m.id));
 				for (const m of extra) {
+					if (seen.has(m.id)) continue;
+					seen.add(m.id);
+					list.push(m);
+				}
+			}
+
+			// Fallback terakhir: scan semua .manga-card di halaman
+			if (list.length < 4) {
+				const all = this.parseMangaCards($);
+				const seen = new Set(list.map((m) => m.id));
+				for (const m of all) {
 					if (seen.has(m.id)) continue;
 					seen.add(m.id);
 					list.push(m);
@@ -301,7 +327,7 @@ export class BacamiSource extends BaseSource {
 			// Search pakai .genre-card
 			let list = this.parseSearchCards($);
 
-			// Fallback: manga-card (kalau suatu saat berubah)
+			// Fallback: manga-card
 			if (!list.length) {
 				list = this.parseMangaCards($);
 			}
