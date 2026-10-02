@@ -9,8 +9,6 @@
  *   Series   : /{slug}/
  *   Chapter  : /{series-slug}/{abbrev}-chapter-{n}/  or /{series-slug}/{abbrev}-chapter-{n}-{title}/
  *   Search   : /?s={q}
- *
- * Situs dilindungi Cloudflare → wajib fetchWithCf (+ Byparr / hybrid Worker di production)
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -72,7 +70,37 @@ function parseChapterNumber(text: string, fallback = 0): number {
 	return fallback;
 }
 
-/** Series: single path segment that is NOT a chapter path */
+const BLOCKED_SLUGS = new Set([
+	'about',
+	'about-policies',
+	'about-and-policies',
+	'privacy',
+	'privacy-policy',
+	'cookies',
+	'cookies-policy',
+	'cookie-policy',
+	'contact',
+	'terms',
+	'terms-of-service',
+	'disclaimer',
+	'donate',
+	'donation',
+	'novel-list',
+	'novellist',
+	'novel-list-2',
+	'list',
+	'home',
+	'blog',
+	'sample-page',
+	'wp-login',
+	'wp-admin',
+	'feed',
+	'comments',
+	'cart',
+	'shop',
+	'my-account'
+]);
+
 function isSeriesPath(path: string): boolean {
 	const p = path.replace(/\/$/, '');
 	if (!p || p === '/') return false;
@@ -80,12 +108,22 @@ function isSeriesPath(path: string): boolean {
 	// /slug only
 	if (!/^\/[^/]+$/.test(p)) return false;
 	if (/chapter/i.test(p)) return false;
+	const slug = p.slice(1).toLowerCase();
+	if (BLOCKED_SLUGS.has(slug)) return false;
+	if (/^(about|privacy|cookie|policy|terms|contact|donate|novel-?list)/i.test(slug)) return false;
 	return true;
+}
+
+function isJunkTitle(title: string): boolean {
+	const t = (title || '').trim();
+	if (!t || t.length < 4) return true;
+	return /^(read more|nomad translations|home|about|privacy|cookies?|policy|terms|contact|novel list|leave a reply)/i.test(
+		t
+	);
 }
 
 function isChapterPath(path: string): boolean {
 	const p = path.replace(/\/$/, '');
-	// /series-slug/xxx-chapter-N or /series-slug/xxx-chapter-N-title
 	return /^\/[^/]+\/[^/]*chapter[^/]*$/i.test(p);
 }
 
@@ -123,7 +161,6 @@ export class NomadTranslationsSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// WP cards: article, .post, .entry, li with series link
 		const cards = $(
 			'article, .post, .entry, .wp-block-post, .type-post, li, .entry-content > ul > li'
 		);
@@ -145,8 +182,7 @@ export class NomadTranslationsSource extends BaseSource {
 				cleanText(a.attr('title') || '') ||
 				cleanText($el.find('h2, h3, .entry-title, .post-title').first().text()) ||
 				cleanText(a.text());
-			if (!title || title.length < 3) return;
-			if (/^read more|^nomad translation/i.test(title)) return;
+			if (!title || isJunkTitle(title)) return;
 
 			const cover =
 				$el.find('img').attr('src') ||
@@ -186,7 +222,6 @@ export class NomadTranslationsSource extends BaseSource {
 			});
 		});
 
-		// Fallback: direct series links on homepage
 		if (list.length < 5) {
 			$('a[href]').each((_, el) => {
 				const href = $(el).attr('href') || '';
@@ -194,8 +229,7 @@ export class NomadTranslationsSource extends BaseSource {
 				if (!isSeriesPath(id) || seen.has(id)) return;
 				if (!href.includes('nomad-translations.com') && !href.startsWith('/')) return;
 				const title = cleanText($(el).attr('title') || $(el).text());
-				if (!title || title.length < 5) return;
-				if (/^read more|home|about|contact|nomad translations$/i.test(title)) return;
+				if (!title || isJunkTitle(title)) return;
 				seen.add(id);
 				list.push({
 					id,
@@ -246,7 +280,6 @@ export class NomadTranslationsSource extends BaseSource {
 		cover = absUrl((cover || '').split('?')[0]);
 		if (/logo|avatar|gravatar|wp-includes/i.test(cover)) cover = '';
 
-		// Synopsis: entry content before chapter list
 		let description = '';
 		const $content = $('.entry-content, .post-content, article .content, .wp-block-post-content').first();
 		const paras: string[] = [];
@@ -268,7 +301,6 @@ export class NomadTranslationsSource extends BaseSource {
 		else if (/future translation/i.test(bodyAll)) status = 'Hiatus';
 		else if (/currently translating|updating/i.test(bodyAll)) status = 'Ongoing';
 
-		// Alt title from (ABBREV) in title
 		const altTitles: string[] = [];
 		const abbrev = title.match(/\(([A-Z0-9]{2,})\)$/);
 		if (abbrev) altTitles.push(abbrev[1]);
@@ -298,13 +330,11 @@ export class NomadTranslationsSource extends BaseSource {
 	private parseChapters($: cheerio.CheerioAPI, seriesPath: string): Chapter[] {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
-
-		// Links like CALID Chapter 1 → /series/calid-chapter-1/
+        
 		$('a[href]').each((_, a) => {
 			const href = $(a).attr('href') || '';
 			const id = pathOnly(href);
 			if (!isChapterPath(id)) return;
-			// must be under this series
 			if (!id.startsWith(seriesPath + '/')) return;
 			if (seen.has(id)) return;
 			seen.add(id);
