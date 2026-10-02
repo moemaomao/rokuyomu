@@ -66,10 +66,8 @@ function shortChapterTitle(number: number): string {
 	return number > 0 ? `Chapter ${number}` : 'Chapter';
 }
 
-/** /category/cultivation/mortal-bones → series id */
 function seriesPathFromHref(href: string): string | null {
 	const id = pathOnly(href);
-	// /category/{genre}/{slug}
 	const m = id.match(/^\/category\/([^/]+)\/([^/]+)\/?$/i);
 	if (m) {
 		const genre = m[1].toLowerCase();
@@ -108,11 +106,9 @@ export class SkyNovelVaultSource extends BaseSource {
 			const fromHome = await this.parseHomepage().catch(() => [] as Manga[]);
 			if (fromHome.length >= 6) return fromHome.slice(0, PER_PAGE);
 		}
-		// Page 2+: scrap vault / cultivation library pages
 		return this.parseCatalog(page);
 	}
 
-	/** Homepage: Latest Updates + vault cards */
 	private async parseHomepage(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
@@ -121,7 +117,6 @@ export class SkyNovelVaultSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// 1) Latest Updates — .sn-update-card
 		$('.sn-update-card').each((_, el) => {
 			const root = $(el);
 			const seriesA = root.find('.sn-update-title a, a.sn-update-cover').first();
@@ -147,7 +142,6 @@ export class SkyNovelVaultSource extends BaseSource {
 					parseChapterNumber(pathOnly(chA.attr('href') || ''));
 				if (n > 0) latestChapter = n;
 			}
-			// batch text: "30-chapter batch: Ch. 951-980"
 			if (latestChapter == null) {
 				const batch = cleanText(root.find('.sn-update-batch').text());
 				const m = batch.match(/ch\.?\s*(\d+)\s*[-–]\s*(\d+)/i);
@@ -166,7 +160,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			});
 		});
 
-		// 2) Vault / book cards — lebih banyak judul
 		$('.sn-home-vault-card, .sn-book-card').each((_, el) => {
 			const root = $(el);
 			const a = root.find('a.sn-cover-wrap, a[href*="/category/"]').first();
@@ -185,7 +178,6 @@ export class SkyNovelVaultSource extends BaseSource {
 				root.find('img').first().attr('src') ||
 				'';
 
-			// meta: "2,070 Chapters (606 Free)"
 			let latestChapter: number | undefined;
 			const meta = cleanText(root.find('.sn-meta, .sn-home-vault-metrics').text());
 			const m = meta.match(/([\d,]+)\s*chapters?/i);
@@ -215,9 +207,7 @@ export class SkyNovelVaultSource extends BaseSource {
 		return list;
 	}
 
-	/** Catalog fallback: /category/cultivation/ page N */
 	private async parseCatalog(page: number): Promise<Manga[]> {
-		// cultivation library is the main catalog; page via WP
 		const path =
 			page <= 1
 				? '/category/cultivation/'
@@ -259,7 +249,6 @@ export class SkyNovelVaultSource extends BaseSource {
 				});
 			});
 
-			// fallback links
 			if (list.length < 4) {
 				$('a[href*="/category/"]').each((_, a) => {
 					const seriesId = seriesPathFromHref($(a).attr('href') || '');
@@ -355,7 +344,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			throw new Error('Novel not found (empty title)');
 		}
 
-		// Cover: site jarang pakai og:image — cari img alt ≈ title
 		let cover =
 			$('meta[property="og:image"]').attr('content') ||
 			$('.sn-cover img, .post-thumb img, img.wp-post-image').first().attr('data-src') ||
@@ -383,7 +371,7 @@ export class SkyNovelVaultSource extends BaseSource {
 				}
 			});
 		}
-		// fallback: gambar upload novel pertama yang bukan logo
+	
 		if (!cover || cover.startsWith('data:')) {
 			$('img').each((_, img) => {
 				if (cover && !cover.startsWith('data:')) return;
@@ -404,26 +392,30 @@ export class SkyNovelVaultSource extends BaseSource {
 		}
 		cover = absUrl((cover || '').split('?')[0]);
 
-		// Introduction / synopsis
 		let description =
 			cleanText($('.sn-novel-panel').first().text()) ||
 			cleanText($('.term-description, .category-description').first().text()) ||
 			cleanText($('meta[name="description"]').attr('content') || '') ||
 			'';
-		// trim "Introduction" prefix
-		description = description.replace(/^Introduction\s*/i, '');
-		if (description.length > 4000) description = description.slice(0, 4000) + '…';
+		description = description
+			.replace(/^Introduction\s*/i, '')
+			.replace(/\s*TagsBrowse[\s\S]*$/i, '')
+			.replace(/\s*Browse all tags[\s\S]*$/i, '')
+			.replace(/\s*Reader Reviews[\s\S]*$/i, '')
+			.replace(/\s*Similar Novels[\s\S]*$/i, '')
+			.replace(/\s*Earn Spirit Stones[\s\S]*$/i, '')
+			.trim();
+		if (description.length > 2500) description = description.slice(0, 2500) + '…';
 
 		const authors: string[] = [];
 		const genres: string[] = [];
 		let status = 'Ongoing';
 
-		// Tags / genres dari link
 		$('a[href*="/tag/"], a[rel="tag"]').each((_, a) => {
 			const g = cleanText($(a).text());
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
-		// category parent as genre (cultivation / apocalypse)
+	
 		const pathParts = path.split('/').filter(Boolean);
 		if (pathParts[1] && !genres.map((g) => g.toLowerCase()).includes(pathParts[1])) {
 			genres.unshift(pathParts[1].replace(/-/g, ' '));
@@ -433,7 +425,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			status = 'Completed';
 		}
 
-		// Chapters — .hentry posts (free list, paginated)
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -457,21 +448,15 @@ export class SkyNovelVaultSource extends BaseSource {
 
 		collectChapters($);
 
-		// Fetch extra chapter pages (max 5 pages ≈ 500 free chapters)
-		const lastPageLink = $('a.page-numbers, .pagination a, .nav-links a')
-			.filter((_, a) => /^\d+$/.test(cleanText($(a).text())))
-			.last();
+		const MAX_CHAPTER_PAGES = 25;
 		let maxPage = 1;
-		if (lastPageLink.length) {
-			const n = parseInt(cleanText(lastPageLink.text()), 10);
-			if (n > 1) maxPage = Math.min(n, 5);
-		} else {
-			// coba deteksi "page/10/"
-			$('a[href*="/page/"]').each((_, a) => {
-				const m = ($(a).attr('href') || '').match(/\/page\/(\d+)/);
-				if (m) maxPage = Math.max(maxPage, Math.min(parseInt(m[1], 10), 5));
-			});
-		}
+		$('a.page-numbers, .pagination a, .nav-links a, a[href*="/page/"]').each((_, a) => {
+			const t = cleanText($(a).text());
+			if (/^\d+$/.test(t)) maxPage = Math.max(maxPage, parseInt(t, 10));
+			const m = ($(a).attr('href') || '').match(/\/page\/(\d+)/);
+			if (m) maxPage = Math.max(maxPage, parseInt(m[1], 10));
+		});
+		maxPage = Math.min(maxPage, MAX_CHAPTER_PAGES);
 
 		if (maxPage > 1) {
 			const baseSeries = path.replace(/\/$/, '');
@@ -480,7 +465,8 @@ export class SkyNovelVaultSource extends BaseSource {
 					const pageHtml = await this.fetchHtml(`${baseSeries}/page/${p}/`);
 					const $p = cheerio.load(pageHtml);
 					collectChapters($p);
-				} catch {
+				} catch (e) {
+					console.warn('[skynovelvault] chapter page', p, e);
 					break;
 				}
 			}
@@ -538,16 +524,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			(/Spirit Stone Exclusive/i.test(bodyText) &&
 				/Unlock Current Chapter/i.test(bodyText));
 
-		/*
-		 * Struktur:
-		 *   .sn-reading-main
-		 *     .sn-chapter-header (judul)
-		 *     .sn-bidvertiser-* (ads)
-		 *     .post-views
-		 *     <p>…</p>  ← ISI CERITA
-		 *     div support / VIP widgets
-		 *     .sn-chapter-nav
-		 */
 		const main = $('.sn-reading-main').first().length
 			? $('.sn-reading-main').first()
 			: $('.entry-content').first();
@@ -556,7 +532,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			throw new Error(`Chapter content not found: ${path}`);
 		}
 
-		// Buang chrome / widget
 		main
 			.find(
 				[
@@ -591,7 +566,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			)
 			.remove();
 
-		// Hapus div widget support / VIP (bukan paragraf cerita)
 		main.find('div, section, aside').each((_, el) => {
 			const t = cleanText($(el).text());
 			if (
@@ -603,7 +577,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			}
 		});
 
-		// Ambil hanya paragraf cerita
 		const paragraphs: string[] = [];
 		main.find('p').each((_, p) => {
 			const t = cleanText($(p).text());
@@ -618,7 +591,6 @@ export class SkyNovelVaultSource extends BaseSource {
 
 		let content = paragraphs.join('\n');
 
-		// Fallback: html sisa main (kalau p kosong)
 		if (content.replace(/<[^>]+>/g, '').trim().length < 40) {
 			main.find('script, style, noscript').remove();
 			content = (main.html() || '')
