@@ -40,9 +40,11 @@ function pathOnly(href: string): string {
 
 function parseChapterNumber(text: string, fallback = 0): number {
 	const t = (text || '').replace(/\s+/g, ' ').trim();
+	if (!t) return fallback;
 	const m =
 		t.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
-		t.match(/\bch\.?\s*(\d+(?:\.\d+)?(?:p\d+)?)/i) ||
+		t.match(/\bch\.?\s*(\d+(?:\.\d+)?)/i) ||
+		t.match(/(?:^|\/|-)(\d+)(?:p\d+)?\/?(?:$|\?|#)/i) ||
 		t.match(/(\d+(?:\.\d+)?)(?:p\d+)?/);
 	if (m) {
 		const n = parseFloat(m[1]);
@@ -54,6 +56,39 @@ function parseChapterNumber(text: string, fallback = 0): number {
 function extractChapterNum(text: string): number | undefined {
 	const n = parseChapterNumber(text, NaN);
 	return Number.isNaN(n) ? undefined : n;
+}
+
+function extractLatestFromCard($: cheerio.CheerioAPI, el: any): number | undefined {
+	const root = $(el);
+
+	const selectors = [
+		'.chap-text',
+		'.chapter-link .chap-text',
+		'.chapter-row a',
+		'.chapter-link',
+		'.nchapter',
+		'.epxs',
+		'.epx',
+		'.luf a[href*="-"]',
+		'a.chap-text'
+	];
+	for (const sel of selectors) {
+		const t = root.find(sel).first().text();
+		const n = extractChapterNum(t);
+		if (n != null) return n;
+	}
+
+	let fromHref: number | undefined;
+	root.find('a[href]').each((_, a) => {
+		if (fromHref != null) return;
+		const href = pathOnly($(a).attr('href') || '');
+		if (!isChapterPath(href) && !/-\d+(?:p\d+)?\/?$/i.test(href)) return;
+		const n = extractChapterNum(href);
+		if (n != null) fromHref = n;
+	});
+	if (fromHref != null) return fromHref;
+
+	return extractChapterNum(root.text());
 }
 
 function escapeHtml(s: string): string {
@@ -72,6 +107,7 @@ function isSeriesPath(path: string): boolean {
 function isChapterPath(path: string): boolean {
 	const p = path.replace(/\/$/, '');
 	if (/^\/series\//.test(p)) return false;
+	// /slug-123 or /slug-123p2
 	return /^\/[a-z0-9-]+-\d+(?:p\d+)?$/i.test(p);
 }
 
@@ -174,11 +210,7 @@ export class DobyTranslationsSource extends BaseSource {
 					parent.find('img').attr('data-src') ||
 					$(el).find('img').attr('src') ||
 					'';
-				const chText =
-					parent.find('.chapter-link, .chapter-row a, a.chap-text').first().text() ||
-					parent.find('a').filter((_, a) => isChapterPath(pathOnly($(a).attr('href') || ''))).first().text() ||
-					'';
-				const latestChapter = extractChapterNum(chText);
+				const latestChapter = extractLatestFromCard($, parent.length ? parent.get(0) : el);
 
 				push({
 					id,
@@ -216,17 +248,10 @@ export class DobyTranslationsSource extends BaseSource {
 			$(el).find('img').attr('src') ||
 			$(el).find('img').attr('data-src') ||
 			$(el).find('img').attr('data-lazy-src') ||
+			$(el).find('img').attr('data-lazy') ||
 			'';
 
-		const chText =
-			$(el).find('.chapter-link, .chapter-row a, a.chap-text, .nchapter a').first().text() ||
-			$(el)
-				.find('a')
-				.filter((_, a) => isChapterPath(pathOnly($(a).attr('href') || '')))
-				.first()
-				.text() ||
-			'';
-		const latestChapter = extractChapterNum(chText);
+		const latestChapter = extractLatestFromCard($, el);
 
 		const statusText =
 			$(el).find('.epic-status, .status').first().text().replace(/\s+/g, ' ').trim() || undefined;
@@ -277,12 +302,9 @@ export class DobyTranslationsSource extends BaseSource {
 			const cover =
 				$(el).find('img').attr('src') ||
 				$(el).find('img').attr('data-src') ||
+				$(el).find('img').attr('data-lazy-src') ||
 				'';
-			const chText =
-				$(el).find('.epxs, .chapter, a[href*="-"]').first().text() ||
-				$(el).text().match(/Ch\.?\s*\d+/i)?.[0] ||
-				'';
-			const latestChapter = extractChapterNum(chText);
+			const latestChapter = extractLatestFromCard($, el);
 
 			list.push({
 				id,
@@ -294,6 +316,35 @@ export class DobyTranslationsSource extends BaseSource {
 				...(latestChapter != null ? { latestChapter } : {})
 			});
 		});
+
+		if (list.length < 10) {
+			$('a[href*="/series/"]').each((_, el) => {
+				const href = $(el).attr('href') || '';
+				const id = pathOnly(href);
+				if (!isSeriesPath(id) || seen.has(id)) return;
+				const title =
+					$(el).attr('title') ||
+					$(el).find('img').attr('alt') ||
+					$(el).text().replace(/\s+/g, ' ').trim();
+				if (!title || title.length < 2 || /view all|series list/i.test(title)) return;
+				seen.add(id);
+				const parent = $(el).closest('.bs, .bsx, .utao, div, li, article');
+				const cover =
+					parent.find('img').attr('src') ||
+					parent.find('img').attr('data-src') ||
+					'';
+				const latestChapter = extractLatestFromCard($, parent.get(0) || el);
+				list.push({
+					id,
+					title: title.replace(/\s+/g, ' ').trim(),
+					cover: absUrl((cover || '').split('?')[0]),
+					sourceId: this.id,
+					type: 'novel',
+					lang: 'en',
+					...(latestChapter != null ? { latestChapter } : {})
+				});
+			});
+		}
 
 		return list;
 	}
@@ -576,7 +627,6 @@ export class DobyTranslationsSource extends BaseSource {
 		const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
-
 		const bodyText = $('.epcontent, .entry-content, main').text();
 		if (
 			$('.coin-price-pill, .premium-star, #unlock-selected-btn, .dg-popup').length &&
