@@ -135,7 +135,8 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'krakenbites', name: 'KrakenBites' },
 	{ id: 'lazygirltranslations', name: 'LazyGirlTranslations' },
 	{ id: 'curspe', name: 'Curspe' },
-	{ id: 'foxaholic', name: 'Foxaholic' }
+	{ id: 'foxaholic', name: 'Foxaholic' },
+	{ id: 'redpandatranslations', name: 'Red Panda Translations' }
 
 ];
 
