@@ -13,12 +13,29 @@ const CF_MARKERS = [
 ];
 
 export function isCloudflareChallenge(status: number, html: string): boolean {
-	const lower = html.toLowerCase();
-	const hasMarker = CF_MARKERS.some((m) => lower.includes(m));
-	if (hasMarker) return true;
-	if ((status === 403 || status === 503) && /cloudflare|cf-ray/i.test(html)) {
+	const lower = html.slice(0, 15000).toLowerCase(); // cek bagian awal saja
+
+	if (
+		lower.includes('just a moment...') ||
+		lower.includes('cf-browser-verification') ||
+		lower.includes('checking your browser') ||
+		lower.includes('enable javascript and cookies to continue') ||
+		(lower.includes('attention required') && lower.includes('cloudflare'))
+	) {
 		return true;
 	}
+
+	if (
+		lower.includes('challenge-platform') &&
+		(lower.includes('just a moment') || lower.includes('turnstile') || lower.includes('_cf_chl'))
+	) {
+		return true;
+	}
+
+	if ((status === 403 || status === 503) && /cf-ray|cloudflare/i.test(html.slice(0, 5000))) {
+		if (lower.includes('challenge') || lower.includes('captcha')) return true;
+	}
+
 	return false;
 }
 

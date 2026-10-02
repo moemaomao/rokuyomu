@@ -355,11 +355,53 @@ export class SkyNovelVaultSource extends BaseSource {
 			throw new Error('Novel not found (empty title)');
 		}
 
+		// Cover: site jarang pakai og:image — cari img alt ≈ title
 		let cover =
 			$('meta[property="og:image"]').attr('content') ||
 			$('.sn-cover img, .post-thumb img, img.wp-post-image').first().attr('data-src') ||
 			$('.sn-cover img, .post-thumb img, img.wp-post-image').first().attr('src') ||
 			'';
+		if (!cover || cover.startsWith('data:')) {
+			const titleLower = title.toLowerCase();
+			$('img').each((_, img) => {
+				if (cover && !cover.startsWith('data:')) return;
+				const alt = cleanText($(img).attr('alt') || '').toLowerCase();
+				const src =
+					$(img).attr('data-src') ||
+					$(img).attr('data-lazy-src') ||
+					$(img).attr('src') ||
+					'';
+				if (!src || src.startsWith('data:')) return;
+				if (src.includes('logo') || src.includes('patreon') || src.includes('avatar')) return;
+				if (
+					alt &&
+					(alt === titleLower ||
+						alt.includes(titleLower.slice(0, 20)) ||
+						titleLower.includes(alt.slice(0, 20)))
+				) {
+					cover = src;
+				}
+			});
+		}
+		// fallback: gambar upload novel pertama yang bukan logo
+		if (!cover || cover.startsWith('data:')) {
+			$('img').each((_, img) => {
+				if (cover && !cover.startsWith('data:')) return;
+				const src =
+					$(img).attr('data-src') ||
+					$(img).attr('data-lazy-src') ||
+					$(img).attr('src') ||
+					'';
+				if (
+					src &&
+					!src.startsWith('data:') &&
+					/\/uploads\//.test(src) &&
+					!/logo|patreon|avatar|icon/i.test(src)
+				) {
+					cover = src;
+				}
+			});
+		}
 		cover = absUrl((cover || '').split('?')[0]);
 
 		// Introduction / synopsis
@@ -484,65 +526,121 @@ export class SkyNovelVaultSource extends BaseSource {
 		const $ = cheerio.load(html);
 
 		const rawTitle =
-			cleanText($('h1.entry-title, h1').first().text()) ||
+			cleanText($('.sn-chapter-title, h1.entry-title, h1').first().text()) ||
 			cleanText($('meta[property="og:title"]').attr('content') || '') ||
 			'Chapter';
 		const number = parseChapterNumber(rawTitle || path);
 		const title = shortChapterTitle(number > 0 ? number : 0) || rawTitle;
 
-		// VIP / Spirit Stone lock
 		const bodyText = $('body').text();
 		const isLocked =
 			/permanently unlock it using/i.test(bodyText) ||
 			(/Spirit Stone Exclusive/i.test(bodyText) &&
 				/Unlock Current Chapter/i.test(bodyText));
 
-		const contentEl = $('.entry-content').first();
-		if (!contentEl.length) {
+		/*
+		 * Struktur:
+		 *   .sn-reading-main
+		 *     .sn-chapter-header (judul)
+		 *     .sn-bidvertiser-* (ads)
+		 *     .post-views
+		 *     <p>…</p>  ← ISI CERITA
+		 *     div support / VIP widgets
+		 *     .sn-chapter-nav
+		 */
+		const main = $('.sn-reading-main').first().length
+			? $('.sn-reading-main').first()
+			: $('.entry-content').first();
+
+		if (!main.length) {
 			throw new Error(`Chapter content not found: ${path}`);
 		}
 
-		contentEl
+		// Buang chrome / widget
+		main
 			.find(
-				'script, style, noscript, iframe, .ads, .ad, .code-block, nav, .sharedaddy, .misc, .socials, .wp-block-buttons, form'
+				[
+					'script',
+					'style',
+					'noscript',
+					'iframe',
+					'form',
+					'button',
+					'nav',
+					'.sn-chapter-header',
+					'.sn-chapter-book-title',
+					'.sn-chapter-title',
+					'.sn-bidvertiser-reader-ad',
+					'.sn-bidvertiser-reader-ad-label',
+					'.post-views',
+					'.content-post',
+					'.sn-chapter-nav',
+					'.sn-nav-next',
+					'.sn-nav-prev',
+					'.sn-chapter-catalog-link',
+					'.sn-reading-sidebar',
+					'.sn-recommend-card',
+					'.sn-mobile-chapter-toggle',
+					'.sn-mobile-chapter-backdrop',
+					'.ads',
+					'.ad',
+					'.code-block',
+					'.sharedaddy',
+					'.wp-block-buttons'
+				].join(', ')
 			)
 			.remove();
 
-		// Strip inline color/background
-		let content = contentEl.html() || '';
-		content = content
-			.replace(/\s*style="([^"]*)"/gi, (_m, style: string) => {
-				const cleaned = String(style)
-					.replace(/color\s*:\s*[^;]+;?/gi, '')
-					.replace(/background(-color)?\s*:\s*[^;]+;?/gi, '')
-					.trim()
-					.replace(/;\s*;/g, ';')
-					.replace(/^;|;$/g, '');
-				return cleaned ? ` style="${cleaned}"` : '';
-			})
-			.trim();
+		// Hapus div widget support / VIP (bukan paragraf cerita)
+		main.find('div, section, aside').each((_, el) => {
+			const t = cleanText($(el).text());
+			if (
+				/Support the Creator|Become a VIP|Urge Update|Tip Author|Report Error|Spirit Stones|Subscribe for advance|Finished this chapter|You may also like/i.test(
+					t
+				)
+			) {
+				$(el).remove();
+			}
+		});
 
-		// Hapus chrome di awal (menu novel, font controls, dll)
-		content = content
-			.replace(/☰[\s\S]{0,80}?Chapter\s+\d+[^\n<]*/i, '')
-			.replace(/Advertisement/gi, '')
-			.trim();
+		// Ambil hanya paragraf cerita
+		const paragraphs: string[] = [];
+		main.find('p').each((_, p) => {
+			const t = cleanText($(p).text());
+			if (!t || t.length < 2) return;
+			if (/^Advertisement$/i.test(t)) return;
+			if (/^Post Views/i.test(t)) return;
+			if (/Support the Creator|Become a VIP|Spirit Stone/i.test(t)) return;
+			paragraphs.push(
+				`<p>${t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`
+			);
+		});
+
+		let content = paragraphs.join('\n');
+
+		// Fallback: html sisa main (kalau p kosong)
+		if (content.replace(/<[^>]+>/g, '').trim().length < 40) {
+			main.find('script, style, noscript').remove();
+			content = (main.html() || '')
+				.replace(/\s*style="[^"]*"/gi, '')
+				.replace(/Advertisement/gi, '')
+				.trim();
+		}
 
 		const textLen = content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
 
 		if (isLocked && textLen < 200) {
 			content =
-				'<p><em>This chapter is locked (VIP / Spirit Stone Exclusive on SkyNovel Vault). Open the original site and unlock it, or read free earlier chapters.</em></p>';
+				'<p><em>This chapter is locked (VIP / Spirit Stone Exclusive on SkyNovel Vault). Open the original site to unlock it, or read free earlier chapters.</em></p>';
 		} else if (textLen < 40) {
 			throw new Error(`Chapter empty: ${path}`);
 		}
 
-		// Next / Prev
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
-		const prevA = $('a[rel="prev"]').first();
-		const nextA = $('a[rel="next"]').first();
+		const prevA = $('a[rel="prev"], .sn-nav-prev a, a.sn-nav-prev').first();
+		const nextA = $('a[rel="next"], .sn-nav-next a, a.sn-nav-next').first();
 		if (prevA.length) prevChapterId = pathOnly(prevA.attr('href') || '');
 		if (nextA.length) nextChapterId = pathOnly(nextA.attr('href') || '');
 
