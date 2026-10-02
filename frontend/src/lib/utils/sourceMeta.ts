@@ -144,7 +144,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	raysvault: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	harishtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	nomadtranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
-	wetriedtls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
+	wetriedtls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
+	kaystls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {
