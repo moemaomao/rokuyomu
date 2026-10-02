@@ -13,8 +13,8 @@
  * - Target ~24 titles from Latest Release
  */
 import * as cheerio from 'cheerio';
-import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types-manga';
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails, Chapter } from '../types-manga';
 
 const BASE = 'https://dobytranslations.com';
 
