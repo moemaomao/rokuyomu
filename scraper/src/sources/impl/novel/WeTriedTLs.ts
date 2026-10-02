@@ -41,15 +41,12 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, '&quot;');
 }
 
-function parseChapterNumber(text: string, fallback = -1): number {
+function parseChapterNumber(text: string, fallback = 0): number {
 	const t = (text || '').trim();
-	if (!t) return fallback;
-
 	const m =
-		t.match(/(?:chapter|ch|c)[\s._-]*(\d+(?:\.\d+)?)/i) ||
+		t.match(/chapter\s*(\d+(?:\.\d+)?)/i) ||
 		t.match(/^(\d+(?:\.\d+)?)$/) ||
 		t.match(/(\d+(?:\.\d+)?)/);
-
 	if (m) {
 		const n = parseFloat(m[1]);
 		if (!Number.isNaN(n)) return n;
@@ -94,18 +91,18 @@ type ApiSeriesListItem = {
 	latest_chapters?: Array<{
 		chapter_name?: string;
 		chapter_slug?: string;
-		index?: string | number;
+		index?: string;
 		is_paid?: boolean;
 	}>;
 	free_chapters?: Array<{
 		chapter_name?: string;
 		chapter_slug?: string;
-		index?: string | number;
+		index?: string;
 	}>;
 	paid_chapters?: Array<{
 		chapter_name?: string;
 		chapter_slug?: string;
-		index?: string | number;
+		index?: string;
 	}>;
 };
 
@@ -114,7 +111,7 @@ type ApiChapterRow = {
 	chapter_slug: string;
 	chapter_name?: string;
 	chapter_title?: string;
-	index?: string | number;
+	index?: string;
 	price?: number;
 	public?: boolean;
 	created_at?: string;
@@ -205,13 +202,9 @@ export class WeTriedTLsSource extends BaseSource {
 		];
 		for (const c of candidates) {
 			const n =
-				parseChapterNumber(String(c.index ?? ''), -1) >= 0
-					? parseChapterNumber(String(c.index ?? ''), -1)
-					: parseChapterNumber(c.chapter_name || c.chapter_slug || '', -1);
-
-			if (n >= 0 && (latestChapter == null || n > latestChapter)) {
-				latestChapter = n;
-			}
+				parseChapterNumber(c.index || '', 0) ||
+				parseChapterNumber(c.chapter_name || c.chapter_slug || '', 0);
+			if (n > 0 && (latestChapter == null || n > latestChapter)) latestChapter = n;
 		}
 
 		return {
@@ -306,14 +299,13 @@ export class WeTriedTLsSource extends BaseSource {
 		let page = 1;
 		let lastPage = 1;
 
-		while (page <= lastPage) {
+		while (page <= lastPage && page <= 50) {
 			const res = await this.fetchApi<{
-				meta?: { last_page?: number; total_pages?: number };
-				last_page?: number;
+				meta?: { last_page?: number };
 				data?: ApiChapterRow[];
 			}>(`/chapters/${encodeURIComponent(slug)}?page=${page}`);
 
-			lastPage = res.meta?.last_page ?? res.meta?.total_pages ?? res.last_page ?? 1;
+			lastPage = res.meta?.last_page || 1;
 			const rows = res.data || [];
 			if (!rows.length) break;
 
@@ -324,16 +316,10 @@ export class WeTriedTLsSource extends BaseSource {
 				if (seen.has(id)) continue;
 				seen.add(id);
 
-				let number = -1;
-				if (row.index !== undefined && row.index !== null && String(row.index).trim() !== '') {
-					number = parseChapterNumber(String(row.index), -1);
-				}
-				if (number === -1 && (row.chapter_name || chSlug)) {
-					number = parseChapterNumber(row.chapter_name || chSlug, -1);
-				}
-				if (number === -1) {
-					number = out.length + 1;
-				}
+				const number =
+					parseChapterNumber(row.index || '', 0) ||
+					parseChapterNumber(row.chapter_name || chSlug, 0) ||
+					out.length + 1;
 
 				const isLocked =
 					(typeof row.price === 'number' && row.price > 0) ||
@@ -341,9 +327,7 @@ export class WeTriedTLsSource extends BaseSource {
 
 				out.push({
 					id,
-					title: row.chapter_title
-						? `Chapter ${number} — ${row.chapter_title}`
-						: (row.chapter_name || `Chapter ${number}`),
+					title: `Chapter ${number}`,
 					number,
 					date: row.created_at || row.updated_at,
 					...(isLocked ? { isLocked: true } : {})
@@ -366,6 +350,7 @@ export class WeTriedTLsSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
+		
 		const parts = chapterId.replace(/\/$/, '').split('/').filter(Boolean);
 		let seriesSlug = '';
 		let chapterSlug = '';
@@ -387,7 +372,7 @@ export class WeTriedTLsSource extends BaseSource {
 				chapter_slug?: string;
 				price?: number;
 				public?: boolean;
-				index?: string | number;
+				index?: string;
 			};
 			previous_chapter?: { chapter_slug?: string; index?: string } | null;
 			next_chapter?: { chapter_slug?: string; index?: string } | null;
@@ -406,9 +391,9 @@ export class WeTriedTLsSource extends BaseSource {
 			}
 		}
 
-		const num = parseChapterNumber(String(ch.index ?? ch.chapter_name ?? chapterSlug), -1);
+		const num = parseChapterNumber(ch.index || ch.chapter_name || chapterSlug, 0);
 		const title =
-			(num >= 0 ? `Chapter ${num}` : ch.chapter_name || 'Chapter') +
+			(num > 0 ? `Chapter ${num}` : ch.chapter_name || 'Chapter') +
 			(ch.chapter_title ? ` — ${ch.chapter_title}` : '');
 
 		const content = htmlToParagraphs(ch.chapter_content || '');
