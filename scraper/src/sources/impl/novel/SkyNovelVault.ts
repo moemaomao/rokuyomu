@@ -102,9 +102,10 @@ export class SkyNovelVaultSource extends BaseSource {
 	// ─── Latest ──────────────────────────────────────────────────────────
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
-		if (page <= 1) {
-			const fromHome = await this.parseHomepage().catch(() => [] as Manga[]);
-			if (fromHome.length >= 6) return fromHome.slice(0, PER_PAGE);
+		const all = await this.parseHomepage().catch(() => [] as Manga[]);
+		if (all.length >= 6) {
+			const start = (Math.max(1, page) - 1) * PER_PAGE;
+			return all.slice(start, start + PER_PAGE);
 		}
 		return this.parseCatalog(page);
 	}
@@ -142,6 +143,7 @@ export class SkyNovelVaultSource extends BaseSource {
 					parseChapterNumber(pathOnly(chA.attr('href') || ''));
 				if (n > 0) latestChapter = n;
 			}
+		
 			if (latestChapter == null) {
 				const batch = cleanText(root.find('.sn-update-batch').text());
 				const m = batch.match(/ch\.?\s*(\d+)\s*[-–]\s*(\d+)/i);
@@ -207,67 +209,46 @@ export class SkyNovelVaultSource extends BaseSource {
 		return list;
 	}
 
+	
 	private async parseCatalog(page: number): Promise<Manga[]> {
-		const path =
-			page <= 1
-				? '/category/cultivation/'
-				: `/category/cultivation/page/${page}/`;
+		const path = page <= 1 ? '/' : `/`;
 		try {
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
 			const list: Manga[] = [];
 			const seen = new Set<string>();
 
-			$('.sn-book-card, .sn-home-vault-card, article').each((_, el) => {
+			$('.sn-home-vault-card, .sn-book-card').each((_, el) => {
 				const root = $(el);
-				const a = root
-					.find('a[href*="/category/"]')
-					.filter((__, link) => !!seriesPathFromHref($(link).attr('href') || ''))
-					.first();
+				const a = root.find('a.sn-cover-wrap, a[href*="/category/"]').first();
 				const seriesId = seriesPathFromHref(a.attr('href') || '');
 				if (!seriesId || seen.has(seriesId)) return;
 
 				const title =
-					cleanText(root.find('.sn-title, h2, h3').first().text()) ||
+					cleanText(root.find('.sn-title').text()) ||
 					cleanText(a.attr('title') || '') ||
-					cleanText(a.text());
-				if (!title || title.length < 2) return;
+					cleanText(root.find('img').attr('alt') || '');
+				if (!title || title.length < 2 || /^Chapter\s+\d/i.test(title)) return;
 
 				const img =
 					root.find('img').first().attr('data-src') ||
 					root.find('img').first().attr('src') ||
 					'';
+				const coverRaw = (img || '').startsWith('data:') ? '' : img;
 
 				seen.add(seriesId);
 				list.push({
 					id: seriesId,
 					title: title.slice(0, 200),
-					cover: absUrl((img || '').split('?')[0]),
+					cover: absUrl((coverRaw || '').split('?')[0]),
 					sourceId: this.id,
 					type: 'novel',
 					lang: 'en'
 				});
 			});
 
-			if (list.length < 4) {
-				$('a[href*="/category/"]').each((_, a) => {
-					const seriesId = seriesPathFromHref($(a).attr('href') || '');
-					if (!seriesId || seen.has(seriesId)) return;
-					const title = cleanText($(a).attr('title') || $(a).text());
-					if (!title || title.length < 2) return;
-					seen.add(seriesId);
-					list.push({
-						id: seriesId,
-						title: title.slice(0, 200),
-						cover: '',
-						sourceId: this.id,
-						type: 'novel',
-						lang: 'en'
-					});
-				});
-			}
-
-			return list.slice(0, PER_PAGE);
+			const start = (Math.max(1, page) - 1) * PER_PAGE;
+			return list.slice(start, start + PER_PAGE);
 		} catch (e) {
 			console.error('[skynovelvault] catalog', page, e);
 			return [];
@@ -371,7 +352,7 @@ export class SkyNovelVaultSource extends BaseSource {
 				}
 			});
 		}
-	
+		
 		if (!cover || cover.startsWith('data:')) {
 			$('img').each((_, img) => {
 				if (cover && !cover.startsWith('data:')) return;
@@ -415,7 +396,6 @@ export class SkyNovelVaultSource extends BaseSource {
 			const g = cleanText($(a).text());
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
-	
 		const pathParts = path.split('/').filter(Boolean);
 		if (pathParts[1] && !genres.map((g) => g.toLowerCase()).includes(pathParts[1])) {
 			genres.unshift(pathParts[1].replace(/-/g, ' '));
