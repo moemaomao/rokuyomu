@@ -71,7 +71,6 @@ function seriesPathFromHref(href: string): string | null {
 	if (m && !/\/series\/?(list-mode|page|feed)?$/i.test(id)) {
 		return `/series/${m[1]}`;
 	}
-	// chapter URL → series: /{slug}-ch{n}/ → /series/{slug}
 	const ch = id.match(/^\/(.+)-ch[\d.]+(?:-[\d.]+)?(?:-.*)?$/i);
 	if (ch) return `/series/${ch[1]}`;
 	return null;
@@ -109,7 +108,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 		return this.parseSeriesArchive(page);
 	}
 
-	/** Homepage — section Latest Release */
 	private async parseLatestReleaseHome(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
@@ -118,125 +116,32 @@ export class RedPandaTranslationsSource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Themesia: .bixbox.releases.latesthome .utao / .listupd .bsx
 		const root =
-			$('.bixbox.releases.latesthome, .releases.latesthome, .bixbox.releases').first().length > 0
-				? $('.bixbox.releases.latesthome, .releases.latesthome, .bixbox.releases').first()
+			$('.releases.latesthome, .bixbox.releases.latesthome, .bixbox.releases').first().length > 0
+				? $('.releases.latesthome, .bixbox.releases.latesthome, .bixbox.releases').first()
 				: $('body');
 
-		// Style tree: .utao.styletree
-		root.find('.utao, .uta, .bsx, .bs').each((_, el) => {
-			const item = this.parseCard($, el);
+		root.find('.utao').each((_, el) => {
+			const item = this.parseUtaoCard($, el);
 			if (item && !seen.has(item.id)) {
 				seen.add(item.id);
 				list.push(item);
 			}
 		});
 
-		// Fallback: any /series/ link in latest area
-		if (list.length < 8) {
-			root.find('a[href*="/series/"]').each((_, a) => {
-				const seriesId = seriesPathFromHref($(a).attr('href') || '');
-				if (!seriesId || seen.has(seriesId)) return;
-				const title = cleanText($(a).attr('title') || $(a).text());
-				if (!title || title.length < 2) return;
-				const parent = $(a).closest('.utao, .uta, .bsx, .bs, li, article, div');
-				const img =
-					parent.find('img').first().attr('data-src') ||
-					parent.find('img').first().attr('src') ||
-					'';
-				const chText =
-					parent.find('.nchapter, .chapter, a[href*="-ch"]').first().text() || '';
-				const n = parseChapterNumber(chText);
-				seen.add(seriesId);
-				list.push({
-					id: seriesId,
-					title: title.slice(0, 200),
-					cover: absUrl((img || '').split('?')[0]),
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en',
-					...(n > 0 ? { latestChapter: n } : {})
-				});
-			});
-		}
-
 		return list;
 	}
 
-	/** /series/?order=update (+ page) */
-	private async parseSeriesArchive(page: number): Promise<Manga[]> {
-		const path =
-			page <= 1
-				? '/series/?order=update'
-				: `/series/page/${page}/?order=update`;
-		try {
-			const html = await this.fetchHtml(path);
-			const $ = cheerio.load(html);
-			$('script, style, noscript').remove();
-
-			const list: Manga[] = [];
-			const seen = new Set<string>();
-
-			$('.listupd .bsx, .listupd .bs, .bsx, .bs, .utao').each((_, el) => {
-				const item = this.parseCard($, el);
-				if (item && !seen.has(item.id)) {
-					seen.add(item.id);
-					list.push(item);
-				}
-			});
-
-			if (list.length < 4) {
-				$('a[href*="/series/"]').each((_, a) => {
-					const seriesId = seriesPathFromHref($(a).attr('href') || '');
-					if (!seriesId || seen.has(seriesId)) return;
-					const title = cleanText($(a).attr('title') || $(a).text());
-					if (!title || title.length < 2) return;
-					const parent = $(a).closest('.bsx, .bs, .utao, article, li, div');
-					const img =
-						parent.find('img').first().attr('data-src') ||
-						parent.find('img').first().attr('src') ||
-						'';
-					seen.add(seriesId);
-					list.push({
-						id: seriesId,
-						title: title.slice(0, 200),
-						cover: absUrl((img || '').split('?')[0]),
-						sourceId: this.id,
-						type: 'novel',
-						lang: 'en'
-					});
-				});
-			}
-
-			return list.slice(0, PER_PAGE);
-		} catch (e) {
-			console.error('[redpandatranslations] archive', page, e);
-			return [];
-		}
-	}
-
-	private parseCard($: cheerio.CheerioAPI, el: any): Manga | null {
+	private parseUtaoCard($: cheerio.CheerioAPI, el: any): Manga | null {
 		const root = $(el);
 
-		const a = root
-			.find('a[href*="/series/"]')
-			.filter((_, link) => {
-				const h = pathOnly($(link).attr('href') || '');
-				return /\/series\/[^/]+\/?$/.test(h) && !/\/series\/(page|list-mode|feed)/i.test(h);
-			})
-			.first();
-
-		let href = a.attr('href') || root.find('a[href*="/series/"]').first().attr('href') || '';
+		const seriesA = root.find('a.series[href*="/series/"], a[href*="/series/"]').first();
+		const href = seriesA.attr('href') || '';
 		let seriesId = seriesPathFromHref(href);
 
-		// styletree: kadang hanya ada chapter link, series di-derive dari -ch URL
 		if (!seriesId) {
-			const chHref =
-				root.find('a[href*="-ch"]').first().attr('href') ||
-				root.find('a[href*="-ch"]').first().attr('href') ||
-				'';
-			seriesId = seriesPathFromHref(chHref || '');
+			const chHref = root.find('.luf a[href*="-ch"], a[href*="-ch"]').first().attr('href') || '';
+			seriesId = seriesPathFromHref(chHref);
 		}
 		if (!seriesId) return null;
 
@@ -247,33 +152,109 @@ export class RedPandaTranslationsSource extends BaseSource {
 			imgEl.attr('src') ||
 			'';
 
+		const coverRaw = (img || '').startsWith('data:') ? '' : img;
+
+		const title =
+			cleanText(seriesA.attr('title') || '') ||
+			cleanText(root.find('h3, .ntitle, .tt').first().text()) ||
+			cleanText(imgEl.attr('alt') || '') ||
+			cleanText(seriesA.text());
+		if (!title || title.length < 2) return null;
+
+		let latestChapter: number | undefined;
+		const firstCh = root.find('.luf ul li a, .luf a[href*="-ch"]').first();
+		if (firstCh.length) {
+			const n =
+				parseChapterNumber(cleanText(firstCh.text())) ||
+				parseChapterNumber(pathOnly(firstCh.attr('href') || ''));
+			if (n > 0) latestChapter = n;
+		}
+
+		return {
+			id: seriesId,
+			title: title.slice(0, 200),
+			cover: absUrl((coverRaw || '').split('?')[0]),
+			sourceId: this.id,
+			type: 'novel',
+			lang: 'en',
+			...(latestChapter != null ? { latestChapter } : {})
+		};
+	}
+
+	private async parseSeriesArchive(page: number): Promise<Manga[]> {
+		const path =
+			page <= 1
+				? '/series/?order=update'
+				: `/series/?page=${page}&order=update`;
+		try {
+			const html = await this.fetchHtml(path);
+			const $ = cheerio.load(html);
+			$('script, style, noscript').remove();
+
+			const list: Manga[] = [];
+			const seen = new Set<string>();
+
+			$('.listupd article.maindet, .listupd article, article.maindet').each((_, el) => {
+				const item = this.parseMaindetCard($, el);
+				if (item && !seen.has(item.id)) {
+					seen.add(item.id);
+					list.push(item);
+				}
+			});
+
+			if (list.length < 4) {
+				$('.listupd .bsx, .bsx, .utao').each((_, el) => {
+					const item = this.parseUtaoCard($, el) || this.parseMaindetCard($, el);
+					if (item && !seen.has(item.id)) {
+						seen.add(item.id);
+						list.push(item);
+					}
+				});
+			}
+
+			return list.slice(0, PER_PAGE);
+		} catch (e) {
+			console.error('[redpandatranslations] archive', page, e);
+			return [];
+		}
+	}
+
+	private parseMaindetCard($: cheerio.CheerioAPI, el: any): Manga | null {
+		const root = $(el);
+
+		const a = root
+			.find('a[href*="/series/"]')
+			.filter((_, link) => {
+				const h = pathOnly($(link).attr('href') || '');
+				return /\/series\/[^/]+\/?$/.test(h) && !/\/series\/(page|list-mode|feed)/i.test(h);
+			})
+			.first();
+
+		const href = a.attr('href') || '';
+		const seriesId = seriesPathFromHref(href);
+		if (!seriesId) return null;
+
+		const imgEl = root.find('img').first();
+		const img =
+			imgEl.attr('data-src') ||
+			imgEl.attr('data-lazy-src') ||
+			imgEl.attr('src') ||
+			'';
+		const coverRaw = (img || '').startsWith('data:') ? '' : img;
+
 		const title =
 			cleanText(a.attr('title') || '') ||
-			cleanText(root.find('.ntitle, .tt, .title, h2, h3, a.series').first().text()) ||
+			cleanText(root.find('h2, h3, .mdinfo a').first().text()) ||
 			cleanText(imgEl.attr('alt') || '') ||
 			cleanText(a.text());
 		if (!title || title.length < 2) return null;
 
-		// Latest chapter: "Ch. 340" di list .luf / a[href*="-ch"]
 		let latestChapter: number | undefined;
-		const chLinks = root.find('.luf a[href*="-ch"], a[href*="-ch"]');
-		if (chLinks.length) {
-			let best = 0;
-			chLinks.each((_, link) => {
-				const t = cleanText($(link).text());
-				const fromText = parseChapterNumber(t);
-				const fromHref = parseChapterNumber(pathOnly($(link).attr('href') || ''));
-				const n = fromText > 0 ? fromText : fromHref;
-				// ambil chapter pertama di list (paling baru di styletree)
-				if (n > 0 && best === 0) best = n;
-			});
-			if (best > 0) latestChapter = best;
-		}
-		if (latestChapter == null) {
-			const chText = cleanText(root.find('.nchapter, .chapter, .epx, .luf li').first().text());
-			const n = parseChapterNumber(chText);
-			if (n > 0) latestChapter = n;
-		}
+		const chText = cleanText(
+			root.find('.nchapter, .chapter, .epx, .mdch, a[href*="-ch"]').first().text()
+		);
+		const n = parseChapterNumber(chText);
+		if (n > 0) latestChapter = n;
 
 		let status: string | undefined;
 		const st = cleanText(root.find('.status, .todstat, [class*="status"]').first().text());
@@ -282,7 +263,7 @@ export class RedPandaTranslationsSource extends BaseSource {
 		return {
 			id: seriesId,
 			title: title.slice(0, 200),
-			cover: absUrl((img || '').split('?')[0]),
+			cover: absUrl((coverRaw || '').split('?')[0]),
 			sourceId: this.id,
 			type: 'novel',
 			status,
@@ -309,8 +290,16 @@ export class RedPandaTranslationsSource extends BaseSource {
 			const list: Manga[] = [];
 			const seen = new Set<string>();
 
-			$('.listupd .bsx, .listupd .bs, .bsx, .bs, .utao').each((_, el) => {
-				const item = this.parseCard($, el);
+			$('.listupd article.maindet, .listupd article, article.maindet').each((_, el) => {
+				const item = this.parseMaindetCard($, el);
+				if (item && !seen.has(item.id)) {
+					seen.add(item.id);
+					list.push(item);
+				}
+			});
+
+			$('.listupd .bsx, .bsx, .utao').each((_, el) => {
+				const item = this.parseUtaoCard($, el) || this.parseMaindetCard($, el);
 				if (item && !seen.has(item.id)) {
 					seen.add(item.id);
 					list.push(item);
@@ -323,11 +312,16 @@ export class RedPandaTranslationsSource extends BaseSource {
 					if (!seriesId || seen.has(seriesId)) return;
 					const title = cleanText($(a).attr('title') || $(a).text());
 					if (!title || title.length < 2) return;
+					const parent = $(a).closest('article, .bsx, .utao, li, div');
+					const img =
+						parent.find('img').first().attr('data-src') ||
+						parent.find('img').first().attr('src') ||
+						'';
 					seen.add(seriesId);
 					list.push({
 						id: seriesId,
 						title: title.slice(0, 200),
-						cover: '',
+						cover: absUrl((img || '').split('?')[0]),
 						sourceId: this.id,
 						type: 'novel',
 						lang: 'en'
@@ -374,14 +368,12 @@ export class RedPandaTranslationsSource extends BaseSource {
 			'';
 		cover = absUrl((cover || '').split('?')[0]);
 
-		// Synopsis
 		let description =
 			cleanText($('.sersysn, .sersys.entry-content, .entry-content.sersys, .series-synops').first().text()) ||
 			cleanText($('meta[name="description"]').attr('content') || '') ||
 			'';
 		if (description.length > 4000) description = description.slice(0, 4000) + '…';
 
-		// Metadata rows: .serl > .sername + .serval
 		const authors: string[] = [];
 		const genres: string[] = [];
 		let status = 'Ongoing';
@@ -429,11 +421,9 @@ export class RedPandaTranslationsSource extends BaseSource {
 			}
 		});
 
-		// Status badge
 		const badge = cleanText($('.sertostat, .status-value, .status').first().text());
 		if (badge) status = normalizeStatus(badge);
 
-		// Genres from links
 		$('a[href*="/genre/"], a[href*="/genres/"]').each((_, a) => {
 			const g = cleanText($(a).text());
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
@@ -446,7 +436,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			description = (description ? description + '\n\n' : '') + metaExtra.join('\n');
 		}
 
-		// Chapters — .eplister
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -454,7 +443,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			const href = $(a).attr('href') || '';
 			const id = pathOnly(href);
 			if (!id || seen.has(id)) return;
-			// chapter path: /{slug}-ch{n}/
 			if (!/-ch[\d.]+/i.test(id) && !/\/chapter/i.test(id)) return;
 			seen.add(id);
 
@@ -473,7 +461,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			});
 		});
 
-		// Fallback: any -ch link on page
 		if (!chapters.length) {
 			$('a[href*="-ch"]').each((_, a) => {
 				const href = $(a).attr('href') || '';
@@ -538,7 +525,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 		const number = parseChapterNumber(rawTitle || path);
 		const title = shortChapterTitle(number > 0 ? number : 0) || rawTitle;
 
-		// ── extract content (beberapa fallback) ──
 		let content = '';
 
 		const stripNoise = ($root: any) => {
@@ -566,14 +552,12 @@ export class RedPandaTranslationsSource extends BaseSource {
 		const textLen = (htmlStr: string) =>
 			htmlStr.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
 
-		// 1) .epcontent (Themesia)
 		const ep = $('.epcontent').first();
 		if (ep.length) {
 			stripNoise(ep);
 			content = cleanInline(ep.html() || '');
 		}
 
-		// 2) .tts_content_wrapper / entry-content di dalam article
 		if (textLen(content) < 80) {
 			for (const sel of [
 				'[class*="tts_content_wrapper"]',
@@ -591,7 +575,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			}
 		}
 
-		// 3) Kumpulkan semua <p> di dalam post
 		if (textLen(content) < 80) {
 			const ps: string[] = [];
 			$('.epcontent p, article p, .postbody p, .entry-content p').each((_, p) => {
@@ -605,7 +588,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			if (ps.length) content = ps.join('\n');
 		}
 
-		// 4) Regex fallback dari raw HTML (kalau cheerio gagal / konten di-obfuscate)
 		if (textLen(content) < 80) {
 			const epRe = /<div[^>]*class="[^"]*epcontent[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
 			const m = html.match(epRe);
@@ -619,7 +601,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			}
 		}
 
-		// 5) Plain text terakhir
 		if (textLen(content) < 80) {
 			const plain =
 				$('.epcontent').text() ||
@@ -627,7 +608,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 				$('.postbody').text() ||
 				'';
 			const cleaned = plain.replace(/\s+/g, ' ').trim();
-			// potong meta chrome di depan
 			const cut = cleaned.replace(
 				/^[\s\S]{0,200}?(Chapter\s+\d+[^\n]*?)(?=\s+[A-Z])/i,
 				'$1'
@@ -655,7 +635,6 @@ export class RedPandaTranslationsSource extends BaseSource {
 			);
 		}
 
-		// Next / Prev
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
