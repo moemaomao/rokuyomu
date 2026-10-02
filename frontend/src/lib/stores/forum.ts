@@ -73,7 +73,7 @@ export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
     {
         name: 'General',
         slug: 'general',
-        description: 'General discussion about manga, manhwa, and the site.',
+        description: 'General discussion about manga, manhwa, novels, and the site.',
         order: 1
     },
     {
@@ -83,21 +83,21 @@ export const DEFAULT_CATEGORIES: Omit<ForumCategory, 'id'>[] = [
         order: 2
     },
     {
-        name: 'Chapter Discussion',
+        name: 'Manga Discussion',
         slug: 'chapter-discussion',
-        description: 'Talk about specific chapters (use spoiler tags).',
+        description: 'Discuss manga, manhwa, and manhua (use spoiler tags when needed).',
         order: 3
     },
     {
-        name: 'Source & Site Issues',
+        name: 'NSFW',
         slug: 'source-issues',
-        description: 'Broken sources, missing chapters, site bugs.',
+        description: 'Adult / NSFW titles and discussion. Keep it tagged and respectful.',
         order: 4
     },
     {
-        name: 'Requests',
+        name: 'Novel Discussion',
         slug: 'requests',
-        description: 'Request new sources or titles.',
+        description: 'Discuss web novels and light novels (JP / CN / KR).',
         order: 5
     }
 ];
@@ -167,7 +167,39 @@ export async function ensureCategories(): Promise<ForumCategory[]> {
     if (!browser || !db) return [];
     const snap = await getDocs(query(collection(db, 'forumCategories'), orderBy('order', 'asc')));
     if (!snap.empty) {
-        return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ForumCategory, 'id'>) }));
+        // Sync name/description dari DEFAULT (rename kategori tanpa ubah slug/id)
+        const bySlug = new Map(DEFAULT_CATEGORIES.map((c) => [c.slug, c]));
+        const out: ForumCategory[] = [];
+        for (const d of snap.docs) {
+            const data = d.data() as Omit<ForumCategory, 'id'>;
+            const def = bySlug.get(data.slug);
+            if (
+                def &&
+                (data.name !== def.name ||
+                    data.description !== def.description ||
+                    data.order !== def.order)
+            ) {
+                try {
+                    await updateDoc(doc(db, 'forumCategories', d.id), {
+                        name: def.name,
+                        description: def.description,
+                        order: def.order
+                    });
+                    out.push({
+                        id: d.id,
+                        ...data,
+                        name: def.name,
+                        description: def.description,
+                        order: def.order
+                    });
+                    continue;
+                } catch (e) {
+                    console.warn('[forum] category sync failed', data.slug, e);
+                }
+            }
+            out.push({ id: d.id, ...data });
+        }
+        return out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     }
     const created: ForumCategory[] = [];
     for (const c of DEFAULT_CATEGORIES) {
