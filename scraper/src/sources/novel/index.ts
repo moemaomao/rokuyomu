@@ -36,9 +36,11 @@ import { NomadTranslationsSource } from '../impl/novel/NomadTranslations';
 import { WeTriedTLsSource } from '../impl/novel/WeTriedTLs';
 import { KaysTLsSource } from '../impl/novel/KaysTLs';
 import { StabbingWithASyringeSource } from '../impl/novel/StabbingWithASyringe';
+import { ZeusTranslationsSource } from '../impl/novel/ZeusTranslations';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	zeustranslations: new ZeusTranslationsSource(),
 	stabbingwithasyringe: new StabbingWithASyringeSource(),
 	kaystls: new KaysTLsSource(),
 	wetriedtls: new WeTriedTLsSource(),
