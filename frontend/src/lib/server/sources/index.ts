@@ -144,7 +144,8 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'harishtranslation', name: 'Harish Translation' },
 	{ id: 'nomadtranslations', name: 'Nomad Translations' },
 	{ id: 'wetriedtls', name: 'We Tried TLs' },
-	{ id: 'kaystls', name: 'Kays TLs' }
+	{ id: 'kaystls', name: 'Kays TLs' },
+	{ id: 'stabbingwithasyringe', name: 'Stabbing With A Syringe' }
 ];
 
 export function getSourceList(): SourceMeta[] {
