@@ -44,9 +44,11 @@ import { DasuiTLSource } from '../impl/novel/DasuiTL';
 import { MelreadsSource } from '../impl/novel/Melreads';
 import { MainichiTLSource } from '../impl/novel/MainichiTL';
 import { ToastefulSource } from '../impl/novel/Toasteful';
+import { NovelibSource } from '../impl/novel/Novelib';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	novelib: new NovelibSource(),
 	toasteful: new ToastefulSource(),
 	mainichitl: new MainichiTLSource(),
 	melreads: new MelreadsSource(),
