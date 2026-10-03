@@ -39,7 +39,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'stabbingwithasyringe',
 	'zeustranslations',
 	'drowsic',
-	'machineslicedbread'
+	'machineslicedbread',
+	'transweaver'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

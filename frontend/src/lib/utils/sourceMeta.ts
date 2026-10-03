@@ -149,7 +149,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	stabbingwithasyringe: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	zeustranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	drowsic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
-	machineslicedbread: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
+	machineslicedbread: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
+	transweaver: { flag: 'gb', lang: 'EN', isBL: true, isR18: true, color: 'bg-emerald-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {
