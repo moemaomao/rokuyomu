@@ -75,6 +75,10 @@ function decodeEntities(s: string): string {
 		.replace(/&#8212;/g, '—');
 }
 
+/**
+ * Parse chapter label → integer sort key (hindari float error).
+ * "Vol. 9 Chapter 1.1" → vol*100000 + round(ch*100) = 900000 + 110 = 900110
+ */
 function parseChapterNumber(text: string, fallback = 0): number {
 	const t = cleanText(text);
 	const volCh = t.match(
@@ -100,6 +104,7 @@ function parseChapterNumber(text: string, fallback = 0): number {
 	return fallback;
 }
 
+/** Decode sort key back to clean display title */
 function shortChapterTitle(num: number, raw?: string): string {
 	if (num >= 100000) {
 		const vol = Math.floor(num / 100000);
@@ -127,6 +132,7 @@ function isStoryPath(href: string): { slug: string } | null {
 
 function isChapterPath(href: string): boolean {
 	const path = pathOnly(href);
+	// /story/{slug}/{chapter-slug}
 	return /^\/story\/[^/]+\/[^/]+$/.test(path);
 }
 
@@ -136,6 +142,7 @@ function pickImgSrc(img: cheerio.Cheerio<any>): string {
 		img.attr('data-lazy-src'),
 		img.attr('data-bg'),
 		img.attr('data-orig-file'),
+		// prefer largest from srcset
 		...(img.attr('srcset') || '')
 			.split(',')
 			.map((s) => s.trim().split(/\s+/)[0])
@@ -143,6 +150,7 @@ function pickImgSrc(img: cheerio.Cheerio<any>): string {
 		img.attr('src')
 	].filter((s): s is string => !!s && !s.startsWith('data:'));
 
+	// Prefer full cover.jpg over -142x200 thumb if available
 	const full = candidates.find((s) => /\/cover\.\w+$/i.test(s) || !/\-\d+x\d+\./.test(s));
 	const src = full || candidates[0] || '';
 	return absUrl((src || '').split('?')[0]);
@@ -183,19 +191,87 @@ export class DrowsicSource extends BaseSource {
 	}
 
 	async getLatestNovels(page = 1): Promise<Manga[]> {
-		const path =
-			page <= 1 ? '/projects/' : `/projects/page/${page}/`;
+		const path = page <= 1 ? '/projects/' : `/projects/page/${page}/`;
+		const errors: string[] = [];
+
+		const load = async (p: string): Promise<Manga[]> => {
+			try {
+				const html = await this.fetchHtml(p);
+				if (!html || html.length < 500) {
+					errors.push(`${p}: empty html (${html?.length ?? 0})`);
+					return [];
+				}
+				const list = this.parseStoryCards(html);
+				if (!list.length) {
+					// regex fallback bila cheerio gagal
+					const fb = this.parseStoryCardsRegex(html);
+					if (fb.length) return fb;
+					errors.push(`${p}: parsed 0 cards (html ${html.length})`);
+				}
+				return list;
+			} catch (e: any) {
+				errors.push(`${p}: ${e?.message || e}`);
+				return [];
+			}
+		};
+
+		let list: Manga[] = [];
 		if (page <= 1) {
-			const [home, projects] = await Promise.all([
-				this.fetchHtml('/').then((h) => this.parseStoryCards(h)).catch(() => [] as Manga[]),
-				this.fetchHtml(path)
-					.then((h) => this.parseStoryCards(h))
-					.catch(() => [] as Manga[])
-			]);
-			return this.dedupe([...home, ...projects]).slice(0, 24);
+			const [home, projects] = await Promise.all([load('/'), load(path)]);
+			list = this.dedupe([...home, ...projects]);
+		} else {
+			list = await load(path);
 		}
-		const html = await this.fetchHtml(path);
-		return this.parseStoryCards(html).slice(0, 24);
+
+		list = list.slice(0, 24);
+		if (!list.length) {
+			throw new Error(
+				`[Drowsic] No stories found (page ${page}). ${errors.join(' | ') || 'unknown'}`
+			);
+		}
+		return list;
+	}
+
+	/** Fallback parser tanpa mengandalkan struktur card cheerio */
+	private parseStoryCardsRegex(html: string): Manga[] {
+		const list: Manga[] = [];
+		const seen = new Set<string>();
+		const re =
+			/href=["'](https?:\/\/drowsic\.com\/story\/([^/"'?#]+)\/?)["'][^>]*>\s*([^<]{2,120})\s*</gi;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(html)) !== null) {
+			const slug = m[2];
+			const id = `/story/${slug}`;
+			if (seen.has(id)) continue;
+			let title = cleanText(decodeEntities(m[3]));
+			if (!title || title.length < 2) continue;
+			if (/^(read|home|projects|more)$/i.test(title)) continue;
+			// skip chapter deep links
+			if (m[1].split('/').filter(Boolean).length > 3) continue;
+			seen.add(id);
+
+			// cover dekat slug
+			const around = html.slice(Math.max(0, m.index - 600), m.index + 200);
+			const img =
+				around.match(
+					/data-src=["'](https?:\/\/[^"']+wp-content\/uploads\/[^"']+)["']/i
+				) ||
+				around.match(
+					/srcset=["'](https?:\/\/[^"'\s]+wp-content\/uploads\/[^"'\s]+)/i
+				);
+			const cover = img ? absUrl(img[1].split(' ')[0]) : '';
+
+			list.push({
+				id,
+				title,
+				cover,
+				sourceId: this.id,
+				type: 'novel',
+				status: 'Ongoing',
+				lang: 'en'
+			});
+		}
+		return list;
 	}
 
 	private dedupe(items: Manga[]): Manga[] {
@@ -213,40 +289,33 @@ export class DrowsicSource extends BaseSource {
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
-		const cards = $('.card._story, .card[class*="_story"], article.card, [class*="card"][class*="_story"]');
-		const roots =
-			cards.length > 0
-				? cards.toArray()
-				: $('a[href*="/story/"]')
-						.map((_, a) => $(a).closest('.card, article, li, .post')[0] || a)
-						.get();
 
-		for (const node of roots) {
-			const root = $(node);
-			const a = root.find('a[href*="/story/"]').filter((_, el) => {
-				return !!isStoryPath($(el).attr('href') || '');
-			}).first();
-			const href = a.attr('href') || root.attr('href') || '';
+		// 1) Link story langsung (paling andal)
+		$('a[href*="/story/"]').each((_, el) => {
+			const a = $(el);
+			const href = a.attr('href') || '';
 			const parsed = isStoryPath(href);
-			if (!parsed) continue;
+			if (!parsed) return;
 			const id = `/story/${parsed.slug}`;
-			if (seen.has(id)) continue;
+			if (seen.has(id)) return;
+
+			const root = a.closest('.card, article, li, [class*="card"]');
+			const box = root.length ? root : a.parent();
 
 			const title = cleanText(
 				a.attr('title') ||
-					root.find('.card__title, h2, h3, h4').first().text() ||
+					box.find('.card__title, h2, h3, h4').first().text() ||
 					a.text() ||
 					''
 			);
-			if (!title || title.length < 2) continue;
-			if (/^(home|projects|bookmarks|faq|dmca)$/i.test(title)) continue;
+			if (!title || title.length < 2) return;
+			if (/^(home|projects|bookmarks|faq|dmca|read more)$/i.test(title)) return;
 
-			const cover = imgFromEl($, root);
+			const cover = imgFromEl($, box);
 
-			const statusText = root.text();
-			const status = /completed|complete/i.test(
-				root.find('.card__footer-status, .story__status').text() || statusText
-			)
+			const statusText =
+				box.find('.card__footer-status, .story__status').text() || box.text();
+			const status = /completed|complete/i.test(statusText)
 				? 'Completed'
 				: /hiatus|dropped/i.test(statusText)
 					? 'Hiatus'
@@ -254,13 +323,16 @@ export class DrowsicSource extends BaseSource {
 
 			let latestChapter: number | undefined;
 			const chFooter = cleanText(
-				root.find('.card__footer-chapters, [class*="footer-chapters"]').text()
+				box.find('.card__footer-chapters, [class*="footer-chapters"]').text()
 			);
 			const chMatch =
 				chFooter.match(/(\d+)/) ||
 				statusText.match(/(\d+)\s*chapters?/i) ||
 				statusText.match(/ch(?:apter)?\.?\s*(\d+)/i);
-			if (chMatch) latestChapter = parseInt(chMatch[1], 10);
+			if (chMatch) {
+				const n = parseInt(chMatch[1], 10);
+				if (n > 0 && n < 100000) latestChapter = n;
+			}
 
 			seen.add(id);
 			list.push({
@@ -271,30 +343,9 @@ export class DrowsicSource extends BaseSource {
 				type: 'novel',
 				status,
 				lang: 'en',
-				...(latestChapter != null && latestChapter > 0 ? { latestChapter } : {})
+				...(latestChapter != null ? { latestChapter } : {})
 			});
-		}
-
-		if (list.length === 0) {
-			$('a[href*="/story/"]').each((_, a) => {
-				const href = $(a).attr('href') || '';
-				const parsed = isStoryPath(href);
-				if (!parsed) return;
-				const id = `/story/${parsed.slug}`;
-				if (seen.has(id)) return;
-				const title = cleanText($(a).attr('title') || $(a).text());
-				if (!title || title.length < 2) return;
-				seen.add(id);
-				list.push({
-					id,
-					title,
-					cover: '',
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en'
-				});
-			});
-		}
+		});
 
 		return list;
 	}
@@ -305,6 +356,7 @@ export class DrowsicSource extends BaseSource {
 		const page = opts?.page ?? 1;
 		const q = query.trim();
 		if (!q) return [];
+		// Fictioneer / WP search
 		const path =
 			page <= 1
 				? `/?s=${encodeURIComponent(q)}`
@@ -344,16 +396,18 @@ export class DrowsicSource extends BaseSource {
 			cleanText($('meta[property="og:description"]').attr('content') || '') ||
 			cleanText($('.story__summary, .content-section').first().text());
 
+		// Authors
 		const authors: string[] = [];
 		$('.story__author a, a[href*="/author/"], .chapter__author a').each((_, a) => {
 			const n = cleanText($(a).text());
 			if (n && n.length < 60 && !authors.includes(n)) authors.push(n);
 		});
-
+		// Fallback from page text "by X" / known creator links
 		if (!authors.length) {
 			const m = html.match(/dc:creator[^>]*>([^<]+)/i);
+			// ignore
 		}
-
+		// PinkPanther-style from body meta
 		$('[rel="author"], .author').each((_, el) => {
 			const n = cleanText($(el).text());
 			if (n && n.length < 60 && !authors.includes(n)) authors.push(n);
@@ -378,6 +432,7 @@ export class DrowsicSource extends BaseSource {
 		const chapters = this.parseChapterList($, pathOnly(path));
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 
+		// Badge: jumlah chapter, bukan sort-key (vol*100000+…)
 		const latestChapter = chapters.length > 0 ? chapters.length : undefined;
 
 		return {
@@ -401,14 +456,17 @@ export class DrowsicSource extends BaseSource {
 		const seen = new Set<string>();
 		let idx = 0;
 
+		// Primary: chapter-group list
 		$('.chapter-group__list-item, li[class*="chapter-group"]').each((_, li) => {
 			const el = $(li);
 			const a = el.find('a.chapter-group__list-item-link, a[href*="/story/"]').first();
 			const href = a.attr('href') || '';
 			if (!href) return;
 
+			// Skip pure query premium stubs without real path if needed — still include as locked
 			let id = pathOnly(href);
 			if (href.includes('post_type=fcn_chapter') || href.includes('?p=')) {
+				// keep query-based id unique
 				id = href.replace(BASE, '').split('#')[0];
 				if (!id.startsWith('/')) id = `/${id}`;
 			}
@@ -451,6 +509,7 @@ export class DrowsicSource extends BaseSource {
 			});
 		});
 
+		// Fallback: any chapter-looking links under story
 		if (out.length < 2) {
 			$('a[href*="/story/"]').each((_, a) => {
 				const href = $(a).attr('href') || '';
@@ -486,6 +545,7 @@ export class DrowsicSource extends BaseSource {
 		nextChapterId?: string | null;
 	}> {
 		let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+		// query-style premium URLs
 		const url = path.startsWith('http')
 			? path
 			: path.includes('?')
@@ -504,6 +564,7 @@ export class DrowsicSource extends BaseSource {
 		const num = parseChapterNumber(rawTitle, 0);
 		const title = shortChapterTitle(num, rawTitle);
 
+		// Locked / premium gate
 		const bodyText = $('body').text().toLowerCase();
 		const locked =
 			bodyText.includes('this chapter is locked') ||
@@ -543,6 +604,7 @@ export class DrowsicSource extends BaseSource {
 
 		let content = parts.join('\n');
 		if (!content || content.length < 40) {
+			// raw html fallback
 			const raw = contentEl.html() || '';
 			if (raw.length > 40) {
 				content = raw;
@@ -551,6 +613,7 @@ export class DrowsicSource extends BaseSource {
 			}
 		}
 
+		// Prev / next — Fictioneer chapter nav
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
@@ -575,6 +638,7 @@ export class DrowsicSource extends BaseSource {
 			}
 		});
 
+		// Also catch #start nav links common on this theme
 		if (!nextChapterId || !prevChapterId) {
 			$('a[href*="/story/"]').each((_, a) => {
 				const href = ($(a).attr('href') || '').split('#')[0];
