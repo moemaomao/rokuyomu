@@ -19,9 +19,9 @@
  * IP datacenter kena Cloudflare challenge.
  */
 import * as cheerio from 'cheerio';
-import { BaseSource } from '../../BaseSource';
-import type { Manga, MangaDetails, Chapter } from '../../types-manga';
-import { fetchWithCf } from '../../../lib/fetchWithCf';
+import { BaseSource } from '../BaseSource';
+import type { Manga, MangaDetails, Chapter } from '../types-manga';
+import { fetchWithCf } from '../../fetchWithCf';
 
 const BASE = 'https://drowsic.com';
 
