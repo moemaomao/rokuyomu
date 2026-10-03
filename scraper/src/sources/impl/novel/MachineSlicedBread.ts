@@ -167,19 +167,52 @@ export class MachineSlicedBreadSource extends BaseSource {
 		Referer: `${BASE}/`
 	};
 
+	private _queue: Promise<void> = Promise.resolve();
+	private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+		const run = this._queue.then(fn, fn);
+		this._queue = run.then(
+			() => undefined,
+			() => undefined
+		);
+		return run;
+	}
+
+	private sleep(ms: number): Promise<void> {
+		return new Promise((r) => setTimeout(r, ms));
+	}
+
 	private async wpJson<T>(
-		url: string
+		url: string,
+		retries = 4
 	): Promise<{ data: T; total: number; totalPages: number }> {
-		const res = await fetch(url, {
-			headers: { ...this.headers, Accept: 'application/json' }
+		return this.enqueue(async () => {
+			let lastErr: Error | null = null;
+			for (let attempt = 0; attempt <= retries; attempt++) {
+				try {
+					const res = await fetch(url, {
+						headers: { ...this.headers, Accept: 'application/json' }
+					});
+					if (res.status === 429 || res.status === 503) {
+						const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+						const wait = Math.max(retryAfter * 1000, 800 * Math.pow(2, attempt));
+						await this.sleep(wait);
+						continue;
+					}
+					if (!res.ok) {
+						throw new Error(`MSB API ${res.status}: ${url}`);
+					}
+					const total = parseInt(res.headers.get('X-WP-Total') || '0', 10);
+					const totalPages = parseInt(res.headers.get('X-WP-TotalPages') || '0', 10);
+					const data = (await res.json()) as T;
+					await this.sleep(120);
+					return { data, total, totalPages };
+				} catch (e) {
+					lastErr = e instanceof Error ? e : new Error(String(e));
+					if (attempt < retries) await this.sleep(500 * (attempt + 1));
+				}
+			}
+			throw lastErr || new Error(`MSB API failed: ${url}`);
 		});
-		if (!res.ok) {
-			throw new Error(`MSB API ${res.status}: ${url}`);
-		}
-		const total = parseInt(res.headers.get('X-WP-Total') || '0', 10);
-		const totalPages = parseInt(res.headers.get('X-WP-TotalPages') || '0', 10);
-		const data = (await res.json()) as T;
-		return { data, total, totalPages };
 	}
 
 	// ─── Series list (latest / homepage) ─────────────────────────────────
@@ -205,17 +238,15 @@ export class MachineSlicedBreadSource extends BaseSource {
 			latestChapter: c.count || undefined
 		}));
 
-		await Promise.all(
-			list.map(async (m, i) => {
-				const cat = slice[i];
-				if (!cat) return;
-				try {
-					const cover = await this.fetchCategoryCover(cat.id, cat.slug || '');
-					if (cover) m.cover = cover;
-				} catch {
-				}
-			})
-		);
+		for (let i = 0; i < Math.min(6, list.length); i++) {
+			const cat = slice[i];
+			if (!cat) continue;
+			try {
+				const cover = await this.fetchCategoryCover(cat.id, cat.slug || '');
+				if (cover) list[i].cover = cover;
+			} catch {
+			}
+		}
 
 		return list;
 	}
@@ -266,20 +297,24 @@ export class MachineSlicedBreadSource extends BaseSource {
 	}
 
 	private async fetchCategoryCover(catId: number, slug: string): Promise<string> {
-		try {
-			const { data } = await this.wpJson<WpPost[]>(
-				`${BASE}/wp-json/wp/v2/posts?categories=${catId}&per_page=1&_embed=1&orderby=date&order=desc&_fields=id,_embedded`
-			);
-			const media = data?.[0]?._embedded?.['wp:featuredmedia']?.[0]?.source_url;
-			if (media) return absUrl(media);
-		} catch {
+		if (slug) {
+			try {
+				const html = await this.fetchHtml(`/${slug}/`);
+				const $ = cheerio.load(html);
+				const og = $('meta[property="og:image"]').attr('content');
+				if (og) return absUrl(og.split('?')[0]);
+			} catch {
+			}
 		}
-		try {
-			const html = await this.fetchHtml(`/${slug}/`);
-			const $ = cheerio.load(html);
-			const og = $('meta[property="og:image"]').attr('content');
-			if (og) return absUrl(og.split('?')[0]);
-		} catch {
+		if (catId > 0) {
+			try {
+				const { data } = await this.wpJson<WpPost[]>(
+					`${BASE}/wp-json/wp/v2/posts?categories=${catId}&per_page=1&_embed=1&orderby=date&order=desc&_fields=id,_embedded`
+				);
+				const media = data?.[0]?._embedded?.['wp:featuredmedia']?.[0]?.source_url;
+				if (media) return absUrl(media);
+			} catch {
+			}
 		}
 		return '';
 	}
@@ -317,30 +352,36 @@ export class MachineSlicedBreadSource extends BaseSource {
 		const parsed = this.parseCategoryId(mangaId);
 		if (!parsed) throw new Error('Invalid series id');
 
-		const cat = await this.fetchCategoryBySlug(parsed.slug);
-		if (!cat) throw new Error(`Series not found: ${parsed.slug}`);
+		let cat: WpCategory | null = null;
+		try {
+			cat = await this.fetchCategoryBySlug(parsed.slug);
+		} catch {
+		}
 
-		const title = cleanText(cat.name || parsed.slug);
+		const title = cleanText(cat?.name || parsed.slug.replace(/-/g, ' '));
 		const description = cleanText(
-			decodeEntities((cat.description || '').replace(/<[^>]+>/g, ' '))
+			decodeEntities((cat?.description || '').replace(/<[^>]+>/g, ' '))
 		);
 
 		let cover = '';
 		try {
-			cover = await this.fetchCategoryCover(cat.id, cat.slug || parsed.slug);
+			cover = await this.fetchCategoryCover(cat?.id || 0, cat?.slug || parsed.slug);
 		} catch {
 		}
 
-		const chapters = await this.fetchAllChapters(cat.slug || parsed.slug, cat.id);
+		const chapters = await this.fetchAllChapters(
+			cat?.slug || parsed.slug,
+			cat?.id || 0
+		);
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 
 		const genres =
-			cat.parent === 6
+			cat?.parent === 6
 				? ['Adult', 'Original']
 				: ['Adult', 'Web Novel'];
 
 		return {
-			id: this.categoryToId(cat),
+			id: cat ? this.categoryToId(cat) : pathOnly(mangaId),
 			title,
 			cover,
 			sourceId: this.id,
@@ -354,10 +395,11 @@ export class MachineSlicedBreadSource extends BaseSource {
 			latestChapter:
 				chapters[0] && chapters[0].number < 9000
 					? chapters[0].number
-					: chapters.length || cat.count || undefined
+					: chapters.length || cat?.count || undefined
 		};
 	}
 
+	
 	private async fetchAllChapters(slug: string, catId: number): Promise<Chapter[]> {
 		let parentPageId: number | null = null;
 		try {
@@ -369,11 +411,21 @@ export class MachineSlicedBreadSource extends BaseSource {
 		}
 
 		if (parentPageId) {
-			const fromPages = await this.fetchChaptersFromPages(parentPageId, slug);
-			if (fromPages.length) return fromPages;
+			try {
+				const fromPages = await this.fetchChaptersFromPages(parentPageId, slug);
+				if (fromPages.length) return fromPages;
+			} catch {
+			}
 		}
 
-		return this.fetchChaptersFromPosts(catId, slug);
+		if (catId > 0) {
+			try {
+				return await this.fetchChaptersFromPosts(catId, slug);
+			} catch {
+			}
+		}
+
+		return [];
 	}
 
 	private async fetchChaptersFromPages(
@@ -542,7 +594,6 @@ export class MachineSlicedBreadSource extends BaseSource {
 					}
 				}
 			} catch {
-				/* ignore */
 			}
 		}
 
@@ -639,7 +690,6 @@ export class MachineSlicedBreadSource extends BaseSource {
 					}
 				);
 			} catch {
-				/* ignore */
 			}
 		}
 
