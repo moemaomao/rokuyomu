@@ -63,6 +63,7 @@ export const WORKER_SOURCE_IDS = new Set([
 	'softkomik',
 	'storyseedling',
 	'tinytranslation',
+	'toasteful',
 	'voratoon',
 	'weebcentral',
 	'yumeneijiworks'
@@ -118,6 +119,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	softkomik: async () => new (await import('./impl/Softkomik')).SoftkomikSource(),
 	storyseedling: async () => new (await import('./impl/StorySeedling')).StorySeedlingSource(),
 	tinytranslation: async () => new (await import('./impl/TinyTranslation')).TinyTranslationSource(),
+	toasteful: async () => new (await import('./impl/Toasteful')).ToastefulSource(),
 	voratoon: async () => new (await import('./impl/Voratoon')).VoratoonSource(),
 	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
 	yumeneijiworks: async () => new (await import('./impl/YumeNeijiWorks')).YumeNeijiWorksSource(),

@@ -9,14 +9,6 @@
  * - Chapter: /story/{slug}/{chapter-slug}/
  * - Content: .chapter__content / #chapter-content
  * - Premium: list item class _premium + fa-lock → isLocked
- *
- * Homepage: 24 titles
- * Chapter titles: "Chapter N" (volume disimpan di number composit opsional)
- *
- * Frontend id: drowsic
- *
- * WAJIB: BYPARR_URL di Vercel ATAU hybrid Worker (worker-sources.json → drowsic).
- * IP datacenter kena Cloudflare challenge.
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
