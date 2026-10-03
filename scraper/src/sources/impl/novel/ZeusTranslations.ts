@@ -26,6 +26,27 @@ import { BaseSource } from '../../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const BASE = 'https://zeustranslations.blogspot.com';
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const chaptersCache = new Map<string, { at: number; chapters: Chapter[] }>();
+const seriesMapCache: { at: number; map: Map<string, string> } = {
+	at: 0,
+	map: new Map()
+};
+const htmlCache = new Map<string, { at: number; html: string }>();
+
+function cacheGetChapters(code: string): Chapter[] | null {
+	const e = chaptersCache.get(code);
+	if (!e) return null;
+	if (Date.now() - e.at > CACHE_TTL_MS) {
+		chaptersCache.delete(code);
+		return null;
+	}
+	return e.chapters;
+}
+
+function cacheSetChapters(code: string, chapters: Chapter[]): void {
+	chaptersCache.set(code, { at: Date.now(), chapters });
+}
 
 function absUrl(href: string | undefined | null): string {
 	if (!href) return '';
@@ -208,7 +229,47 @@ export class ZeusTranslationsSource extends BaseSource {
 		Referer: `${BASE}/`
 	};
 
-	// ─── Feed helpers ────────────────────────────────────────────────────
+	private async sleep(ms: number): Promise<void> {
+		await new Promise((r) => setTimeout(r, ms));
+	}
+
+	private async fetchOk(url: string, init?: RequestInit): Promise<Response | null> {
+		for (let attempt = 0; attempt < 3; attempt++) {
+			try {
+				const res = await fetch(url, init);
+				if (res.status === 429) {
+					await this.sleep(800 * (attempt + 1));
+					continue;
+				}
+				return res;
+			} catch {
+				await this.sleep(400 * (attempt + 1));
+			}
+		}
+		return null;
+	}
+
+	private async fetchHtmlCached(pathOrUrl: string): Promise<string> {
+		const url = pathOrUrl.startsWith('http')
+			? pathOrUrl
+			: `${BASE}${pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`}`;
+		const hit = htmlCache.get(url);
+		if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.html;
+
+		let html = '';
+		const res = await this.fetchOk(url, {
+			headers: { ...this.headers, Accept: 'text/html' }
+		});
+		if (res && res.ok) {
+			html = await res.text();
+		} else {
+			html = await this.fetchHtml(url);
+		}
+		if (html && html.length > 500) {
+			htmlCache.set(url, { at: Date.now(), html });
+		}
+		return html;
+	}
 
 	private async fetchFeed(
 		label: string,
@@ -217,13 +278,13 @@ export class ZeusTranslationsSource extends BaseSource {
 	): Promise<BloggerEntry[]> {
 		const url = feedUrl(label, maxResults, startIndex);
 		try {
-			const res = await fetch(url, {
+			const res = await this.fetchOk(url, {
 				headers: {
 					...this.headers,
 					Accept: 'application/json'
 				}
 			});
-			if (!res.ok) return [];
+			if (!res || !res.ok) return [];
 			const data = (await res.json()) as {
 				feed?: { entry?: BloggerEntry | BloggerEntry[] };
 			};
@@ -238,7 +299,7 @@ export class ZeusTranslationsSource extends BaseSource {
 	private async fetchAllFeed(
 		label: string,
 		pageSize = 150,
-		hardCap = 800
+		hardCap = 300
 	): Promise<BloggerEntry[]> {
 		const all: BloggerEntry[] = [];
 		let start = 1;
@@ -248,8 +309,34 @@ export class ZeusTranslationsSource extends BaseSource {
 			all.push(...batch);
 			if (batch.length < pageSize) break;
 			start += pageSize;
+			// kecilkan burst
+			if (all.length < hardCap) await this.sleep(150);
 		}
 		return all;
+	}
+
+	private async getSeriesCodeMap(): Promise<Map<string, string>> {
+		if (Date.now() - seriesMapCache.at < CACHE_TTL_MS && seriesMapCache.map.size) {
+			return seriesMapCache.map;
+		}
+		const map = new Map<string, string>();
+		const entries = await this.fetchFeed('Series', 80, 1);
+		for (const e of entries) {
+			const code = extractSeriesCode(e.category);
+			const href = entryAlternateHref(e);
+			if (code && href) map.set(code, pathOnly(href));
+		}
+		if (entries.length >= 80) {
+			const more = await this.fetchFeed('Series', 80, 81);
+			for (const e of more) {
+				const code = extractSeriesCode(e.category);
+				const href = entryAlternateHref(e);
+				if (code && href) map.set(code, pathOnly(href));
+			}
+		}
+		seriesMapCache.at = Date.now();
+		seriesMapCache.map = map;
+		return map;
 	}
 
 	// ─── Latest ──────────────────────────────────────────────────────────
@@ -336,7 +423,7 @@ export class ZeusTranslationsSource extends BaseSource {
 		path = path.replace(/\/$/, '');
 		const pageUrl = path.startsWith('http') ? path : `${BASE}${path}`;
 
-		const html = await this.fetchHtml(pageUrl);
+		const html = await this.fetchHtmlCached(pageUrl);
 		const $ = cheerio.load(html);
 
 		const titleRaw =
@@ -384,6 +471,7 @@ export class ZeusTranslationsSource extends BaseSource {
 				cleanText($('meta[name="description"]').attr('content') || '');
 		}
 
+		// Authors
 		const authors: string[] = [];
 		const byMatch = titleRaw.match(/\(by\s+([^)]+)\)/i) || title.match(/\(by\s+([^)]+)\)/i);
 		if (byMatch) {
@@ -405,7 +493,6 @@ export class ZeusTranslationsSource extends BaseSource {
 					genres.push(g);
 				}
 			} catch {
-				/* ignore */
 			}
 		}
 		if (!genres.includes('Adult')) genres.push('Adult');
@@ -470,7 +557,13 @@ export class ZeusTranslationsSource extends BaseSource {
 		code: string,
 		seriesPath: string
 	): Promise<Chapter[]> {
-		const entries = await this.fetchAllFeed(code, 150, 900);
+		const cached = cacheGetChapters(code);
+		if (cached) {
+			if (!seriesPath) return cached;
+			return cached.filter((c) => c.id !== seriesPath);
+		}
+
+		const entries = await this.fetchAllFeed(code, 150, 300);
 		const out: Chapter[] = [];
 		const seenId = new Set<string>();
 		const seenNum = new Set<number>();
@@ -501,6 +594,7 @@ export class ZeusTranslationsSource extends BaseSource {
 			});
 		}
 
+		cacheSetChapters(code, out);
 		return out;
 	}
 
@@ -538,7 +632,7 @@ export class ZeusTranslationsSource extends BaseSource {
 		const url = path.startsWith('http') ? path : `${BASE}${path}`;
 
 		try {
-			const html = await this.fetchHtml(url);
+			const html = await this.fetchHtmlCached(url);
 			let seriesCode: string | null = null;
 			for (const m of html.matchAll(/\/search\/label\/(\d{3,5})/gi)) {
 				if (/^\d{3,5}$/.test(m[1])) {
@@ -552,19 +646,15 @@ export class ZeusTranslationsSource extends BaseSource {
 			}
 			if (!seriesCode) return null;
 
-			const entries = await this.fetchFeed(seriesCode, 20, 1);
+			const map = await this.getSeriesCodeMap();
+			const fromMap = map.get(seriesCode);
+			if (fromMap) return fromMap;
+
+			const entries = await this.fetchFeed(seriesCode, 5, 1);
 			for (const e of entries) {
 				if (!hasLabel(e.category, 'Series')) continue;
 				const href = entryAlternateHref(e);
 				if (href) return pathOnly(href);
-			}
-
-			const seriesList = await this.fetchFeed('Series', 80, 1);
-			for (const e of seriesList) {
-				if (extractSeriesCode(e.category) === seriesCode) {
-					const href = entryAlternateHref(e);
-					if (href) return pathOnly(href);
-				}
 			}
 		} catch {
 		}
@@ -587,7 +677,7 @@ export class ZeusTranslationsSource extends BaseSource {
 		path = path.replace(/\/$/, '');
 		const url = path.startsWith('http') ? path : `${BASE}${path}`;
 
-		const html = await this.fetchHtml(url);
+		const html = await this.fetchHtmlCached(url);
 		const $ = cheerio.load(html);
 
 		const rawTitle =
@@ -600,36 +690,13 @@ export class ZeusTranslationsSource extends BaseSource {
 		const titleClean = rawTitle.replace(/\s*[-–|]\s*Zeus Translations\s*$/i, '');
 		const num = parseChapterNumber(titleClean, 0);
 		const title = shortChapterTitle(num, titleClean);
+
 		const isVip =
 			/vip-chapters|label\/VIP/i.test(html) &&
 			!html.includes('name="more"') &&
 			html.length < 40000;
 
 		let content = extractChapterHtml(html);
-
-		if (!content || content.length < 80) {
-			try {
-				const feedUrl2 = `${BASE}/feeds/posts/default?alt=json&max-results=1&q=${encodeURIComponent(titleClean.slice(0, 40))}`;
-				const res = await fetch(feedUrl2, {
-					headers: { ...this.headers, Accept: 'application/json' }
-				});
-				if (res.ok) {
-					const data = (await res.json()) as {
-						feed?: { entry?: BloggerEntry | BloggerEntry[] };
-					};
-					let entry = data?.feed?.entry;
-					if (entry && !Array.isArray(entry)) entry = [entry];
-					const body = Array.isArray(entry)
-						? entry[0]?.content?.$t || entry[0]?.summary?.$t || ''
-						: '';
-					if (body && body.length > 100) {
-						content = extractChapterHtml(body);
-					}
-				}
-			} catch {
-				/* ignore */
-			}
-		}
 
 		if (!content || content.length < 80) {
 			content = isVip
