@@ -14,10 +14,14 @@
  * Chapter titles: "Chapter N" (volume disimpan di number composit opsional)
  *
  * Frontend id: drowsic
+ *
+ * WAJIB: BYPARR_URL di Vercel ATAU hybrid Worker (worker-sources.json → drowsic).
+ * IP datacenter kena Cloudflare challenge.
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../../types-manga';
+import { fetchWithCf } from '../../../lib/fetchWithCf';
 
 const BASE = 'https://drowsic.com';
 
@@ -183,6 +187,19 @@ export class DrowsicSource extends BaseSource {
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: `${BASE}/`
 	};
+
+	/** Vercel IP sering kena CF challenge — wajib Byparr / hybrid Worker */
+	protected async fetchHtml(path: string): Promise<string> {
+		const url = path.startsWith('http')
+			? path
+			: `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+		return fetchWithCf(url, {
+			headers: {
+				...this.headers,
+				Referer: this.baseUrl + '/'
+			}
+		});
+	}
 
 	// ─── Latest ──────────────────────────────────────────────────────────
 
