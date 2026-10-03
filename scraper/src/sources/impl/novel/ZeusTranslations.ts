@@ -338,6 +338,7 @@ export class ZeusTranslationsSource extends BaseSource {
 
 		const html = await this.fetchHtml(pageUrl);
 		const $ = cheerio.load(html);
+
 		const titleRaw =
 			cleanText($('meta[property="og:title"]').attr('content') || '') ||
 			cleanText($('title').first().text()) ||
@@ -404,6 +405,7 @@ export class ZeusTranslationsSource extends BaseSource {
 					genres.push(g);
 				}
 			} catch {
+				/* ignore */
 			}
 		}
 		if (!genres.includes('Adult')) genres.push('Adult');
@@ -530,6 +532,45 @@ export class ZeusTranslationsSource extends BaseSource {
 		return out;
 	}
 
+	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+		let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+		path = path.replace(/\/$/, '');
+		const url = path.startsWith('http') ? path : `${BASE}${path}`;
+
+		try {
+			const html = await this.fetchHtml(url);
+			let seriesCode: string | null = null;
+			for (const m of html.matchAll(/\/search\/label\/(\d{3,5})/gi)) {
+				if (/^\d{3,5}$/.test(m[1])) {
+					seriesCode = m[1];
+					break;
+				}
+			}
+			if (!seriesCode) {
+				const m = html.match(/\b(000\d{2,3})\b/);
+				if (m) seriesCode = m[1];
+			}
+			if (!seriesCode) return null;
+
+			const entries = await this.fetchFeed(seriesCode, 20, 1);
+			for (const e of entries) {
+				if (!hasLabel(e.category, 'Series')) continue;
+				const href = entryAlternateHref(e);
+				if (href) return pathOnly(href);
+			}
+
+			const seriesList = await this.fetchFeed('Series', 80, 1);
+			for (const e of seriesList) {
+				if (extractSeriesCode(e.category) === seriesCode) {
+					const href = entryAlternateHref(e);
+					if (href) return pathOnly(href);
+				}
+			}
+		} catch {
+		}
+		return null;
+	}
+
 	// ─── Chapter content ─────────────────────────────────────────────────
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
@@ -586,6 +627,7 @@ export class ZeusTranslationsSource extends BaseSource {
 					}
 				}
 			} catch {
+				/* ignore */
 			}
 		}
 
@@ -615,6 +657,7 @@ export class ZeusTranslationsSource extends BaseSource {
 
 				const currentPath = pathOnly(path);
 				let idx = chapters.findIndex((c) => c.id === currentPath);
+
 				if (idx < 0 && num > 0) {
 					idx = chapters.findIndex((c) => c.number === num);
 				}
