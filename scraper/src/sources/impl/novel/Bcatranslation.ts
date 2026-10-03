@@ -112,7 +112,6 @@ export class BcatranslationSource extends BaseSource {
 	async getLatestNovels(page = 1): Promise<Manga[]> {
 		const p = Math.max(1, page);
 		try {
-		
 			if (p <= 1) {
 				const html = await this.fetchHtml('/');
 				const list = this.parseSeriesCards(html).slice(0, 24);
@@ -120,7 +119,6 @@ export class BcatranslationSource extends BaseSource {
 					console.log(`[bcatranslation] latest page=1 → ${list.length}`);
 					return list;
 				}
-		
 				const all = await this.fetchHtml('/novel/');
 				const more = this.parseSeriesCards(all).slice(0, 24);
 				console.log(`[bcatranslation] latest page=1 (novel/) → ${more.length}`);
@@ -179,8 +177,13 @@ export class BcatranslationSource extends BaseSource {
 				root.find('img').first().attr('data-src') ||
 				root.find('img').first().attr('src') ||
 				'';
-			const chText = root.find('.rr-chapter a, .chapter a, .chapter').first().text();
-			const latest = parseChapterNumber(chText, 0);
+		
+			let latest = 0;
+			root.find('a[href*="/chapter-"], .rr-chapter a, .chapter a').each((_, ca) => {
+				const t = $(ca).text() + ' ' + ($(ca).attr('href') || '');
+				const n = parseChapterNumber(t, 0);
+				if (n > latest) latest = n;
+			});
 			push(id, title, cover, latest || undefined);
 		});
 
@@ -195,7 +198,9 @@ export class BcatranslationSource extends BaseSource {
 
 			const title =
 				root
-					.find('.manga__content h3 a, .manga__content h4 a, .post-title a, h3 a, h4 a, .manga__title')
+					.find(
+						'.manga__content .post-title a, .manga__content h2 a, .manga__content h3 a, .post-title a, h2 a, h3 a'
+					)
 					.first()
 					.text()
 					.replace(/\s+/g, ' ')
@@ -213,8 +218,14 @@ export class BcatranslationSource extends BaseSource {
 				) ||
 				'';
 
-			const chText = root.find('.chapter a, .list-chapter a, .font-meta a').first().text();
-			const latest = parseChapterNumber(chText, 0);
+			let latest = 0;
+			root.find('a[href*="/chapter-"], .chapter-item a, .list-chapter a, .font-meta a').each(
+				(_, ca) => {
+					const t = $(ca).text() + ' ' + ($(ca).attr('href') || '');
+					const n = parseChapterNumber(t, 0);
+					if (n > latest) latest = n;
+				}
+			);
 			push(id, title, cover, latest || undefined);
 		});
 
@@ -233,7 +244,12 @@ export class BcatranslationSource extends BaseSource {
 				root.find('img').first().attr('data-src') ||
 				root.find('img').first().attr('src') ||
 				'';
-			push(id, title, cover);
+			let latest = 0;
+			root.find('a[href*="/chapter-"]').each((_, ca) => {
+				const n = parseChapterNumber($(ca).text() + ' ' + ($(ca).attr('href') || ''), 0);
+				if (n > latest) latest = n;
+			});
+			push(id, title, cover, latest || undefined);
 		});
 
 		if (list.length < 10) {
@@ -384,6 +400,7 @@ export class BcatranslationSource extends BaseSource {
 			const $ = cheerio.load(ajaxHtml);
 			let maxPage = 1;
 			let added = 0;
+
 			$('ul.main.version-chap li.wp-manga-chapter, li.wp-manga-chapter').each((_, li) => {
 				const $li = $(li);
 				const a = $li.children('a').first().length
@@ -404,6 +421,7 @@ export class BcatranslationSource extends BaseSource {
 				let number = parseChapterNumber(rawTitle, 0);
 				if (number <= 0) number = parseChapterNumber(href, 0);
 				if (number <= 0) return;
+
 				let id = '';
 				if (href && href !== '#' && /\/chapter-/i.test(href)) {
 					const full = pathOnly(href, this.baseUrl);
@@ -442,7 +460,6 @@ export class BcatranslationSource extends BaseSource {
 					if (n > maxPage) maxPage = n;
 				}
 			});
-		
 			$('.pagination .page').each((_, el) => {
 				const t = $(el).text().replace(/[^\d]/g, '');
 				if (t) {
@@ -458,11 +475,14 @@ export class BcatranslationSource extends BaseSource {
 			const first = await this.postAjax(`${this.baseUrl}${base}ajax/chapters/?t=1`);
 			const r1 = parseAjax(first);
 			let maxPage = Math.min(Math.max(r1.maxPage, 1), 60);
+
+			// Fetch remaining pages; stop early after 2 consecutive empty pages
 			let emptyStreak = 0;
 			for (let pg = 2; pg <= maxPage; pg++) {
 				try {
 					const h = await this.postAjax(`${this.baseUrl}${base}ajax/chapters/?t=${pg}`);
 					const r = parseAjax(h);
+					// Pagination on later pages may reveal higher max
 					if (r.maxPage > maxPage) maxPage = Math.min(r.maxPage, 60);
 					if (r.added === 0) {
 						emptyStreak++;
@@ -499,6 +519,7 @@ export class BcatranslationSource extends BaseSource {
 					});
 				});
 			} catch {
+				/* ignore */
 			}
 		}
 
@@ -526,6 +547,8 @@ export class BcatranslationSource extends BaseSource {
 
 		const html = await this.fetchHtml(fetchPath);
 		const $ = cheerio.load(html);
+
+		// Locked / coin wall
 		const bodyText = $('body').text().toLowerCase();
 		const contentProbe = $('.reading-content p, .text-left p').length;
 		if (
