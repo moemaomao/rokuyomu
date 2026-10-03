@@ -38,9 +38,11 @@ import { KaysTLsSource } from '../impl/novel/KaysTLs';
 import { StabbingWithASyringeSource } from '../impl/novel/StabbingWithASyringe';
 import { ZeusTranslationsSource } from '../impl/novel/ZeusTranslations';
 import { DrowsicSource } from '../impl/novel/Drowsic';
+import { MachineSlicedBreadSource } from '../impl/novel/MachineSlicedBread';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	machineslicedbread: new MachineSlicedBreadSource(),
 	drowsic: new DrowsicSource(),
 	zeustranslations: new ZeusTranslationsSource(),
 	stabbingwithasyringe: new StabbingWithASyringeSource(),
