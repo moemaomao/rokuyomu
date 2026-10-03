@@ -55,14 +55,6 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, '&quot;');
 }
 
-/**
- * Parse chapter number from title or path.
- * - hero-mother-12.html → 12
- * - hero-mother-21-5.html → 21.5
- * - arafo-boukensha-v39c53.html → 39053 (vol*1000 + ch)
- * - "Volume 39 Chapter 53 ..." → 39053
- * - "Chapter 357 ..." → 357
- */
 function parseChapterNumber(text: string, fallback = 0): number {
 	const t = (text || '').replace(/\s+/g, ' ').trim();
 
@@ -75,7 +67,14 @@ function parseChapterNumber(text: string, fallback = 0): number {
 		if (!Number.isNaN(vol) && !Number.isNaN(ch)) return vol * 1000 + ch;
 	}
 
-	// path: slug-21-5.html or slug-12.html
+	const pathDec = t.match(/-(\d+)-(\d+)(?:\.html)?$/i);
+	if (pathDec && !/-v\d+c\d+/i.test(t)) {
+		const whole = parseInt(pathDec[1], 10);
+		const frac = parseInt(pathDec[2], 10);
+		if (!Number.isNaN(whole) && !Number.isNaN(frac)) {
+			return whole + frac / Math.pow(10, String(frac).length);
+		}
+	}
 	const pathNum = t.match(/-(\d+(?:\.\d+)?)(?:\.html)?$/i);
 	if (pathNum) {
 		const n = parseFloat(pathNum[1]);
@@ -115,12 +114,10 @@ function shortChapterTitle(number: number, raw?: string): string {
 }
 
 function isSeriesPath(path: string): boolean {
-	// /2022/07/hero-mother  (no trailing chapter number)
 	const clean = path.replace(/\/$/, '');
 	const m = clean.match(/^\/(\d{4})\/(\d{2})\/([a-z0-9\-]+)$/i);
 	if (!m) return false;
 	const slug = m[3];
-	// chapter posts end with -N or -vNcN
 	if (/-\d+(?:\.\d+)?$/i.test(slug)) return false;
 	if (/-v\d+c\d+/i.test(slug)) return false;
 	return true;
@@ -134,7 +131,6 @@ function isChapterPath(path: string): boolean {
 	return /-\d+(?:\.\d+)?$/i.test(slug) || /-v\d+c\d+/i.test(slug);
 }
 
-/** Series base slug from chapter path: /2022/07/hero-mother-12 → hero-mother */
 function seriesSlugFromChapterPath(path: string): string {
 	const clean = path.replace(/\/$/, '').replace(/\.html$/i, '');
 	const parts = clean.split('/').filter(Boolean);
@@ -162,16 +158,11 @@ export class ToastefulSource extends BaseSource {
 
 	// ─── Feed helpers ────────────────────────────────────────────────────
 
-	/**
-	 * Fetch Blogger feed via BaseSource.fetchHtml (fetchWithCf) to avoid
-	 * bare-fetch 403 from Vercel / Cloudflare. Supports alt=json and JSONP.
-	 */
 	private async fetchFeedJson(path: string): Promise<{
 		entries: BlogEntry[];
 		total: number;
 	}> {
 		const tryPaths = [path];
-		// Also try json-in-script (what the site itself uses via JSONP)
 		if (path.includes('alt=json') && !path.includes('json-in-script')) {
 			tryPaths.push(path.replace('alt=json', 'alt=json-in-script') + '&callback=cb');
 		}
@@ -225,16 +216,15 @@ export class ToastefulSource extends BaseSource {
 
 	private parseFeedPayload(text: string): any {
 		const t = (text || '').trim();
-		// Pure JSON
 		if (t.startsWith('{')) {
 			return JSON.parse(t);
 		}
-		// JSONP: cb({...}); or callback({...})
+
 		const m = t.match(/^[a-zA-Z_$][\w$]*\s*\(\s*([\s\S]*)\s*\)\s*;?\s*$/);
 		if (m) {
 			return JSON.parse(m[1]);
 		}
-		// Sometimes HTML error page wrapped — try extract first { ... }
+
 		const start = t.indexOf('{');
 		const end = t.lastIndexOf('}');
 		if (start >= 0 && end > start) {
@@ -243,14 +233,12 @@ export class ToastefulSource extends BaseSource {
 		throw new Error('Unable to parse feed payload');
 	}
 
-	/** Homepage / list-novel HTML fallback when feed is blocked */
 	private async fetchLatestFromHtml(page = 1): Promise<Manga[]> {
 		const html = await this.fetchHtml(page <= 1 ? '/' : `/search?updated-max=&max-results=24&start=${(page - 1) * 24}&by-date=true`);
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
-
-		// 1) Parse fallbackNovels embedded in page script (no eval — regex safe)
+        
 		const scripts = $('script')
 			.map((_, el) => $(el).html() || '')
 			.get()
@@ -281,7 +269,6 @@ export class ToastefulSource extends BaseSource {
 			}
 		}
 
-		// 2) Homepage post titles → map chapter hits to series
 		$('h3.post-title a, .post-title a, h2 a, a[href*="/20"]').each((_, a) => {
 			const href = $(a).attr('href') || '';
 			let p = pathOnly(href, this.baseUrl).replace(/\.html$/i, '');
@@ -319,7 +306,6 @@ export class ToastefulSource extends BaseSource {
 	private entryToManga(e: BlogEntry, statusHint?: string): Manga | null {
 		if (!e.link) return null;
 		const path = pathOnly(e.link, this.baseUrl);
-		// Prefer series pages only for list
 		if (!isSeriesPath(path) && !path.match(/^\/\d{4}\/\d{2}\/[a-z0-9\-]+$/i)) {
 			return null;
 		}
@@ -331,9 +317,17 @@ export class ToastefulSource extends BaseSource {
 		else if (cats.some((c) => /ongoing/i.test(c))) status = 'Ongoing';
 
 		let cover = e.thumbnail || '';
-		if (!cover && e.contentHtml) {
-			const m = e.contentHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
-			if (m) cover = m[1];
+		if (e.contentHtml) {
+			const imgs = [
+				...e.contentHtml.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)
+			].map((m) => m[1]);
+			const good =
+				imgs.find(
+					(s) =>
+						/ibb\.co|blogger|bp\.blogspot|googleusercontent|imgur/i.test(s) &&
+						!/icon|logo|pixel|1x1/i.test(s)
+				) || imgs.find((s) => !/icon|logo|follow\.it|pixel/i.test(s));
+			if (good) cover = good;
 		}
 
 		return {
@@ -412,8 +406,6 @@ export class ToastefulSource extends BaseSource {
 			for (const e of entries) {
 				const cats = e.categories || [];
 				const path = pathOnly(e.link, this.baseUrl);
-
-				// Prefer series (Web Novel label or series path)
 				const isSeries =
 					cats.some((c) => /^web novel$/i.test(c)) || isSeriesPath(path.replace(/\.html$/i, ''));
 
@@ -426,10 +418,8 @@ export class ToastefulSource extends BaseSource {
 					continue;
 				}
 
-				// Chapter hit → map to series page via slug
 				if (isChapterPath(path.replace(/\.html$/i, ''))) {
 					const slug = seriesSlugFromChapterPath(path);
-					// Find series year/month from first path segments — use search for series
 					const seriesGuess = path
 						.replace(/\.html$/i, '')
 						.replace(/-v\d+c\d+(?:\.\d+)?$/i, '')
@@ -452,7 +442,6 @@ export class ToastefulSource extends BaseSource {
 				}
 			}
 
-			// Fallback HTML search if feed thin
 			if (list.length < 2) {
 				const htmlPath =
 					page <= 1
@@ -498,7 +487,6 @@ export class ToastefulSource extends BaseSource {
 
 	async getNovelDetails(novelId: string): Promise<MangaDetails> {
 		let path = pathOnly(novelId, this.baseUrl).replace(/\.html$/i, '');
-		// If chapter id was passed, strip to series
 		if (isChapterPath(path)) {
 			path = path.replace(/-v\d+c\d+(?:\.\d+)?$/i, '').replace(/-\d+(?:\.\d+)?$/i, '');
 		}
@@ -521,17 +509,27 @@ export class ToastefulSource extends BaseSource {
 			path.split('/').pop()?.replace(/-/g, ' ') ||
 			'';
 
-		let cover =
+		const body = $('#post-body, .post-body.entry-content[itemprop], .post-body.entry-content, .post-body').first();
+		const bodyHtml = body.html() || '';
+
+		let cover = '';
+		const coverCandidates: string[] = [];
+		body.find('img').each((_, img) => {
+			const src = $(img).attr('src') || $(img).attr('data-src') || '';
+			if (!src) return;
+			if (/follow\.it|icon|logo|avatar|button|badge|1x1|pixel/i.test(src)) return;
+			coverCandidates.push(src);
+		});
+		cover =
+			coverCandidates.find((s) => /ibb\.co|blogger|bp\.blogspot|googleusercontent|imgur|webp|png|jpg/i.test(s)) ||
+			coverCandidates[0] ||
 			$('meta[property="og:image"]').attr('content') ||
-			$('.post-body img, .entry-content img, #post-body img').first().attr('src') ||
-			$('a[href*="ibb.co"] img, a[href*="blogspot"] img').first().attr('src') ||
 			'';
 		cover = absUrl(this.baseUrl, (cover || '').split('?')[0]);
 
-		// Labels / genres
 		const genres: string[] = [];
 		let status = 'Ongoing';
-		$('.post-labels a, a[href*="/search/label/"]').each((_, a) => {
+		body.find('a[href*="/search/label/"]').each((_, a) => {
 			const g = $(a).text().replace(/\s+/g, ' ').trim();
 			if (!g) return;
 			if (/^completed$/i.test(g)) status = 'Completed';
@@ -542,72 +540,106 @@ export class ToastefulSource extends BaseSource {
 			}
 		});
 
-		// Synopsis
+		const genreLine = bodyHtml.match(/Genre\s*:\s*([\s\S]*?)(?:<a\s+name=["']more["']|Description\s*:|Other name|$)/i);
+		if (genreLine) {
+			const extra = cheerio.load(`<div>${genreLine[1]}</div>`)('div').text();
+			extra.split(/[,|]/).forEach((g) => {
+				const t = g.replace(/\s+/g, ' ').trim();
+				if (t && t.length < 40 && !BLACKLIST_LABELS.has(t) && !genres.includes(t)) {
+					genres.push(t);
+				}
+			});
+		}
+
 		let description = '';
-		const body = $('#post-body, .post-body.entry-content, .post-body').first();
-		const bodyHtml = body.html() || '';
-		const synMatch = bodyHtml.match(
-			/Synopsis\s*:?\s*<\/?(?:b|strong|span)[^>]*>\s*([\s\S]*?)(?=<b>|<strong>|Chapter\s*List|Table\s*of|All\s*Chapter|<h[1-3])/i
+		let metaHtml = bodyHtml;
+		const tocCut = metaHtml.search(
+			/<b[^>]*>\s*Chapter\s*:?\s*<\/b>|<div[^>]*>\s*<b[^>]*>\s*Chapter\s*:?\s*<\/b>|<!--Paste code|<b[^>]*>\s*<u>\s*Volume\s+\d+/i
 		);
-		if (synMatch) {
+		if (tocCut > 0) metaHtml = metaHtml.slice(0, tocCut);
+
+		const descMatch = metaHtml.match(
+			/Description\s*:\s*<\/p>\s*([\s\S]*)/i
+		) || metaHtml.match(
+			/Description\s*:\s*([\s\S]*)/i
+		) || metaHtml.match(
+			/Synopsis\s*:\s*([\s\S]*)/i
+		);
+		if (descMatch) {
 			description = cheerio
-				.load(`<div>${synMatch[1]}</div>`)('div')
+				.load(`<div>${descMatch[1]}</div>`)('div')
 				.text()
 				.replace(/\s+/g, ' ')
 				.trim();
 		}
-		if (!description) {
-			const paras = body
-				.find('div, p, span')
-				.map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+		if (!description || description.length < 40) {
+			const $meta = cheerio.load(`<div id="x">${metaHtml}</div>`);
+			const paras = $meta('#x > p, #x p')
+				.map((_, el) => $meta(el).text().replace(/\s+/g, ' ').trim())
 				.get()
 				.filter(
 					(t) =>
-						t.length > 60 &&
+						t.length > 40 &&
+						!/^genre\s*:/i.test(t) &&
+						!/^other name\s*:/i.test(t) &&
+						!/^raw source/i.test(t) &&
 						!/^chapter\s*\d/i.test(t) &&
-						!/^notice:/i.test(t) &&
+						!/^volume\s*\d/i.test(t) &&
 						!/enable javascript/i.test(t)
 				);
-			description = paras.slice(0, 6).join('\n\n');
+			description = paras.slice(0, 8).join('\n\n');
 		}
 
-		// Author (rare)
+		if (description.length > 3000) description = description.slice(0, 3000).trim() + '…';
+
 		const authors: string[] = [];
-		const authorMatch = (body.text() || '').match(/Author\s*[:：]\s*([^\n\r<]+)/i);
+		const authorMatch = metaHtml.match(/Author\s*[:：]\s*([^<\n\r]+)/i);
 		if (authorMatch) {
 			const name = authorMatch[1].replace(/\s+/g, ' ').trim().slice(0, 80);
 			if (name) authors.push(name);
 		}
 
-		// Alt title (JP link / text)
 		let altTitle = '';
-		body.find('a').each((_, a) => {
-			const t = $(a).text().replace(/\s+/g, ' ').trim();
-			const href = $(a).attr('href') || '';
-			if (
-				/[\u3040-\u30ff\u3400-\u9fff]/.test(t) &&
-				(href.includes('kakuyomu') || href.includes('syosetu') || href.includes('ncode'))
-			) {
-				altTitle = t;
-				return false;
-			}
-		});
+		const otherName = metaHtml.match(/Other name\s*:\s*([^<]+)/i);
+		if (otherName) {
+			altTitle = otherName[1].replace(/\s+/g, ' ').trim();
+		}
+		if (!altTitle) {
+			body.find('a').each((_, a) => {
+				const t = $(a).text().replace(/\s+/g, ' ').trim();
+				const href = $(a).attr('href') || '';
+				if (
+					/[\u3040-\u30ff\u3400-\u9fff]/.test(t) &&
+					(href.includes('kakuyomu') || href.includes('syosetu') || href.includes('ncode'))
+				) {
+					altTitle = t;
+					return false;
+				}
+			});
+		}
 
-		// Chapters from TOC links on series page
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
-		const seriesSlug = path.split('/').pop() || '';
+		const seriesSlug = (path.split('/').pop() || '').replace(/\.html$/i, '');
 
-		$('a[href]').each((_, a) => {
-			const href = $(a).attr('href') || '';
+		const linkScope = body.length ? body : $('body');
+		linkScope.find('a[href]').each((_, a) => {
+			const href = ($(a).attr('href') || '').trim();
+			if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
 			let full = pathOnly(href, this.baseUrl).replace(/\.html$/i, '');
+			if (!full.startsWith('/')) full = `/${full}`;
+
 			if (!isChapterPath(full)) return;
 
-			// Same series slug
 			const chSlug = seriesSlugFromChapterPath(full);
-			if (chSlug !== seriesSlug && !full.includes(`/${seriesSlug}-`)) return;
+			const sameSeries =
+				chSlug === seriesSlug ||
+				full.includes(`/${seriesSlug}-`) ||
+				full.includes(`/${seriesSlug}/`);
+			if (!sameSeries) return;
 
-			const id = full.startsWith('/') ? full : `/${full}`;
+			const id = full;
 			if (seen.has(id)) return;
 			seen.add(id);
 
@@ -616,7 +648,11 @@ export class ToastefulSource extends BaseSource {
 			if (number <= 0) number = parseChapterNumber(rawTitle, 0);
 			if (number <= 0) number = chapters.length + 1;
 
-			const parentHtml = (($(a).parent().html() || '') + ($(a).attr('class') || '')).toLowerCase();
+			const parentHtml = (
+				($(a).parent().html() || '') +
+				' ' +
+				($(a).attr('class') || '')
+			).toLowerCase();
 			const isLocked =
 				/\block\b|password|premium|patreon|ko-fi exclusive|members.?only|🔒/i.test(
 					parentHtml + ' ' + rawTitle
@@ -630,19 +666,25 @@ export class ToastefulSource extends BaseSource {
 			});
 		});
 
-		// Sort ascending then reverse (newest first)
 		chapters.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
 		const nums = chapters.map((c) => c.number);
-		if (nums.length !== new Set(nums).size) {
+		if (nums.length && nums.length !== new Set(nums).size) {
 			chapters.forEach((c, i) => {
-				c.number = i + 1;
-				c.title = `Chapter ${i + 1}`;
+				if (chapters.filter((x) => x.number === c.number).length > 1) {
+				}
 			});
+			const dupCount = nums.length - new Set(nums).size;
+			if (dupCount > chapters.length * 0.3) {
+				chapters.forEach((c, i) => {
+					c.number = i + 1;
+					c.title = `Chapter ${i + 1}`;
+				});
+			}
 		}
 		chapters.reverse();
 
 		console.log(
-			`[toasteful] details ${path} → ${chapters.length} chapters (${chapters.filter((c) => c.isLocked).length} locked)`
+			`[toasteful] details ${path} → ${chapters.length} chapters, cover=${cover ? 'yes' : 'no'}, desc=${description.length}c`
 		);
 
 		const details: MangaDetails & { altTitles?: string[] } = {
@@ -657,7 +699,11 @@ export class ToastefulSource extends BaseSource {
 			chapters,
 			type: 'novel',
 			lang: 'en',
-			latestChapter: chapters[0]?.number
+			latestChapter: chapters[0]
+				? chapters[0].number >= 1000
+					? chapters[0].number % 1000 || chapters[0].number
+					: chapters[0].number
+				: undefined
 		};
 		if (altTitle) details.altTitles = [altTitle];
 
@@ -731,8 +777,6 @@ export class ToastefulSource extends BaseSource {
 			}
 		}
 
-		// ── Prev / Next ──
-		// Prefer static .ChapterNav links (only if href is non-empty)
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
@@ -756,13 +800,11 @@ export class ToastefulSource extends BaseSource {
 			nextChapterId = full.startsWith('/') ? full : `/${full}`;
 		});
 
-		// Pattern fallback when site leaves href empty (JS fills them)
 		if ((!prevChapterId || !nextChapterId) && number > 0) {
 			const m = path.match(/^(\/\d{4}\/\d{2}\/.+?)(?:-v(\d+)c(\d+(?:\.\d+)?)|-(\d+(?:\.\d+)?))$/i);
 			if (m) {
 				const base = m[1];
 				if (m[2] != null) {
-					// volume-chapter pattern
 					const vol = parseInt(m[2], 10);
 					const ch = parseFloat(m[3]);
 					if (!nextChapterId) {
