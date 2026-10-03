@@ -135,24 +135,35 @@ function isChapterPath(href: string): boolean {
 }
 
 function pickImgSrc(img: cheerio.Cheerio<any>): string {
+	const srcset =
+		img.attr('data-srcset') ||
+		img.attr('srcset') ||
+		'';
+	const fromSrcset = srcset
+		.split(',')
+		.map((s) => s.trim().split(/\s+/)[0])
+		.filter(Boolean);
+
 	const candidates = [
 		img.attr('data-src'),
 		img.attr('data-lazy-src'),
 		img.attr('data-bg'),
 		img.attr('data-orig-file'),
-		...(img.attr('srcset') || '')
-			.split(',')
-			.map((s) => s.trim().split(/\s+/)[0])
-			.filter(Boolean),
+		...fromSrcset,
 		img.attr('src')
-	].filter((s): s is string => !!s && !s.startsWith('data:'));
+	].filter((s): s is string => !!s && !s.startsWith('data:') && !s.startsWith('#'));
 
-	const full = candidates.find((s) => /\/cover\.\w+$/i.test(s) || !/\-\d+x\d+\./.test(s));
-	const src = full || candidates[0] || '';
+	const full = candidates.find((s) => /\/uploads\/.+\.(jpg|jpeg|png|webp)$/i.test(s) && !/\-\d+x\d+\./.test(s));
+	const src = full || candidates[candidates.length - 1] || candidates[0] || '';
 	return absUrl((src || '').split('?')[0]);
 }
 
 function imgFromEl($: cheerio.CheerioAPI, el: cheerio.Cheerio<any>): string {
+	const imageLink = el.find('a.card__image, a[data-lightbox]').first().attr('href') || '';
+	if (imageLink && /\.(jpg|jpeg|png|webp)(\?|$)/i.test(imageLink)) {
+		return absUrl(imageLink.split('?')[0]);
+	}
+
 	const imgs = el.find('img');
 	for (let i = 0; i < imgs.length; i++) {
 		const src = pickImgSrc(imgs.eq(i));
@@ -314,7 +325,8 @@ export class DrowsicSource extends BaseSource {
 			if (!title || title.length < 2) return;
 			if (/^(home|projects|bookmarks|faq|dmca|read more)$/i.test(title)) return;
 
-			const cover = imgFromEl($, box);
+			const cardRoot = a.closest('.card').length ? a.closest('.card') : box;
+			const cover = imgFromEl($, cardRoot);
 
 			const statusText =
 				box.find('.card__footer-status, .story__status').text() || box.text();
@@ -326,15 +338,13 @@ export class DrowsicSource extends BaseSource {
 
 			let latestChapter: number | undefined;
 			const chFooter = cleanText(
-				box.find('.card__footer-chapters, [class*="footer-chapters"]').text()
+				box.find('.card__footer-chapters').first().text() ||
+					box.find('[class*="footer-chapters"]').first().text()
 			);
-			const chMatch =
-				chFooter.match(/(\d+)/) ||
-				statusText.match(/(\d+)\s*chapters?/i) ||
-				statusText.match(/ch(?:apter)?\.?\s*(\d+)/i);
+			const chMatch = chFooter.match(/(\d{1,5})/);
 			if (chMatch) {
 				const n = parseInt(chMatch[1], 10);
-				if (n > 0 && n < 100000) latestChapter = n;
+				if (n > 0) latestChapter = n;
 			}
 
 			seen.add(id);
@@ -398,11 +408,13 @@ export class DrowsicSource extends BaseSource {
 			cleanText($('meta[property="og:description"]').attr('content') || '') ||
 			cleanText($('.story__summary, .content-section').first().text());
 
+		// Authors
 		const authors: string[] = [];
 		$('.story__author a, a[href*="/author/"], .chapter__author a').each((_, a) => {
 			const n = cleanText($(a).text());
 			if (n && n.length < 60 && !authors.includes(n)) authors.push(n);
 		});
+	
 		if (!authors.length) {
 			const m = html.match(/dc:creator[^>]*>([^<]+)/i);
 		}
@@ -429,7 +441,6 @@ export class DrowsicSource extends BaseSource {
 
 		const chapters = this.parseChapterList($, pathOnly(path));
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
-
 		const latestChapter = chapters.length > 0 ? chapters.length : undefined;
 
 		return {
