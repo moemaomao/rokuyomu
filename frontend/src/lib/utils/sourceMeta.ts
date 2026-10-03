@@ -147,7 +147,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	wetriedtls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	kaystls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	stabbingwithasyringe: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
-	zeustranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
+	zeustranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
+	drowsic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {
