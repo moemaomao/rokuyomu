@@ -69,10 +69,6 @@
 		{ id: 'misc', name: 'Miscellaneous', icon: '📦' }
 	] as const;
 
-	/**
-	 * Types for novel mode — only JP / CN / KR style novels
-	 * (novel jepang, china, korea) as requested.
-	 */
 	const NOVEL_TYPES = [
 		{ id: 'all', name: 'All Types', icon: '✨' },
 		{ id: 'japanese', name: 'Novel Jepang', icon: 'jp' },
@@ -87,6 +83,7 @@
 
 	// ── State ────────────────────────────────────────────────────────────────
 	let searchInput = $state('');
+	let sourceSearch = $state('');
 	let activeDropdown = $state<'kind' | 'source' | 'lang' | 'type' | null>(null);
 	let sourceListEl = $state<HTMLDivElement | null>(null);
 	let sourceScrollTop = $state(0);
@@ -94,19 +91,16 @@
 	let showAgeGate = $state(false);
 	let pendingSourceId = $state<string | null>(null);
 
-	/** Content kind: comic | novel — from URL ?kind= or inferred from current source */
 	function readKindFromUrl(): ContentKind {
 		const k = ($page.url.searchParams.get('kind') || '').toLowerCase();
 		if (k === 'novel') return 'novel';
 		if (k === 'comic') return 'comic';
-		// Infer from selected source
 		if (currentSource && isNovelSource(currentSource)) return 'novel';
 		return 'comic';
 	}
 
 	let selectedKind = $state<ContentKind>(readKindFromUrl());
 
-	// Sync kind when URL / source changes
 	$effect(() => {
 		const fromUrl = readKindFromUrl();
 		if (fromUrl !== selectedKind) selectedKind = fromUrl;
@@ -115,7 +109,6 @@
 	// ── Derived ──────────────────────────────────────────────────────────────
 	let isMultiMode = $derived(!currentSource);
 
-	/** Filter sources by content kind */
 	let filteredSources = $derived(
 		sources.filter((s) => {
 			const isNovel = isNovelSource(s.id);
@@ -123,7 +116,15 @@
 		})
 	);
 
-	let groupedSources = $derived(groupSourcesByLang(filteredSources));
+	let matchingSources = $derived.by(() => {
+		const query = sourceSearch.trim().toLowerCase();
+		if (!query) return filteredSources;
+		return filteredSources.filter((source) => {
+			const meta = getSourceMeta(source.id);
+			return `${source.name} ${source.id} ${meta.lang}`.toLowerCase().includes(query);
+		});
+	});
+	let groupedSources = $derived(groupSourcesByLang(matchingSources));
 
 	let TYPES = $derived(selectedKind === 'novel' ? NOVEL_TYPES : COMIC_TYPES);
 
@@ -171,7 +172,10 @@
 		if (activeDropdown === 'source') saveSourceScroll();
 		const next = activeDropdown === type ? null : type;
 		activeDropdown = next;
-		if (next === 'source') restoreSourceScroll();
+		if (next === 'source') {
+			sourceSearch = '';
+			restoreSourceScroll();
+		}
 	}
 
 	function closeDropdown() {
@@ -207,9 +211,7 @@
 		const params = new URLSearchParams();
 
 		const kind = overrides.kind ?? selectedKind;
-		// Always persist kind so filter stays after navigation
 		if (kind && kind !== 'comic') params.set('kind', kind);
-		// comic = default, omit to keep URL clean; still accepted if present
 
 		const source = overrides.source ?? (isMultiMode ? '' : currentSource);
 		if (source) params.set('source', source);
@@ -392,7 +394,6 @@
 	class="relative z-30 mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3"
 	use:clickOutside
 >
-	<!-- KIND: Comic | Novel (di depan source list) -->
 	<div class="relative">
 		<button
 			type="button"
@@ -482,6 +483,22 @@
 			<div
 				class="dropdown-menu absolute left-0 top-full z-[200] mt-2 w-[280px] overflow-hidden rounded-2xl border shadow-2xl"
 			>
+				<div class="border-b border-zinc-600/40 p-2">
+					<label class="sr-only" for="source-search">Search source</label>
+					<div class="relative">
+						<Search
+							class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 opacity-50"
+						/>
+						<input
+							id="source-search"
+							type="search"
+							bind:value={sourceSearch}
+							placeholder="Search source..."
+							autocomplete="off"
+							class="filter-btn w-full rounded-xl border py-2 pr-3 pl-9 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+						/>
+					</div>
+				</div>
 				<div
 					bind:this={sourceListEl}
 					onscroll={() => {
@@ -511,11 +528,13 @@
 
 					<div class="my-1.5 border-t border-zinc-600/40"></div>
 
-					{#if filteredSources.length === 0}
+					{#if matchingSources.length === 0}
 						<p class="px-3 py-4 text-center text-xs opacity-60">
-							{selectedKind === 'novel'
-								? 'Belum ada source novel terdaftar.'
-								: 'Tidak ada source comic.'}
+							{filteredSources.length === 0
+								? selectedKind === 'novel'
+									? 'Belum ada source novel terdaftar.'
+									: 'Tidak ada source comic.'
+								: 'Source tidak ditemukan.'}
 						</p>
 					{:else}
 						{#each Object.entries(groupedSources) as [langKey, items]}
