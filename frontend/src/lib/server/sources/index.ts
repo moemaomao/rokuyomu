@@ -150,6 +150,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'drowsic', name: 'Drowsic' },
 	{ id: 'machineslicedbread', name: 'Machine Sliced Bread' },
 	{ id: 'transweaver', name: 'Transweaver' },
+	{ id: 'dasuitl', name: 'Dasui TL' }
 ];
 
 export function getSourceList(): SourceMeta[] {

@@ -7,14 +7,6 @@
  *   Series   : /series/{slug}/
  *   Chapter  : /{dd}/{mm}/{yyyy}/{id}/{slug}/
  *   Search   : /?s={q}
- *
- * Features:
- *   - Homepage / latest returns up to 24 titles
- *   - Full metadata: author, artist, alt/native title, release year, type, status, genres
- *   - Clean chapter list (Chapter N only — no long site titles)
- *   - isLocked=true when chapter title has 🔒 / lock (paywall)
- *   - Pagination on archive & search
- *   - Chapter content with prev/next
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -54,7 +46,6 @@ function cleanText(s: string): string {
 		.trim();
 }
 
-/** Sort key only — Side/Epilogue/Extra ranked after main chapters for newest-first lists. */
 function parseChapterNumber(text: string, fallback = 0): number {
 	const t = cleanText(text);
 	if (!t) return fallback;
@@ -82,10 +73,6 @@ function parseChapterNumber(text: string, fallback = 0): number {
 	return fallback;
 }
 
-/**
- * Label for homepage badge (UI shows "Ch. {latestChapter}").
- * Returns plain number for normal chapters, or "Side 15" / "Epilogue" for special ones.
- */
 function extractLatestLabel(text: string): string | number | undefined {
 	const t = cleanText(text);
 	if (!t) return undefined;
@@ -113,7 +100,6 @@ function extractLatestLabel(text: string): string | number | undefined {
 	return undefined;
 }
 
-/** Clean display title for chapter list — never the long site title. */
 function shortChapterTitle(...texts: string[]): string {
 	const t = cleanText(texts.filter(Boolean).join(' '));
 	if (!t) return 'Chapter';
@@ -201,7 +187,6 @@ export class TransweaverSource extends BaseSource {
 			const seen = new Set(fromHome.map((m) => m.id));
 			const merged = [...fromHome];
 
-			// Always pad to 24 titles from series archive
 			for (let p = 1; merged.length < PER_PAGE && p <= 3; p++) {
 				const fromArchive = await this.parseSeriesArchive(p).catch(() => [] as Manga[]);
 				for (const item of fromArchive) {
@@ -324,7 +309,6 @@ export class TransweaverSource extends BaseSource {
 
 				if (list.length) return list.slice(0, PER_PAGE);
 			} catch {
-				/* try next path */
 			}
 		}
 		return [];
@@ -509,7 +493,6 @@ export class TransweaverSource extends BaseSource {
 			}
 		});
 
-		// Status badge near title
 		const badge = cleanText(
 			$('span.Ongoing, span.Completed, span.Hiatus, span.Dropped, .status').first().text()
 		);
@@ -517,18 +500,14 @@ export class TransweaverSource extends BaseSource {
 			status = normalizeStatus(badge);
 		}
 
-		// Genres from genxed / genre links
 		$('.genxed a, a[href*="/genre/"]').each((_, a) => {
 			const g = cleanText($(a).text());
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
 
-		// Artists appended into authors metadata note via description footer if needed —
-		// MangaDetails has authors[] only; include artists in authors list when no separate field.
 		if (artists.length) {
 			for (const a of artists) {
 				if (!authors.includes(a)) {
-					// keep authors pure; artists go into genres-like metadata via description note
 				}
 			}
 		}
@@ -536,7 +515,6 @@ export class TransweaverSource extends BaseSource {
 		const chapters = this.parseChapterList($);
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 
-		// Enrich description with extra meta so UI can show alt/artist/release
 		const metaBits: string[] = [];
 		if (altTitle && altTitle !== title) metaBits.push(`Alt / Native: ${altTitle}`);
 		if (artists.length) metaBits.push(`Artist: ${artists.join(', ')}`);
@@ -578,7 +556,6 @@ export class TransweaverSource extends BaseSource {
 			const a = $(li).find('a').first();
 			const href = a.attr('href') || '';
 			if (!href) return;
-			// skip pure series links
 			if (/\/series\/[^/]+\/?$/.test(pathOnly(href))) return;
 
 			const id = pathOnly(href);
@@ -595,8 +572,6 @@ export class TransweaverSource extends BaseSource {
 			}
 			seen.add(id);
 
-			// Prefer titleText for Side/Epilogue detection — site often puts
-			// "Ch. 12" in epl-num while epl-title says "ACTSV Side 12".
 			const num = parseChapterNumber(titleText || numText || rawFallback, i + 1);
 			const locked = isLockedText(titleText, rawFallback, numText, $(li).html() || '');
 
@@ -658,7 +633,6 @@ export class TransweaverSource extends BaseSource {
 			)
 			.remove();
 
-		// Build HTML paragraphs so the novel reader renders proper spacing
 		const paragraphs = root
 			.find('p')
 			.map((_, p) => {
@@ -717,10 +691,8 @@ export class TransweaverSource extends BaseSource {
 
 		let content = '';
 		if (paragraphs.length) {
-			// HTML <p> tags → proper paragraph spacing in novel reader
 			content = paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n');
 		} else {
-			// Fallback: keep structure from raw HTML if possible
 			const rawHtml = root.html() || '';
 			if (/<p[\s>]/i.test(rawHtml)) {
 				content = rawHtml
