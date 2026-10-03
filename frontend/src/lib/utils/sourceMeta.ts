@@ -151,7 +151,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	drowsic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	machineslicedbread: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-blue-500' },
 	transweaver: { flag: 'gb', lang: 'EN', isBL: true, isR18: true, color: 'bg-emerald-500' },
-	dasuitl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
+	dasuitl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
+	melreads: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' }
 };
 
 export const DEFAULT_META: SourceMeta = {
