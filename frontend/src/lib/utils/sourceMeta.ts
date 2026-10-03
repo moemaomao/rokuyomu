@@ -157,6 +157,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	toasteful: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-blue-500' },
 	novelib: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-500' },
 	hostednovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-500' },
+	bcatranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-orange-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

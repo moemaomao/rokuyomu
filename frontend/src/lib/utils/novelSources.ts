@@ -47,6 +47,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'toasteful',
 	'novelib',
 	'hostednovel',
+	'bcatranslation',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

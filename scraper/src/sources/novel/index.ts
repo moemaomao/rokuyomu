@@ -46,9 +46,11 @@ import { MainichiTLSource } from '../impl/novel/MainichiTL';
 import { ToastefulSource } from '../impl/novel/Toasteful';
 import { NovelibSource } from '../impl/novel/Novelib';
 import { HostedNovelSource } from '../impl/novel/HostedNovel';
+import { BcatranslationSource } from '../impl/novel/Bcatranslation';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	bcatranslation: new BcatranslationSource(),
 	hostednovel: new HostedNovelSource(),
 	novelib: new NovelibSource(),
 	toasteful: new ToastefulSource(),
