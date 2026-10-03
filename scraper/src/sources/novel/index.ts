@@ -42,9 +42,11 @@ import { MachineSlicedBreadSource } from '../impl/novel/MachineSlicedBread';
 import { TransweaverSource } from '../impl/novel/Transweaver';
 import { DasuiTLSource } from '../impl/novel/DasuiTL';
 import { MelreadsSource } from '../impl/novel/Melreads';
+import { MainichiTLSource } from '../impl/novel/MainichiTL';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	mainichitl: new MainichiTLSource(),
 	melreads: new MelreadsSource(),
 	dasuitl: new DasuiTLSource(),
 	transweaver: new TransweaverSource(),
