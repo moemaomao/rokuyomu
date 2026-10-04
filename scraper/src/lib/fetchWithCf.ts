@@ -1,19 +1,13 @@
-import { getCfSession, setCfSession, clearCfSession } from './cfCookieJar';
+import {
+	getCfSession,
+	setCfSession,
+	clearCfSession,
+	applyCfSessionHeaders
+} from './cfCookieJar';
 import { isByparrEnabled, solveWithByparr } from './byparr';
-const CF_MARKERS = [
-	'just a moment...',
-	'cf-browser-verification',
-	'verify you are human',
-	'checking your browser',
-	'enable javascript and cookies to continue',
-	'cf-chl-captcha',
-	'cf-challenge',
-	'challenge-platform',
-	'attention required'
-];
 
 export function isCloudflareChallenge(status: number, html: string): boolean {
-	const lower = html.slice(0, 15000).toLowerCase(); // cek bagian awal saja
+	const lower = html.slice(0, 15000).toLowerCase();
 
 	if (
 		lower.includes('just a moment...') ||
@@ -27,7 +21,9 @@ export function isCloudflareChallenge(status: number, html: string): boolean {
 
 	if (
 		lower.includes('challenge-platform') &&
-		(lower.includes('just a moment') || lower.includes('turnstile') || lower.includes('_cf_chl'))
+		(lower.includes('just a moment') ||
+			lower.includes('turnstile') ||
+			lower.includes('_cf_chl'))
 	) {
 		return true;
 	}
@@ -54,11 +50,10 @@ export async function fetchWithCf(
 		...opts.headers
 	};
 
-	const session = getCfSession(url);
-	const headers: Record<string, string> = { ...baseHeaders };
-	if (session) {
-		headers['Cookie'] = session.cookieHeader;
-		headers['User-Agent'] = session.userAgent;
+	const headers = applyCfSessionHeaders(url, baseHeaders);
+	const reused = Boolean(getCfSession(url));
+	if (reused) {
+		console.log(`[cf] reuse cookie ${safeHost(url)}`);
 	}
 
 	const res = await fetch(url, { headers, redirect: 'follow' });
@@ -71,14 +66,14 @@ export async function fetchWithCf(
 		return html;
 	}
 
+	console.warn(`[cf] challenge detected → byparr: ${url}`);
+	clearCfSession(url);
+
 	if (!isByparrEnabled()) {
 		throw new Error(
 			`Cloudflare challenge on ${url} (Byparr disabled; set BYPARR_URL)`
 		);
 	}
-
-	console.warn(`[cf] challenge detected → Byparr: ${url}`);
-	clearCfSession(url);
 
 	const solved = await solveWithByparr(url);
 	if (!solved.cookieHeader) {
@@ -87,15 +82,21 @@ export async function fetchWithCf(
 
 	setCfSession(url, solved.cookieHeader, solved.userAgent);
 
-	if (opts.preferSolverBody !== false && solved.html && !isCloudflareChallenge(200, solved.html)) {
+	if (
+		opts.preferSolverBody !== false &&
+		solved.html &&
+		!isCloudflareChallenge(200, solved.html)
+	) {
+		console.log(`[cf] using solver body ${safeHost(url)} len=${solved.html.length}`);
 		return solved.html;
 	}
 
-	const retryHeaders: Record<string, string> = {
+	const retryHeaders = applyCfSessionHeaders(url, {
 		...baseHeaders,
 		Cookie: solved.cookieHeader,
 		'User-Agent': solved.userAgent
-	};
+	});
+
 	const retry = await fetch(url, { headers: retryHeaders, redirect: 'follow' });
 	const retryHtml = await retry.text();
 
@@ -106,5 +107,15 @@ export async function fetchWithCf(
 	if (!retry.ok) {
 		throw new Error(`Failed to fetch ${url} after CF solve: ${retry.status}`);
 	}
+
+	console.log(`[cf] ok after solve ${safeHost(url)} status=${retry.status}`);
 	return retryHtml;
+}
+
+function safeHost(url: string): string {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return url;
+	}
 }
