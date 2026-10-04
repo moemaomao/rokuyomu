@@ -55,8 +55,10 @@ import { AkkNovelSource } from '../impl/novel/AkkNovel';
 import { NhvNovelsSource } from '../impl/novel/NhvNovels';
 import { ZkyTLSource } from '../impl/novel/ZkyTL';
 import { OssanTLSource } from '../impl/novel/OssanTL';
+import { StarlitTalesSource } from '../impl/novel/StarlitTales';
 
 const novelSources: Record<string, IMangaSource> = {
+	starlittales: new StarlitTalesSource(),
 	ossantl: new OssanTLSource(),
 	zkytl: new ZkyTLSource(),
 	akknovel: new AkkNovelSource(),
