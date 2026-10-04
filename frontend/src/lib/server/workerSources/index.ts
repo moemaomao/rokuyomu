@@ -17,6 +17,7 @@ import type { IMangaSource } from './types-manga';
 
 export const WORKER_SOURCE_IDS = new Set([
 	'ainzscans',
+	'akknovel',
 	'areakomik',
 	'athreascans',
 	'bacakomik',
@@ -46,6 +47,7 @@ export const WORKER_SOURCE_IDS = new Set([
 	'manhwaindo',
 	'meionovel',
 	'ngomik',
+	'nhvnovels',
 	'nomadtranslations',
 	'novelib',
 	'novelshaven',
@@ -74,6 +76,7 @@ const instanceCache = new Map<string, IMangaSource>();
 
 const loaders: Record<string, () => Promise<IMangaSource>> = {
 	ainzscans: async () => new (await import('./impl/AinzScans')).AinzScansSource(),
+	akknovel: async () => new (await import('./impl/AkkNovel')).AkkNovelSource(),
 	areakomik: async () => new (await import('./impl/Areakomik')).AreakomikSource(),
 	athreascans: async () => new (await import('./impl/AthreaScans')).AthreaScansSource(),
 	bacakomik: async () => new (await import('./impl/Bacakomik')).BacaKomikSource(),
@@ -103,6 +106,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	manhwaindo: async () => new (await import('./impl/ManhwaIndo')).ManhwaIndoSource(),
 	meionovel: async () => new (await import('./impl/Meionovel')).MeionovelSource(),
 	ngomik: async () => new (await import('./impl/Ngomik')).NgomikSource(),
+	nhvnovels: async () => new (await import('./impl/NhvNovels')).NhvNovelsSource(),
 	nomadtranslations: async () => new (await import('./impl/NomadTranslations')).NomadTranslationsSource(),
 	novelib: async () => new (await import('./impl/Novelib')).NovelibSource(),
 	novelshaven: async () => new (await import('./impl/NovelsHaven')).NovelsHavenSource(),
