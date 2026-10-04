@@ -159,6 +159,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	hostednovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-500' },
 	bcatranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-orange-500' },
 	duskblossoms: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-500' },
+	wordexcerpt: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-violet-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

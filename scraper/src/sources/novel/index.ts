@@ -48,9 +48,11 @@ import { NovelibSource } from '../impl/novel/Novelib';
 import { HostedNovelSource } from '../impl/novel/HostedNovel';
 import { BcatranslationSource } from '../impl/novel/Bcatranslation';
 import { DuskBlossomsSource } from '../impl/novel/DuskBlossoms';
+import { WordExcerptSource } from '../impl/novel/WordExcerpt';
 import type { IMangaSource } from '../types-manga';
 
 const novelSources: Record<string, IMangaSource> = {
+	wordexcerpt: new WordExcerptSource(),
 	duskblossoms: new DuskBlossomsSource(),
 	bcatranslation: new BcatranslationSource(),
 	hostednovel: new HostedNovelSource(),

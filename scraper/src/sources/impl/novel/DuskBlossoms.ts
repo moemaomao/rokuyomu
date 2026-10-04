@@ -618,7 +618,7 @@ export class DuskBlossomsSource extends BaseSource {
 			return {
 				title: 'Locked Chapter',
 				content:
-					'<p><em>Chapter ini terkunci (paywall / unlock timer). Buka di situs untuk membaca.</em></p>',
+					'<p><em>This chapter is locked (paywall / unlock timer). Read it on the website.</em></p>',
 				prevChapterId: null,
 				nextChapterId: null
 			};
