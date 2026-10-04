@@ -23,7 +23,7 @@ export async function fetchWithCf(
 }
 
 function isCloudflareChallenge(res: Response, body: string): boolean {
-	const lower = body.slice(0, 5000).toLowerCase();
+	const lower = body.slice(0, 8000).toLowerCase();
 
 	if (
 		lower.includes('just a moment') ||
