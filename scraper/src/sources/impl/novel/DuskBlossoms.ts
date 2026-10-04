@@ -72,25 +72,42 @@ function extractChapterNum(text: string): number | undefined {
 
 function isLockedChapter($: cheerio.CheerioAPI, el: any): boolean {
 	const $el = $(el);
-	const cls = (($el.attr('class') || '') + ' ' + ($el.find('a').attr('class') || '')).toLowerCase();
-	if (/premium|locked|lock|paid|paywall|c-premium|premium-block/.test(cls)) return true;
+	const cls = (($el.attr('class') || '') + ' ' + ($el.find('a').first().attr('class') || ''))
+		.toLowerCase()
+		.trim();
 
-	// coin / blossom cost badge near chapter
-	const badge =
-		$el.find('.premium-block, .c-premium, .lock, .fa-lock, .icon-lock, i.fa-lock, svg').length > 0 ||
-		$el.find('[class*="lock"], [class*="premium"], [class*="coin"]').length > 0;
-	if (badge) return true;
+	if (/\bfree-chap\b/.test(cls)) return false;
+	if (/\bfree\b/.test(cls) && !/\bpremium\b/.test(cls)) return false;
+
+	if (/\bpremium-block\b|\bpremium\b|\bto_be_free\b|\bcoin-\d+\b|\bpaid\b|\bpaywall\b/.test(cls)) {
+		return true;
+	}
 
 	const text = $el.text().replace(/\s+/g, ' ').toLowerCase();
-	if (/\bunlocks?\s+in\b|\bpremium\b|\blocked\b|\bpaywall\b|\bcoins?\b/.test(text)) return true;
+	if (/\bunlocks?\s+in\b/.test(text)) return true;
 
 	const href = ($el.find('a').first().attr('href') || '').trim();
-	if (!href || href === '#' || href.startsWith('javascript')) {
-		// locked chapters often have no real link
-		if (/chapter\s*\d/i.test(text)) return true;
+	if ((!href || href === '#' || href.startsWith('javascript')) && /chapter\s*\d/i.test(text)) {
+		return true;
 	}
 
 	return false;
+}
+
+function cleanDate(raw: string | undefined): string | undefined {
+	if (!raw) return undefined;
+	let t = raw.replace(/\s+/g, ' ').trim();
+	if (!t) return undefined;
+	t = t.replace(/unlocks?\s+in\s+[\s\S]*$/i, '').trim();
+	const half = Math.floor(t.length / 2);
+	if (half > 4) {
+		const a = t.slice(0, half).trim();
+		const b = t.slice(half).trim();
+		if (a === b) t = a;
+	}
+	const parts = t.split(/\s{2,}|\s*\|\s*/).map((p) => p.trim()).filter(Boolean);
+	if (parts.length === 2 && parts[0] === parts[1]) t = parts[0];
+	return t || undefined;
 }
 
 export class DuskBlossomsSource extends BaseSource {
@@ -133,7 +150,6 @@ export class DuskBlossomsSource extends BaseSource {
 		}
 	}
 
-	/** Homepage Latest / Library cards */
 	private async parseHomeLatest(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		this.assertNotCf(html);
@@ -167,7 +183,6 @@ export class DuskBlossomsSource extends BaseSource {
 			});
 		}
 
-		// Fallback: any /novel/{slug}/ links (library / latest updates)
 		$('a[href*="/novel/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			if (!href || !/\/novel\/[^/]+\/?$/.test(href.replace(this.baseUrl, ''))) return;
@@ -320,7 +335,6 @@ export class DuskBlossomsSource extends BaseSource {
 			throw new Error('Novel not found (empty title)');
 		}
 
-		// Cover
 		const coverEl = $('.summary_image img, .tab-summary img').first();
 		let cover =
 			coverEl.attr('data-src') ||
@@ -338,7 +352,6 @@ export class DuskBlossomsSource extends BaseSource {
 		}
 		cover = (cover || '').split('?')[0];
 
-		// Synopsis
 		let description = '';
 		const summary = $(
 			'.description-summary .summary__content, .summary__content, .manga-excerpt, .description-summary, .summary-content'
@@ -404,7 +417,6 @@ export class DuskBlossomsSource extends BaseSource {
 			}
 		});
 
-		// Genre links elsewhere
 		$('.genres-content a, a[href*="/manga-genre/"], a[href*="/genre/"], .tags-content a').each(
 			(_, a) => {
 				const g = $(a).text().trim();
@@ -412,7 +424,6 @@ export class DuskBlossomsSource extends BaseSource {
 			}
 		);
 
-		// Status badge
 		const statusBadge = $('.post-status .summary-content, .manga-status, span.status')
 			.first()
 			.text()
@@ -436,13 +447,11 @@ export class DuskBlossomsSource extends BaseSource {
 			if (m && parseFloat(m[1]) > 0) rating = m[1];
 		}
 
-		// Chapters via AJAX first, then DOM fallback
 		let chapters = await this.fetchChaptersAjax(novelPath);
 		if (!chapters.length) {
 			chapters = this.parseChapterList($);
 		}
 
-		// Newest first
 		chapters.sort((a, b) => {
 			const na = typeof a.number === 'number' ? a.number : 0;
 			const nb = typeof b.number === 'number' ? b.number : 0;
@@ -477,7 +486,6 @@ export class DuskBlossomsSource extends BaseSource {
 		return details;
 	}
 
-	/** POST /novel/{slug}/ajax/chapters/?t=1 — fallback GET via fetchWithCf if POST fails */
 	private async fetchChaptersAjax(novelPath: string): Promise<Chapter[]> {
 		const base = novelPath.endsWith('/') ? novelPath : `${novelPath}/`;
 		const url = absUrl(this.baseUrl, `${base}ajax/chapters/?t=1`);
@@ -502,7 +510,6 @@ export class DuskBlossomsSource extends BaseSource {
 				}
 			}
 		} catch {
-			/* fall through to fetchWithCf */
 		}
 
 		try {
@@ -521,10 +528,6 @@ export class DuskBlossomsSource extends BaseSource {
 		}
 	}
 
-	/**
-	 * Clean chapter list: title = "Chapter N" only (no long subtitle).
-	 * isLocked = true for paywall / unlock-timer / premium chapters.
-	 */
 	private parseChapterList($: cheerio.CheerioAPI): Chapter[] {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
@@ -540,7 +543,6 @@ export class DuskBlossomsSource extends BaseSource {
 			const num = parseChapterNumber(rawTitle, fallbackNum);
 			let id = pathOnly(href);
 			if (!href || href === '#' || href.startsWith('javascript')) {
-				// synthetic id for locked-only entries so list still shows
 				id = `/novel/locked/chapter-${num}`;
 			}
 			if (seen.has(id)) return;
@@ -550,7 +552,7 @@ export class DuskBlossomsSource extends BaseSource {
 				id,
 				title: `Chapter ${num}`,
 				number: num,
-				date
+				date: cleanDate(date)
 			};
 			if (locked) ch.isLocked = true;
 			out.push(ch);
@@ -561,17 +563,17 @@ export class DuskBlossomsSource extends BaseSource {
 				? $(el).find('> a').first()
 				: $(el).find('a').first();
 			const href = a.attr('href') || '';
-			const rawTitle = (a.attr('title') || a.text() || $(el).text())
+			const rawTitle = (a.attr('title') || a.clone().children().remove().end().text() || a.text())
 				.replace(/\s+/g, ' ')
 				.trim();
-			const date =
-				$(el).find('.chapter-release-date i, .chapter-release-date, .chapter-date').text().trim() ||
-				undefined;
+			const dateEl = $(el).find('.chapter-release-date i').first().length
+				? $(el).find('.chapter-release-date i').first()
+				: $(el).find('.chapter-release-date').first();
+			const date = cleanDate(dateEl.text());
 			const locked = isLockedChapter($, el);
 			pushChapter(href, rawTitle, date, locked, i + 1);
 		});
 
-		// Locked section (e.g. "LOCKED CHAPTERS" with # links)
 		if (!out.length || out.every((c) => !c.isLocked)) {
 			$('a[href*="chapter"], a[href="#"]').each((i, el) => {
 				const parent = $(el).closest('li, div, tr');
@@ -686,7 +688,6 @@ export class DuskBlossomsSource extends BaseSource {
 			if (parts.length) contentHtml = parts.join('\n');
 		}
 
-		// Paywall / empty body
 		if (
 			!contentHtml ||
 			contentHtml.length < 80 ||
@@ -702,10 +703,22 @@ export class DuskBlossomsSource extends BaseSource {
 
 		const prevHref =
 			$('a[rel="prev"]').attr('href') ||
-			$('.prev_page a, a.prev, .nav-previous a, .nav-previous').first().attr('href');
+			$('a.btn.prev_page, a.prev_page, .prev_page a, a.prev, .nav-previous a')
+				.filter((_, el) => {
+					const h = $(el).attr('href') || '';
+					return !!h && h !== '#' && !h.startsWith('javascript');
+				})
+				.first()
+				.attr('href');
 		const nextHref =
 			$('a[rel="next"]').attr('href') ||
-			$('.next_page a, a.next, .nav-next a, .nav-next').first().attr('href');
+			$('a.btn.next_page, a.next_page, .next_page a, a.next, .nav-next a')
+				.filter((_, el) => {
+					const h = $(el).attr('href') || '';
+					return !!h && h !== '#' && !h.startsWith('javascript');
+				})
+				.first()
+				.attr('href');
 
 		return {
 			title,
