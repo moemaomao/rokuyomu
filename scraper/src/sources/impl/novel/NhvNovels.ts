@@ -116,26 +116,37 @@ export class NhvNovelsSource extends BaseSource {
 	}
 
 	/**
-	 * Homepage Recently Updated section (+ page 2 from /novels/ if needed)
+	 * Recently Updated:
+	 * 1) API /wp-json/custom/v1/latest-novels (most reliable)
+	 * 2) Homepage .rec-upd-card
+	 * 3) /novels/ list to fill up to PAGE_SIZE + pagination
 	 */
-	async getLatestManga(page = 1): Promise<Manga[]> {
+	async getLatestManga(
+		page = 1,
+		_opts?: { lang?: string; type?: string }
+	): Promise<Manga[]> {
 		const p = Math.max(1, page);
-		if (p <= 1) {
-			const fromHome = await this.parseRecentlyUpdatedHome().catch(() => [] as Manga[]);
-			if (fromHome.length >= 12) {
-				return fromHome.slice(0, PAGE_SIZE);
+		try {
+			if (p === 1) {
+				const api = await this.fetchLatestFromApi().catch(() => [] as Manga[]);
+				const home = await this.parseRecentlyUpdatedHome().catch(() => [] as Manga[]);
+				const list = this.dedupe([...api, ...home]);
+				if (list.length >= PAGE_SIZE) return list.slice(0, PAGE_SIZE);
+				const extra = await this.parseNovelsList(1).catch(() => [] as Manga[]);
+				return this.dedupe([...list, ...extra]).slice(0, PAGE_SIZE);
 			}
-			// top up from API / novels list
-			const extra = await this.parseNovelsList(1).catch(() => [] as Manga[]);
-			return this.dedupe([...fromHome, ...extra]).slice(0, PAGE_SIZE);
+			return this.parseNovelsList(p);
+		} catch (e) {
+			console.error('[nhvnovels] getLatestManga', e);
+			return [];
 		}
-		return this.parseNovelsList(p);
 	}
 
 	private dedupe(items: Manga[]): Manga[] {
 		const seen = new Set<string>();
 		const out: Manga[] = [];
 		for (const m of items) {
+			if (!m?.id || !m?.title) continue;
 			if (seen.has(m.id)) continue;
 			seen.add(m.id);
 			out.push(m);
@@ -143,38 +154,58 @@ export class NhvNovelsSource extends BaseSource {
 		return out;
 	}
 
+	private async fetchLatestFromApi(): Promise<Manga[]> {
+		const data = await this.fetchNhvJson<
+			Array<{ title?: string; cover?: string; link?: string; tags?: string[] }>
+		>('/wp-json/custom/v1/latest-novels');
+		if (!Array.isArray(data)) return [];
+		const list: Manga[] = [];
+		for (const n of data) {
+			if (!n?.link || !n?.title) continue;
+			list.push({
+				id: pathOnly(n.link),
+				title: decodeEntities(n.title),
+				cover: largerCover(n.cover || ''),
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en'
+			});
+		}
+		return list;
+	}
+
 	private async parseRecentlyUpdatedHome(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 
-		// Section: .rec-upd-card under Recently Updated
 		$('.rec-upd-card').each((_, el) => {
-			const a =
-				$(el).find('a[href*="/novels/"]').first().length
-					? $(el).find('a[href*="/novels/"]').first()
-					: $(el).find('a').first();
-			let href = a.attr('href') || '';
-			// some cards put link only on Continue button
-			if (!href || !/\/novels\//.test(href)) {
-				href =
-					$(el).find('a[href*="/novels/"]').last().attr('href') ||
-					'';
+			const $el = $(el);
+			// Continue button / any novels link inside card
+			let href =
+				$el.find('a[href*="/novels/"]').first().attr('href') ||
+				$el.find('a[href*="/novels/"]').last().attr('href') ||
+				'';
+			// raw HTML fallback (href may sit outside nested structure in some builds)
+			if (!href) {
+				const raw = $el.html() || '';
+				const m = raw.match(/href="(https?:\/\/[^"]*\/novels\/[^"]+)"/i);
+				if (m) href = m[1];
 			}
-			if (!href || !/\/novels\//.test(href)) return;
+			if (!href || !/\/novels\//i.test(href)) return;
 
 			const title = decodeEntities(
-				$(el).find('h1, h2, h3, .rec-upd-left-content h1').first().text() ||
-					a.attr('title') ||
+				$el.find('.rec-upd-left-content h1, h1, h2, h3').first().text() ||
+					$el.find('img').attr('alt') ||
 					''
 			);
 			if (!title || title.length < 2) return;
 
 			const img =
-				$(el).find('img').attr('data-src') ||
-				$(el).find('img').attr('src') ||
+				$el.find('img.rec-upd-img, img').attr('data-src') ||
+				$el.find('img.rec-upd-img, img').attr('src') ||
 				'';
-			const infoText = $(el).find('.rec-upd-info, .rec-upd-left-content p, p').text();
+			const infoText = $el.find('.rec-upd-info').text() || $el.text();
 			const chMatch = infoText.match(/(\d+)\s*Ch/i);
 			const latestChapter = chMatch ? parseInt(chMatch[1], 10) : undefined;
 
@@ -191,35 +222,10 @@ export class NhvNovelsSource extends BaseSource {
 			});
 		});
 
-		if (list.length) return this.dedupe(list);
-
-		// Fallback API
-		try {
-			const data = await this.fetchNhvJson<
-				Array<{ title?: string; cover?: string; link?: string; tags?: string[] }>
-			>('/wp-json/custom/v1/latest-novels');
-			if (Array.isArray(data)) {
-				for (const n of data) {
-					if (!n.link || !n.title) continue;
-					list.push({
-						id: pathOnly(n.link),
-						title: decodeEntities(n.title),
-						cover: largerCover(n.cover || ''),
-						sourceId: this.id,
-						type: 'novel',
-						lang: 'en'
-					});
-				}
-			}
-		} catch {
-			/* ignore */
-		}
-
 		return this.dedupe(list);
 	}
 
 	private async parseNovelsList(page: number): Promise<Manga[]> {
-		// /novels/ dumps many novels; we slice client-side by page
 		const html = await this.fetchHtml('/novels/');
 		const $ = cheerio.load(html);
 		const all: Manga[] = [];
@@ -227,16 +233,18 @@ export class NhvNovelsSource extends BaseSource {
 
 		$('a[href*="/novels/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
-			if (!/\/novels\/[^/]+\/?$/.test(href.replace(this.baseUrl, ''))) return;
-			if (/\/novels\/feed/.test(href)) return;
-			const id = pathOnly(href);
-			if (seen.has(id)) return;
+			const path = pathOnly(href);
+			// only /novels/{slug} — skip /novels/ and /novels/feed
+			if (!/^\/novels\/[^/]+$/.test(path)) return;
+			if (seen.has(path)) return;
 			const title = decodeEntities(
-				$(el).attr('title') || $(el).find('h1, h2, h3, h4').first().text() || $(el).text()
+				$(el).attr('title') ||
+					$(el).find('h1, h2, h3, h4').first().text() ||
+					$(el).text()
 			);
 			if (!title || title.length < 2) return;
-			if (/^view all|read now|continue|novels$/i.test(title)) return;
-			seen.add(id);
+			if (/^(view all|read now|continue|novels|home)$/i.test(title.trim())) return;
+			seen.add(path);
 			const parent = $(el).closest('div, article, li, a');
 			const cover =
 				parent.find('img').attr('data-src') ||
@@ -244,7 +252,7 @@ export class NhvNovelsSource extends BaseSource {
 				$(el).find('img').attr('src') ||
 				'';
 			all.push({
-				id,
+				id: path,
 				title,
 				cover: largerCover(absUrl(this.baseUrl, cover)),
 				sourceId: this.id,
@@ -474,7 +482,6 @@ export class NhvNovelsSource extends BaseSource {
 				'<p><em>Konten kosong atau chapter terkunci.</em></p>';
 		}
 
-		// Prev / next from chapter-nav buttons
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		$('.chapter-nav button[onclick], .chapter-nav a').each((_, el) => {
