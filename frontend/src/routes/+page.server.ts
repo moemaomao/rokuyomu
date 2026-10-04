@@ -13,11 +13,10 @@ import {
 import type { PageServerLoad } from './$types';
 import type { Manga } from '$lib/server/sources/types';
 
-const LOAD_TIMEOUT_MS = 4500;
+const LOAD_TIMEOUT_MS = 12_000;
 const MAX_MANGAS = 24;
 const MAX_PREFERRED = 4;
 const CONCURRENCY = 2;
-
 const LIST_CACHE_TTL = 60 * 30;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

@@ -1,8 +1,3 @@
-/**
- * Fetch + deteksi Cloudflare Challenge.
- * Di Workers tidak bisa solve challenge, jadi kalau ketahuan → throw
- * supaya bisa fallback ke scraper remote.
- */
 export async function fetchWithCf(
 	url: string,
 	init?: RequestInit
