@@ -165,6 +165,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'zkytl', name: 'Zky Translates' },
 	{ id: 'ossantl', name: 'OssanTL' },
     { id: 'starlittales', name: 'Starlit Tales' },
+	{ id: 'sekaitranslations', name: 'SekaiTranslations' },
 ];
 
 export function getSourceList(): SourceMeta[] {

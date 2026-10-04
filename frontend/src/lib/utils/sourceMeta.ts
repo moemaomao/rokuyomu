@@ -166,6 +166,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	zkytl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-500' },
 	ossantl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-500' },
 	starlittales: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-500' },
+	sekaitranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
