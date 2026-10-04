@@ -51,9 +51,11 @@ import { DuskBlossomsSource } from '../impl/novel/DuskBlossoms';
 import { WordExcerptSource } from '../impl/novel/WordExcerpt';
 import { SaiHirotoSource } from '../impl/novel/SaiHiroto';
 import type { IMangaSource } from '../types-manga';
+import { AkkNovelSource } from '../impl/novel/AkkNovel';
 import { NhvNovelsSource } from '../impl/novel/NhvNovels';
 
 const novelSources: Record<string, IMangaSource> = {
+	akknovel: new AkkNovelSource(),
 	nhvnovels: new NhvNovelsSource(),
 	saihiroto: new SaiHirotoSource(),
 	wordexcerpt: new WordExcerptSource(),
