@@ -9,7 +9,7 @@
  * - Chapter title → "Chapter N" (clean, no subtitle)
  * - Content: #chapter-content / .prose / article
  * - Prev/Next: a.btn with PREVIOUS / NEXT
- * - Paywall: lock icon / premium class → isLocked
+ * - Semua chapter free (tidak ada paywall / isLocked)
  * - Search: /series?keyword={q}
  * - Uses fetchWithCf
  */
@@ -143,16 +143,52 @@ export class AkkNovelSource extends BaseSource {
 			if (p <= 1) {
 				const list = await this.parseHomeLatestUpdated();
 				const slice = list.slice(0, per);
-				console.log(`[akknovel] latest page=1 (Latest Updated) → ${slice.length}`);
-				return slice;
+				const enriched = await this.enrichLatestChapters(slice);
+				console.log(
+					`[akknovel] latest page=1 → ${enriched.length} (with chapter badge: ${enriched.filter((m) => m.latestChapter != null).length})`
+				);
+				return enriched;
 			}
 			const list = await this.fetchSeriesPage(p);
-			console.log(`[akknovel] latest page=${p} → ${list.length}`);
-			return list.slice(0, per);
+			const slice = list.slice(0, per);
+			const enriched = await this.enrichLatestChapters(slice);
+			console.log(`[akknovel] latest page=${p} → ${enriched.length}`);
+			return enriched;
 		} catch (e) {
 			console.error('[akknovel] latest', e);
 			return [];
 		}
+	}
+
+	private async enrichLatestChapters(items: Manga[]): Promise<Manga[]> {
+		if (!items.length) return items;
+		const concurrency = 6;
+		const out = items.map((m) => ({ ...m }));
+
+		const run = async (start: number) => {
+			for (let i = start; i < out.length; i += concurrency) {
+				const m = out[i];
+				if (m.latestChapter != null && Number(m.latestChapter) > 0) continue;
+				try {
+					const html = await this.fetchHtml(m.id);
+					const m1 = html.match(/Last\s*chapter\s*:\s*Ch\.?\s*(\d+(?:\.\d+)?)/i);
+					const m2 = html.match(/\/chapter-(\d+(?:\.\d+)?)[-\/]/i);
+					const n = m1
+						? parseFloat(m1[1])
+						: m2
+							? parseFloat(m2[1])
+							: 0;
+					if (n > 0) out[i] = { ...m, latestChapter: n };
+				} catch (e) {
+					console.warn(`[akknovel] enrich ${m.id} failed`, String(e));
+				}
+			}
+		};
+
+		await Promise.all(
+			Array.from({ length: Math.min(concurrency, out.length) }, (_, k) => run(k))
+		);
+		return out;
 	}
 
 	private dedupeById(items: Manga[]): Manga[] {
@@ -363,7 +399,6 @@ export class AkkNovelSource extends BaseSource {
 			let status = 'Ongoing';
 			if (/completed/i.test(badgeText)) status = 'Completed';
 			else if (/hiatus/i.test(badgeText)) status = 'Hiatus';
-
 			const rowText = row.text().replace(/\s+/g, ' ');
 			let latest = 0;
 			const chM = rowText.match(/(?:Ch\.?|Chapter)\s*(\d+(?:\.\d+)?)/i);
@@ -433,9 +468,10 @@ export class AkkNovelSource extends BaseSource {
 			const path = `/series?${params.toString()}`;
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
-			const list = this.parseSeriesCards($);
-			console.log(`[akknovel] search "${q}" page=${page} → ${list.length}`);
-			return list.slice(0, 24);
+			const list = this.parseSeriesCards($).slice(0, 24);
+			const enriched = await this.enrichLatestChapters(list);
+			console.log(`[akknovel] search "${q}" page=${page} → ${enriched.length}`);
+			return enriched;
 		} catch (e) {
 			console.error('[akknovel] search', e);
 			return [];
@@ -614,7 +650,7 @@ export class AkkNovelSource extends BaseSource {
 		}
 
 		console.log(
-			`[akknovel] details ${path} → ${chapters.length} ch latest=${latestChapter} locked=${chapters.filter((c) => c.isLocked).length}`
+			`[akknovel] details ${path} → ${chapters.length} ch latest=${latestChapter}`
 		);
 
 		return {
@@ -653,20 +689,10 @@ export class AkkNovelSource extends BaseSource {
 			const number = parseChapterNumber(id + ' ' + rawText, 0);
 			if (number <= 0) return;
 
-			const $item = $(a).closest('.chapter-item, li, div');
-			const itemHtml = ($item.html() || '') + ($(a).html() || '');
-			const itemClass = (($item.attr('class') || '') + ' ' + ($(a).attr('class') || '')).toLowerCase();
-			const isLocked =
-				/\bfa-lock\b|\block\b|\bpremium\b|\bpaywall\b|\bvip\b|\bcoin\b/.test(itemClass) ||
-				/\$|🔒|🔒/.test(itemHtml) ||
-				$item.find('svg[class*="lock"], .icon-lock, [class*="lock"], .fa-lock').length > 0 ||
-				/lock|premium|paywall/i.test(itemHtml);
-
 			chapters.push({
 				id,
 				title: shortChapterTitle(number),
-				number,
-				...(isLocked ? { isLocked: true } : {})
+				number
 			});
 		});
 
@@ -693,18 +719,6 @@ export class AkkNovelSource extends BaseSource {
 
 		const html = await this.fetchHtml(path);
 		const $ = cheerio.load(html);
-
-		const bodyText = $('body').text().toLowerCase();
-		const contentProbe = $('#chapter-content p, .prose p, article p').length;
-		if (
-			contentProbe < 2 &&
-			(/you need to (buy|unlock|login)|premium chapter|subscribe to read|members only|paywall|not enough coin/i.test(
-				bodyText
-			) ||
-				$('.premium-block, .c-blocked-content, [class*="paywall"], [class*="locked"]').length > 0)
-		) {
-			throw new Error('Chapter is locked / premium on AkkNovel');
-		}
 
 		const number = parseChapterNumber(path, 0);
 		const rawTitle =
