@@ -54,6 +54,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'nhvnovels',
 	'akknovel',
 	'zkytl',
+	'ossantl'
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

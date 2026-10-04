@@ -163,6 +163,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'nhvnovels', name: 'NHV Novels' },
 	{ id: 'akknovel', name: 'AkkNovel' },
 	{ id: 'zkytl', name: 'Zky Translates' },
+	{ id: 'ossantl', name: 'OssanTL' },
 
 ];
 

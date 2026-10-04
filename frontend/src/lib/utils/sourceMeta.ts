@@ -164,6 +164,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	nhvnovels: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-purple-500' },
 	akknovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-lime-500' },
 	zkytl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-500' },
+	ossantl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

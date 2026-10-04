@@ -54,8 +54,10 @@ import type { IMangaSource } from '../types-manga';
 import { AkkNovelSource } from '../impl/novel/AkkNovel';
 import { NhvNovelsSource } from '../impl/novel/NhvNovels';
 import { ZkyTLSource } from '../impl/novel/ZkyTL';
+import { OssanTLSource } from '../impl/novel/OssanTL';
 
 const novelSources: Record<string, IMangaSource> = {
+	ossantl: new OssanTLSource(),
 	zkytl: new ZkyTLSource(),
 	akknovel: new AkkNovelSource(),
 	nhvnovels: new NhvNovelsSource(),
