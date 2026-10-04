@@ -18,7 +18,9 @@
  *
  * Chapter title → "Chapter N" only
  * isLocked from chapter.isLocked
- * fetchWithCf used for all Convex HTTP calls
+ *
+ * NOTE: Convex needs POST JSON. fetchWithCf only supports GET, so Convex
+ * calls use native fetch. fetchWithCf is still imported for HTML helpers.
  */
 import { BaseSource } from '../../BaseSource';
 import { fetchWithCf } from '../../../lib/fetchWithCf';
@@ -80,7 +82,7 @@ function mapNovel(n: any, sourceId: string, latestChapter?: number): Manga | nul
 	let latest = latestChapter;
 	if (latest == null && n.chapterCount != null) {
 		const c = Number(n.chapterCount);
-		if (!Number.isNaN(c)) latest = c;
+		if (!Number.isNaN(c) && c > 0) latest = c;
 	}
 
 	return {
@@ -106,46 +108,90 @@ export class SekaiTranslationsSource extends BaseSource {
 		'User-Agent':
 			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 		Accept: 'application/json',
-		'Content-Type': 'application/json',
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: SITE + '/',
 		Origin: SITE
 	};
 
-	private async convexQuery<T = any>(path: string, args: Record<string, unknown> = {}): Promise<T> {
+	/**
+	 * Convex HTTP query — MUST be POST (fetchWithCf is GET-only).
+	 */
+	private async convexQuery<T = any>(
+		path: string,
+		args: Record<string, unknown> = {}
+	): Promise<T> {
+		const url = `${CONVEX}/api/query`;
 		const body = JSON.stringify({ path, args, format: 'json' });
-		const text = await fetchWithCf(`${CONVEX}/api/query`, {
-			method: 'POST',
-			headers: {
-				...this.headers,
-				'Content-Type': 'application/json',
-				Accept: 'application/json'
-			},
-			body
-		} as any);
+		console.log(`[sekaitranslations] convexQuery → ${path}`, JSON.stringify(args));
 
+		let res: Response;
+		try {
+			res = await fetch(url, {
+				method: 'POST',
+				headers: {
+					...this.headers,
+					'Content-Type': 'application/json',
+					Accept: 'application/json'
+				},
+				body
+			});
+		} catch (e: any) {
+			console.error(`[sekaitranslations] fetch failed ${path}:`, e?.message || e);
+			throw new Error(`Convex fetch failed ${path}: ${e?.message || e}`);
+		}
+
+		const text = await res.text();
+		console.log(
+			`[sekaitranslations] ${path} status=${res.status} len=${text.length} head=${text.slice(0, 180).replace(/\n/g, ' ')}`
+		);
+
+		if (!res.ok) {
+			throw new Error(`Convex ${path} HTTP ${res.status}: ${text.slice(0, 200)}`);
+		}
 		if (!text || text.length < 2) {
 			throw new Error(`Empty Convex response for ${path}`);
-		}
-		const low = text.slice(0, 400).toLowerCase();
-		if (low.includes('just a moment') || low.includes('cf-browser-verification')) {
-			throw new Error('Cloudflare blocked Convex request (set BYPARR_URL)');
 		}
 
 		let data: any;
 		try {
 			data = JSON.parse(text);
 		} catch {
-			throw new Error(`Invalid JSON from Convex ${path}`);
+			throw new Error(`Invalid JSON from Convex ${path}: ${text.slice(0, 120)}`);
 		}
 
 		if (data?.status === 'error') {
+			console.error(`[sekaitranslations] convex error ${path}:`, data.errorMessage);
 			throw new Error(data.errorMessage || `Convex error on ${path}`);
 		}
-		return data?.value as T;
+
+		const val = data?.value;
+		const count = Array.isArray(val)
+			? val.length
+			: Array.isArray(val?.page)
+				? val.page.length
+				: val
+					? 1
+					: 0;
+		console.log(`[sekaitranslations] ${path} ok items≈${count}`);
+		return val as T;
 	}
 
+	/** Optional HTML helper still uses fetchWithCf */
+	protected async fetchHtml(path: string): Promise<string> {
+		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+		return fetchWithCf(url, {
+			headers: {
+				...this.headers,
+				Accept: 'text/html',
+				Referer: this.baseUrl
+			}
+		});
+	}
+
+	// ─── Recently Updated (homepage section) ──────────────────────────────
+
 	async getLatestManga(page = 1): Promise<Manga[]> {
+		console.log(`[sekaitranslations] getLatestManga page=${page}`);
 		if (page <= 1) {
 			try {
 				const rows = await this.convexQuery<any[]>('novels:getRecentlyUpdated', {
@@ -155,25 +201,32 @@ export class SekaiTranslationsSource extends BaseSource {
 				const seen = new Set<string>();
 				for (const row of Array.isArray(rows) ? rows : []) {
 					const novel = row?.novel || row;
-					const latestNum =
-						Array.isArray(row?.latestChapters) && row.latestChapters[0]
-							? Number(row.latestChapters[0].chapterNumber)
-							: undefined;
-					const item = mapNovel(
-						novel,
-						this.id,
-						Number.isNaN(latestNum as number) ? undefined : latestNum
-					);
+					let latestNum: number | undefined;
+					if (Array.isArray(row?.latestChapters) && row.latestChapters[0]) {
+						const n = Number(row.latestChapters[0].chapterNumber);
+						if (!Number.isNaN(n)) latestNum = n;
+					}
+					const item = mapNovel(novel, this.id, latestNum);
 					if (item && !seen.has(item.id)) {
 						seen.add(item.id);
 						list.push(item);
 					}
 				}
+				console.log(`[sekaitranslations] recently-updated mapped=${list.length}`);
 				if (list.length) return list.slice(0, PAGE_SIZE);
-			} catch {
+			} catch (e: any) {
+				console.error(`[sekaitranslations] getRecentlyUpdated failed:`, e?.message || e);
+				// fallback to list page
 			}
 		}
-		return this.fetchListPage(page);
+		try {
+			const list = await this.fetchListPage(page);
+			console.log(`[sekaitranslations] list page=${page} mapped=${list.length}`);
+			return list;
+		} catch (e: any) {
+			console.error(`[sekaitranslations] fetchListPage failed:`, e?.message || e);
+			throw e;
+		}
 	}
 
 	private async fetchListPage(page: number): Promise<Manga[]> {
@@ -181,42 +234,38 @@ export class SekaiTranslationsSource extends BaseSource {
 		let current = 1;
 		let pageItems: any[] = [];
 
-		try {
-			while (current <= page) {
-				const result = await this.convexQuery<{
-					page?: any[];
-					continueCursor?: string | null;
-					isDone?: boolean;
-				}>('novels:list', {
-					paginationOpts: {
-						numItems: PAGE_SIZE,
-						cursor
-					}
-				});
-
-				pageItems = Array.isArray(result?.page) ? result.page : [];
-				if (current === page) break;
-				if (result?.isDone || !result?.continueCursor) {
-					pageItems = [];
-					break;
+		while (current <= page) {
+			const result = await this.convexQuery<{
+				page?: any[];
+				continueCursor?: string | null;
+				isDone?: boolean;
+			}>('novels:list', {
+				paginationOpts: {
+					numItems: PAGE_SIZE,
+					cursor
 				}
-				cursor = result.continueCursor;
-				current += 1;
-			}
+			});
 
-			const list: Manga[] = [];
-			const seen = new Set<string>();
-			for (const n of pageItems) {
-				const item = mapNovel(n, this.id);
-				if (item && !seen.has(item.id)) {
-					seen.add(item.id);
-					list.push(item);
-				}
+			pageItems = Array.isArray(result?.page) ? result.page : [];
+			if (current === page) break;
+			if (result?.isDone || !result?.continueCursor) {
+				pageItems = [];
+				break;
 			}
-			return list;
-		} catch {
-			return [];
+			cursor = result.continueCursor;
+			current += 1;
 		}
+
+		const list: Manga[] = [];
+		const seen = new Set<string>();
+		for (const n of pageItems) {
+			const item = mapNovel(n, this.id);
+			if (item && !seen.has(item.id)) {
+				seen.add(item.id);
+				list.push(item);
+			}
+		}
+		return list;
 	}
 
 	// ─── Search ───────────────────────────────────────────────────────────
@@ -225,24 +274,20 @@ export class SekaiTranslationsSource extends BaseSource {
 		const q = query.trim();
 		if (!q) return [];
 		const page = opts?.page ?? 1;
-		try {
-			const rows = await this.convexQuery<any[]>('novels:search', { query: q });
-			const all = Array.isArray(rows) ? rows : [];
-			const start = (page - 1) * PAGE_SIZE;
-			const slice = all.slice(start, start + PAGE_SIZE);
-			const list: Manga[] = [];
-			const seen = new Set<string>();
-			for (const n of slice) {
-				const item = mapNovel(n, this.id);
-				if (item && !seen.has(item.id)) {
-					seen.add(item.id);
-					list.push(item);
-				}
+		const rows = await this.convexQuery<any[]>('novels:search', { query: q });
+		const all = Array.isArray(rows) ? rows : [];
+		const start = (page - 1) * PAGE_SIZE;
+		const slice = all.slice(start, start + PAGE_SIZE);
+		const list: Manga[] = [];
+		const seen = new Set<string>();
+		for (const n of slice) {
+			const item = mapNovel(n, this.id);
+			if (item && !seen.has(item.id)) {
+				seen.add(item.id);
+				list.push(item);
 			}
-			return list;
-		} catch {
-			return [];
 		}
+		return list;
 	}
 
 	// ─── Detail ───────────────────────────────────────────────────────────
@@ -306,13 +351,10 @@ export class SekaiTranslationsSource extends BaseSource {
 		};
 
 		const extra = details as MangaDetails & {
-			artists?: string[];
 			altTitles?: string[];
-			published?: string;
 		};
 		if (altTitle) extra.altTitles = [altTitle];
-		if (n.originalLanguage) {
-		}
+
 		return details;
 	}
 
@@ -395,9 +437,7 @@ export class SekaiTranslationsSource extends BaseSource {
 		const title = num > 0 ? `Chapter ${num}` : String(chapter.title || 'Chapter');
 
 		let contentHtml = String(chapter.content || '');
-		contentHtml = contentHtml
-			.replace(/\u200b/g, '')
-			.replace(/&nbsp;/gi, ' ');
+		contentHtml = contentHtml.replace(/\u200b/g, '').replace(/&nbsp;/gi, ' ');
 
 		if (contentHtml && !/<[a-z][\s\S]*>/i.test(contentHtml)) {
 			contentHtml = contentHtml
@@ -408,14 +448,12 @@ export class SekaiTranslationsSource extends BaseSource {
 				.join('\n');
 		}
 
-		// Reader nav
 		let prevId: string | null = null;
 		let nextId: string | null = null;
 		try {
 			const nav = await this.convexQuery<{
 				prevNumber?: number | null;
 				nextNumber?: number | null;
-				lastNumber?: number | null;
 			}>('chapters:getReaderNav', { novelId, chapterNumber: num });
 
 			if (nav?.prevNumber != null) {
@@ -425,6 +463,7 @@ export class SekaiTranslationsSource extends BaseSource {
 				nextId = `/novels/${slug}/chapter/${nav.nextNumber}`;
 			}
 		} catch {
+			/* ignore */
 		}
 
 		return {
@@ -457,6 +496,7 @@ export class SekaiTranslationsSource extends BaseSource {
 			if (nav?.prevNumber != null) prevId = `/novels/${slug}/chapter/${nav.prevNumber}`;
 			if (nav?.nextNumber != null) nextId = `/novels/${slug}/chapter/${nav.nextNumber}`;
 		} catch {
+			/* ignore */
 		}
 
 		return {
