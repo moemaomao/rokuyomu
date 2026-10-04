@@ -163,6 +163,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	saihiroto: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	nhvnovels: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-purple-500' },
 	akknovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-lime-500' },
+	zkytl: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

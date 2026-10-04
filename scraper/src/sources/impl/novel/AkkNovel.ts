@@ -9,7 +9,6 @@
  * - Chapter title → "Chapter N" (clean, no subtitle)
  * - Content: #chapter-content / .prose / article
  * - Prev/Next: a.btn with PREVIOUS / NEXT
- * - Semua chapter free (tidak ada paywall / isLocked)
  * - Search: /series?keyword={q}
  * - Uses fetchWithCf
  */

@@ -53,8 +53,10 @@ import { SaiHirotoSource } from '../impl/novel/SaiHiroto';
 import type { IMangaSource } from '../types-manga';
 import { AkkNovelSource } from '../impl/novel/AkkNovel';
 import { NhvNovelsSource } from '../impl/novel/NhvNovels';
+import { ZkyTLSource } from '../impl/novel/ZkyTL';
 
 const novelSources: Record<string, IMangaSource> = {
+	zkytl: new ZkyTLSource(),
 	akknovel: new AkkNovelSource(),
 	nhvnovels: new NhvNovelsSource(),
 	saihiroto: new SaiHirotoSource(),
