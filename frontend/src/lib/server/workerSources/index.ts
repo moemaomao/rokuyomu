@@ -69,7 +69,8 @@ export const WORKER_SOURCE_IDS = new Set([
 	'toasteful',
 	'voratoon',
 	'weebcentral',
-	'yumeneijiworks'
+	'yumeneijiworks',
+	'zkytl'
 ]);
 
 const instanceCache = new Map<string, IMangaSource>();
@@ -129,6 +130,7 @@ const loaders: Record<string, () => Promise<IMangaSource>> = {
 	voratoon: async () => new (await import('./impl/Voratoon')).VoratoonSource(),
 	weebcentral: async () => new (await import('./impl/WeebCentral')).WeebCentralSource(),
 	yumeneijiworks: async () => new (await import('./impl/YumeNeijiWorks')).YumeNeijiWorksSource(),
+	zkytl: async () => new (await import('./impl/ZkyTL')).ZkyTLSource(),
 };
 
 export function isWorkerSource(sourceId: string): boolean {
