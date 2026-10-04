@@ -1,7 +1,3 @@
-/**
- * Source enable/disable + admin notes — stored in Workers KV.
- */
-
 const KV_DISABLED = 'config:disabled_sources';
 const KV_NOTES = 'config:source_notes';
 
@@ -60,7 +56,6 @@ export async function setSourceEnabled(
 	return next;
 }
 
-/** Notes: { [sourceId]: string } */
 export async function getSourceNotes(
 	kv?: KVNamespace | null
 ): Promise<SourceNotesMap> {

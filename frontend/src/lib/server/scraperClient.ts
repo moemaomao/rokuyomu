@@ -123,8 +123,6 @@ export async function remoteMangaFromChapter(
 	}
 }
 
-// ── Novel chapter (teks) ────────────────────────────────────────────────────
-
 export type NovelChapterPayload = {
 	title: string;
 	content: string;
@@ -143,7 +141,6 @@ export async function remoteNovelChapter(
 ): Promise<NovelChapterPayload> {
 	const id = chapterId.startsWith('/') ? chapterId : `/${chapterId.replace(/^\/+/, '')}`;
 
-	// Hybrid: Worker source (sakuranovel, dll.)
 	if (isWorkerSource(sourceId)) {
 		const adapter = (await getWorkerSource(sourceId)) as {
 			getChapterContent?: (chapterId: string) => Promise<{
@@ -167,7 +164,6 @@ export async function remoteNovelChapter(
 		throw new Error(`Source "${sourceId}" has no getChapterContent()`);
 	}
 
-	// Remote scraper microservice
 	const pathId = id.replace(/^\/+/, '');
 	return scraperFetch<NovelChapterPayload>(
 		`/${encodeURIComponent(sourceId)}/novel-chapter/${pathId}`

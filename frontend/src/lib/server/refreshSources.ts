@@ -1,13 +1,3 @@
-/**
- * Unified popular-source cache refresh.
- *
- * - Default: skip scrape jika key KV masih ada (TTL belum habis).
- * - force=true: selalu scrape ulang + kv.put (manual / admin).
- *
- * Cache key MUST match +page.server.ts single-source browse:
- *   browse:{sourceId}:p{page}:q:lall:tall:lim{BROWSE_LIMIT}
- */
-
 import { getAllSourceIds } from '$lib/server/sources';
 import { remoteLatest } from '$lib/server/scraperClient';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
@@ -16,7 +6,7 @@ import { listToBackupItems, saveSourceBackup } from '$lib/server/backupMeta';
 
 export const BROWSE_LIMIT = 24;
 
-export const LIST_CACHE_TTL = 60 * 45; // 45 min
+export const LIST_CACHE_TTL = 60 * 45;
 
 const TIMEOUT_MS = 8000;
 const DELAY_MS = 300;

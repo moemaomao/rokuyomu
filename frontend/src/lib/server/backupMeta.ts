@@ -1,8 +1,3 @@
-/**
- * Backup metadata manga (tanpa chapters) — satu JSON besar per source.
- * Cover di-rewrite ke wsrv.nl agar lebih kecil.
- * Dipakai sebagai fallback browse + detail saat scrape/cache gagal.
- */
 
 import type { Manga, MangaDetails } from '$lib/server/sources/types';
 import { readCache } from '$lib/server/cache';
