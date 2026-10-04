@@ -140,14 +140,12 @@ export class AkkNovelSource extends BaseSource {
 		const p = Math.max(1, page);
 		const per = 24;
 		try {
-			// Page 1: HANYA section "Latest Updated" di homepage
 			if (p <= 1) {
 				const list = await this.parseHomeLatestUpdated();
 				const slice = list.slice(0, per);
 				console.log(`[akknovel] latest page=1 (Latest Updated) → ${slice.length}`);
 				return slice;
 			}
-			// Page ≥2: /series sorted by updated, paginated
 			const list = await this.fetchSeriesPage(p);
 			console.log(`[akknovel] latest page=${p} → ${list.length}`);
 			return list.slice(0, per);
@@ -170,9 +168,22 @@ export class AkkNovelSource extends BaseSource {
 
 	private async parseHomeLatestUpdated(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
-		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
+		const marker = html.search(/Latest\s*Updated/i);
+		const endCandidates = [
+			html.search(/About\s*Us/i),
+			html.search(/Copyright\s*©/i),
+			html.toLowerCase().indexOf('<footer')
+		].filter((i) => typeof i === 'number' && i > (marker >= 0 ? marker : 0));
+		const cutEnd =
+			endCandidates.length > 0
+				? Math.min(...endCandidates)
+				: marker >= 0
+					? marker + 120000
+					: html.length;
+		const sectionHtml = marker >= 0 ? html.slice(marker, cutEnd) : html;
+		const $ = cheerio.load(sectionHtml);
 
 		$('a.line-clamp-2, a[class*="line-clamp"]').each((_, a) => {
 			const href = $(a).attr('href') || '';
@@ -182,17 +193,19 @@ export class AkkNovelSource extends BaseSource {
 			const title = cleanTitle($(a).text());
 			if (!isValidTitle(title)) return;
 
-			const row = $(a).closest('.grid, [class*="grid"]');
+			const row = $(a).closest('.grid');
 			let cover =
 				row.find('img').first().attr('data-src') ||
 				row.find('img').first().attr('src') ||
 				'';
 			if (!cover || /logo|icon|avatar/i.test(cover)) {
+				const parent = $(a).parent().parent();
 				cover =
-					$(a).parent().parent().find('img').first().attr('src') ||
-					$(a).parent().parent().find('img').first().attr('data-src') ||
+					parent.find('img').first().attr('src') ||
+					parent.find('img').first().attr('data-src') ||
 					'';
 			}
+			if (/logo|icon|avatar/i.test(cover || '')) cover = '';
 
 			const badgeText = row.find('.badge').first().text().replace(/\s+/g, ' ').trim();
 			let status = 'Ongoing';
@@ -216,31 +229,24 @@ export class AkkNovelSource extends BaseSource {
 			});
 		});
 
-		if (list.length < 8) {
-			const bodyHtml = $.root().html() || html;
-			const marker = bodyHtml.search(/Latest\s*Updated/i);
-			const sectionHtml =
-				marker >= 0 ? bodyHtml.slice(marker, marker + 80000) : bodyHtml;
-			const $s = cheerio.load(sectionHtml);
-			$s('a[href*="/series/"]').each((_, a) => {
-				const href = $s(a).attr('href') || '';
+		if (list.length < 5) {
+			$('a[href*="/series/"]').each((_, a) => {
+				const href = $(a).attr('href') || '';
 				const path = pathOnly(href, this.baseUrl);
 				if (!isSeriesPath(path) || seen.has(path)) return;
 
-				let title = cleanTitle($s(a).text());
-				if (!isValidTitle(title)) {
-					title = cleanTitle($s(a).attr('title') || '');
-				}
-				if (!isValidTitle(title)) {
-					const row = $s(a).closest('.grid, div');
-					title = cleanTitle(row.find('a.line-clamp-2, a[class*="line-clamp"]').text());
-				}
+				const row = $(a).closest('.grid, div');
+				const title = cleanTitle(
+					row.find('a.line-clamp-2, a[class*="line-clamp"]').first().text() ||
+						$(a).attr('title') ||
+						$(a).text()
+				);
 				if (!isValidTitle(title)) return;
 
-				const row = $s(a).closest('.grid, div');
 				const cover =
+					row.find('img').first().attr('data-src') ||
 					row.find('img').first().attr('src') ||
-					$s(a).find('img').attr('src') ||
+					$(a).find('img').attr('src') ||
 					'';
 				const badgeText = row.find('.badge').text();
 				let status = 'Ongoing';
@@ -259,6 +265,7 @@ export class AkkNovelSource extends BaseSource {
 			});
 		}
 
+		console.log(`[akknovel] Latest Updated only → ${list.length}`);
 		return list;
 	}
 
@@ -501,7 +508,6 @@ export class AkkNovelSource extends BaseSource {
 				.trim() ||
 			'';
 		description = decodeEntities(description);
-
 		description = description
 			.replace(/^(Description|Chapters)\s*/i, '')
 			.replace(/\s*All\s+\d+\s+Chapters[\s\S]*$/i, '')
