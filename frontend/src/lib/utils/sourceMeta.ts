@@ -160,6 +160,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	bcatranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-orange-500' },
 	duskblossoms: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-500' },
 	wordexcerpt: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-violet-500' },
+	saihiroto: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
