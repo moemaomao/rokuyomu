@@ -1,4 +1,4 @@
-import type { IMangaSource, Manga, MangaDetails } from './types';
+import type { IMangaSource, Manga, MangaDetails } from './types-manga';
 export abstract class BaseSource implements IMangaSource {
 	abstract id: string;
 	abstract name: string;

@@ -1,4 +1,4 @@
-import type { IMangaSource, Manga, MangaDetails } from './types';
+import type { IMangaSource, Manga, MangaDetails } from './types-manga';
 import { fetchWithCf } from '../lib/fetchWithCf';
 
 /**
