@@ -20,9 +20,9 @@
  * isLocked from chapter.isLocked
  * fetchWithCf used for all Convex HTTP calls
  */
-import { BaseSource } from '../../BaseSource';
-import { fetchWithCf } from '../../../lib/fetchWithCf';
-import type { Manga, MangaDetails, Chapter } from '../../types-manga';
+import { BaseSource } from '../BaseSource';
+import { fetchWithCf } from '../../fetchWithCf';
+import type { Manga, MangaDetails, Chapter } from '../types-manga';
 
 const SITE = 'https://sekaitranslations.com';
 const CONVEX = 'https://elated-cardinal-622.convex.cloud';
