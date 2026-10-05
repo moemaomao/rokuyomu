@@ -204,50 +204,10 @@ export class CrimsonScrollsSource extends BaseSource {
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const p = Math.max(1, page);
 		try {
+			// 1 request only — Byparr is slow; homepage already has ≥24 novels
 			if (p === 1) {
-				const seen = new Set<string>();
-				const list: Manga[] = [];
-
-				try {
-					const home = await this.fetchHtml('/');
-					for (const m of this.parseRecentlyUpdatedSection(home)) {
-						if (seen.has(m.id)) continue;
-						seen.add(m.id);
-						list.push(m);
-						if (list.length >= PER_PAGE) break;
-					}
-				} catch (e) {
-					console.warn('[crimsonscrolls] homepage', String(e).slice(0, 100));
-				}
-
-				if (list.length < PER_PAGE) {
-					try {
-						const html = await this.fetchHtml('/novels/recently-updated/');
-						for (const m of this.parseNovelCards(html)) {
-							if (seen.has(m.id)) continue;
-							seen.add(m.id);
-							list.push(m);
-							if (list.length >= PER_PAGE) break;
-						}
-					} catch (e) {
-						console.warn('[crimsonscrolls] RU', String(e).slice(0, 100));
-					}
-				}
-
-				if (list.length < PER_PAGE) {
-					try {
-						const html = await this.fetchHtml('/novels/');
-						for (const m of this.parseNovelCards(html)) {
-							if (seen.has(m.id)) continue;
-							seen.add(m.id);
-							list.push(m);
-							if (list.length >= PER_PAGE) break;
-						}
-					} catch {
-						/* ignore */
-					}
-				}
-
+				const home = await this.fetchHtml('/');
+				const list = this.parseNovelCards(home);
 				console.log(`[crimsonscrolls] latest page=1 n=${list.length}`);
 				return list.slice(0, PER_PAGE);
 			}
