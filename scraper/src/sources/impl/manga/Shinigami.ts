@@ -263,42 +263,54 @@ export class ShinigamiSource extends BaseSource {
 	}
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
-		const path = this.cleanId(chapterId);
-		const cid =
-			path.replace(/^\/chapter\//, '').replace(/^\//, '').split('/')[0] || '';
-		if (!cid) {
-			console.error('[shinigami] invalid chapter id', chapterId);
-			return [];
-		}
-
-		try {
-			const json = await this.apiGet<{ data?: any }>(
-				`/v1/chapter/detail/${encodeURIComponent(cid)}`
-			);
-			const data = json?.data || {};
-			const base = String(data.base_url || 'https://assets.shngm.id').replace(
-				/\/+$/,
-				''
-			);
-			const chPath = String(data.chapter?.path || '');
-			const files: string[] = Array.isArray(data.chapter?.data)
-				? data.chapter.data
-				: [];
-
-			const out = files
-				.map((f) => {
-					const name = String(f || '').trim();
-					if (!name) return '';
-					if (/^https?:\/\//i.test(name)) return name;
-					return `${base}${chPath}${name}`;
-				})
-				.filter(Boolean);
-
-			console.log(`[shinigami] ${out.length} pages → ${cid}`);
-			return out;
-		} catch (e) {
-			console.error('[shinigami] getChapterPages', cid, e);
-			return [];
-		}
+	const path = this.cleanId(chapterId);
+	const cid =
+		path.replace(/^\/chapter\//, '').replace(/^\//, '').split('/')[0] || '';
+	if (!cid) {
+		console.error('[shinigami] invalid chapter id', chapterId);
+		return [];
 	}
+
+	try {
+		const json = await this.apiGet<{ data?: any }>(
+			`/v1/chapter/detail/${encodeURIComponent(cid)}`
+		);
+		const data = json?.data || {};
+
+		let base = String(data.base_url || 'https://assets.shngm.id').replace(/\/+$/, '');
+		if (!base.startsWith('http')) {
+			base = 'https://assets.shngm.id';
+		}
+
+		let chPath = String(data.chapter?.path || '').trim();
+		if (chPath && !chPath.startsWith('/')) {
+			chPath = '/' + chPath;
+		}
+		chPath = chPath.replace(/\/+$/, '');
+
+		const files: string[] = Array.isArray(data.chapter?.data)
+			? data.chapter.data
+			: [];
+
+		const out = files
+			.map((f) => {
+				const name = String(f || '').trim();
+				if (!name) return '';
+
+				if (/^https?:\/\//i.test(name)) {
+					return name;
+				}
+
+				const cleanName = name.replace(/^\/+/, '');
+				return `${base}${chPath}/${cleanName}`;
+			})
+			.filter(Boolean);
+
+		console.log(`[shinigami] ${out.length} pages → ${cid}`);
+		return out;
+	} catch (e) {
+		console.error('[shinigami] getChapterPages', cid, e);
+		return [];
+	}
+  }
 }
