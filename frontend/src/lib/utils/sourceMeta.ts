@@ -168,6 +168,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	starlittales: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-500' },
 	sekaitranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-500' },
 	nobadnovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
+	noicetranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-fuchsia-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

@@ -1,3 +1,4 @@
+import type { IMangaSource } from '../types-manga';
 import Noveltoon from '../impl/novel/Noveltoon';
 import SakuranovelSource from '../impl/novel/Sakuranovel';
 import { MeionovelSource } from '../impl/novel/Meionovel';
@@ -50,7 +51,6 @@ import { BcatranslationSource } from '../impl/novel/Bcatranslation';
 import { DuskBlossomsSource } from '../impl/novel/DuskBlossoms';
 import { WordExcerptSource } from '../impl/novel/WordExcerpt';
 import { SaiHirotoSource } from '../impl/novel/SaiHiroto';
-import type { IMangaSource } from '../types-manga';
 import { AkkNovelSource } from '../impl/novel/AkkNovel';
 import { NhvNovelsSource } from '../impl/novel/NhvNovels';
 import { ZkyTLSource } from '../impl/novel/ZkyTL';
@@ -58,8 +58,10 @@ import { OssanTLSource } from '../impl/novel/OssanTL';
 import { StarlitTalesSource } from '../impl/novel/StarlitTales';
 import { SekaiTranslationsSource } from '../impl/novel/SekaiTranslations';
 import { NoBadNovelSource } from '../impl/novel/NoBadNovel';
+import { NoiceTranslationsSource } from '../impl/novel/NoiceTranslations';
 
 const novelSources: Record<string, IMangaSource> = {
+	noicetranslations: new NoiceTranslationsSource(),
 	nobadnovel: new NoBadNovelSource(),
 	sekaitranslations: new SekaiTranslationsSource(),
 	starlittales: new StarlitTalesSource(),
