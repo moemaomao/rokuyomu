@@ -500,7 +500,9 @@ export class MythoriaTalesSource extends BaseSource {
 		}
 
 		const paragraphs = contentText
-			.split(/\n{2,}/)
+			.replace(/\r\n/g, '\n')
+			.replace(/\u00a0/g, '')
+			.split(/\n+/)
 			.map((p) => cleanText(p))
 			.filter((p) => p.length > 0);
 
