@@ -61,8 +61,10 @@ import { NoBadNovelSource } from '../impl/novel/NoBadNovel';
 import { NoiceTranslationsSource } from '../impl/novel/NoiceTranslations';
 import { TigerTranslationsSource } from '../impl/novel/TigerTranslations';
 import { MythoriaTalesSource } from '../impl/novel/MythoriaTales';
+import { MilousArchiveSource } from '../impl/novel/MilousArchive';
 
 const novelSources: Record<string, IMangaSource> = {
+	milousarchive: new MilousArchiveSource(),
 	mythoriatales: new MythoriaTalesSource(),
 	tigertranslations: new TigerTranslationsSource(),
 	noicetranslations: new NoiceTranslationsSource(),

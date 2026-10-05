@@ -171,6 +171,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	noicetranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-fuchsia-500' },
 	tigertranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-orange-500' },
 	mythoriatales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
+	milousarchive: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
