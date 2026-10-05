@@ -64,6 +64,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'milousarchive',
 	'primodialtranslation',
 	'tangerinearchive',
+	'crimsonscrolls',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
