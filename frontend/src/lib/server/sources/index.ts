@@ -171,6 +171,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'tigertranslations', name: 'Tiger Translations' },
 	{ id: 'mythoriatales', name: 'Mythoria Tales' },
 	{ id: 'milousarchive', name: "Milou's Archive" },
+	{ id: 'primodialtranslation', name: 'Primodial Translation' },
 ];
 
 export function getSourceList(): SourceMeta[] {

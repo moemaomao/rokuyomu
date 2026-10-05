@@ -62,8 +62,10 @@ import { NoiceTranslationsSource } from '../impl/novel/NoiceTranslations';
 import { TigerTranslationsSource } from '../impl/novel/TigerTranslations';
 import { MythoriaTalesSource } from '../impl/novel/MythoriaTales';
 import { MilousArchiveSource } from '../impl/novel/MilousArchive';
+import PrimodialTranslationSource from '../impl/novel/PrimodialTranslation';
 
 const novelSources: Record<string, IMangaSource> = {
+	primodialtranslation: new PrimodialTranslationSource(),
 	milousarchive: new MilousArchiveSource(),
 	mythoriatales: new MythoriaTalesSource(),
 	tigertranslations: new TigerTranslationsSource(),
