@@ -2,21 +2,9 @@
  * MilousArchive.com — WordPress (Kadence / Retrospect)
  * Path: scraper/src/sources/impl/novel/MilousArchive.ts
  *
- * Structure:
- *   Homepage Recent Updates : chapter links grouped by series
- *   All novels              : WP categories + pages
- *   Series page             : /{slug}/  (TOC + meta)
- *   Chapter                 : /{series}/{series}-chapter-{n}/
- *
- * WP REST:
- *   /wp-json/wp/v2/posts?orderby=date
- *   /wp-json/wp/v2/categories
- *   /wp-json/wp/v2/pages
- *   /wp-json/wp/v2/posts?categories={id}&per_page=100
- *   /wp-json/wp/v2/media/{id}
- *   /wp-json/wp/v2/posts?slug={chapter-slug}  ← primary for content
- *
- * Chapter title: "Chapter N" (bersih)
+ * FIX 2026-10:
+ *  - 429 Too Many Requests: reduce API calls, retry+backoff, HTML homepage for latest
+ *  - Chapter content: WP REST by slug first (no CF), HTML fallback
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -26,6 +14,7 @@ import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 const BASE = 'https://milousarchive.com';
 const API = `${BASE}/wp-json/wp/v2`;
 const PER_PAGE = 24;
+const CACHE_MS = 60 * 60_000; // 1h — kurangi pressure ke API
 
 type WpCategory = {
 	id: number;
@@ -108,13 +97,12 @@ function formatDate(iso?: string): string | undefined {
 	}
 }
 
-/** "GSMF Chapter 129" / "gsmf-chapter-129" / "TFLF Extra 5" */
 function parseChapterNumber(title: string, slug: string): number {
 	const t = `${title} ${slug}`;
 	let m = t.match(/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)/i);
 	if (m) return parseFloat(m[1]);
 	m = t.match(/extra\s*(\d+(?:\.\d+)?)/i);
-	if (m) return 10000 + parseFloat(m[1]); // sort extras after main
+	if (m) return 10000 + parseFloat(m[1]);
 	m = slug.match(/-(\d+)(?:\/|$)/);
 	if (m) return parseFloat(m[1]);
 	return 0;
@@ -126,23 +114,22 @@ function isUtilitySlug(slug: string): boolean {
 	);
 }
 
-/** Extract chapter slug from path like /gsmf/gsmf-chapter-129 */
 function chapterSlugFromPath(path: string): string {
 	const parts = path.replace(/^\//, '').replace(/\/$/, '').split('/');
 	return parts[parts.length - 1] || parts[0] || '';
 }
 
-/**
- * Parse WP content.rendered HTML into clean <p> paragraphs.
- * Prefer this over live-page scrape (avoids CF on Vercel).
- */
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
+}
+
 function contentHtmlToParagraphs(html: string): string[] {
 	if (!html || !html.trim()) return [];
 	const $ = cheerio.load(`<div id="root">${html}</div>`);
 	const root = $('#root');
 	root
 		.find(
-			'script, style, .sharedaddy, .comments, #comments, nav, .nav-links, form, .wp-block-embed, iframe, .wordads-ad-wrapper, .wordads-ad, .jp-relatedposts, .sharedaddy'
+			'script, style, .sharedaddy, .comments, #comments, nav, .nav-links, form, .wp-block-embed, iframe, .wordads-ad-wrapper, .wordads-ad, .jp-relatedposts'
 		)
 		.remove();
 
@@ -150,36 +137,28 @@ function contentHtmlToParagraphs(html: string): string[] {
 	root.find('p').each((_, p) => {
 		const t = cleanText($(p).text());
 		if (!t || t.length < 2) return;
-		// skip translator notes / footer / ads
 		if (
 			/^(support|be a patron|tokki|milou|translator|kofi|ko-fi|patreon|discord|hi! this is|advertisement)/i.test(
 				t
 			)
 		)
 			return;
-		if (/milousarchive|tokkisarchives|catsemoji|🐈/i.test(t) && t.length < 120)
+		if (/milousarchive|tokkisarchives|catsemoji/i.test(t) && t.length < 120)
 			return;
 		if (/^━+/.test(t) && t.length < 30) return;
-		// skip pure emoji separators
-		if (/^[\s━─\-🐈⬛🐈‍⬛]+$/.test(t)) return;
+		if (/^[\s━─\-🐈⬛]+$/.test(t)) return;
 		parts.push(`<p>${escapeHtml(t)}</p>`);
 	});
 
-	// Fallback: if almost no <p>, take text blocks from divs
 	if (parts.length < 3) {
 		const full = cleanText(root.text());
 		if (full.length > 80) {
-			const chunks = full
-				.split(/\n{2,}/)
-				.map((s) => s.trim())
-				.filter((s) => s.length > 20);
-			for (const c of chunks) {
+			for (const c of full.split(/\n{2,}/).map((s) => s.trim()).filter((s) => s.length > 20)) {
 				if (/^(support|tokki|milou|advertisement)/i.test(c)) continue;
 				parts.push(`<p>${escapeHtml(c)}</p>`);
 			}
 		}
 	}
-
 	return parts;
 }
 
@@ -198,23 +177,54 @@ export class MilousArchiveSource extends BaseSource {
 
 	private catCache: { at: number; cats: WpCategory[] } | null = null;
 	private pageCache: { at: number; pages: WpPage[] } | null = null;
-	/** categoryId → series path (/gsmf) */
+	private coverCache = new Map<number, string>();
 	private catToSeries = new Map<
 		number,
-		{ path: string; title: string; cover?: string; mediaId?: number }
+		{ path: string; title: string; mediaId?: number }
 	>();
 
-	private async apiGet<T>(path: string): Promise<T> {
+	/** Global soft rate-limit between API calls (shared IP on Vercel) */
+	private lastApiAt = 0;
+	private static readonly API_GAP_MS = 400;
+
+	private async apiGet<T>(path: string, retries = 3): Promise<T> {
 		const url = path.startsWith('http') ? path : `${API}${path}`;
-		const res = await fetch(url, {
-			headers: { ...this.headers, Accept: 'application/json' }
-		});
-		if (!res.ok) {
-			const t = await res.text().catch(() => '');
-			console.error(`[milousarchive] API ${res.status} ${url}: ${t.slice(0, 200)}`);
-			throw new Error(`Milou API ${res.status}: ${t.slice(0, 150)}`);
+
+		for (let attempt = 0; attempt <= retries; attempt++) {
+			const gap = Date.now() - this.lastApiAt;
+			if (gap < MilousArchiveSource.API_GAP_MS) {
+				await sleep(MilousArchiveSource.API_GAP_MS - gap);
+			}
+			this.lastApiAt = Date.now();
+
+			const res = await fetch(url, {
+				headers: { ...this.headers, Accept: 'application/json' }
+			});
+
+			if (res.status === 429) {
+				const ra = res.headers.get('retry-after');
+				const waitSec = ra && /^\d+$/.test(ra) ? parseInt(ra, 10) : Math.min(8, 1 + attempt * 2);
+				const waitMs = waitSec * 1000 + Math.floor(Math.random() * 400);
+				console.warn(
+					`[milousarchive] 429 on ${path} → wait ${waitMs}ms (try ${attempt + 1}/${retries + 1})`
+				);
+				await res.text().catch(() => '');
+				if (attempt === retries) {
+					throw new Error(`Milou API 429 after ${retries + 1} tries: ${path}`);
+				}
+				await sleep(waitMs);
+				continue;
+			}
+
+			if (!res.ok) {
+				const t = await res.text().catch(() => '');
+				console.error(`[milousarchive] API ${res.status} ${path}: ${t.slice(0, 120)}`);
+				throw new Error(`Milou API ${res.status}: ${t.slice(0, 150)}`);
+			}
+
+			return (await res.json()) as T;
 		}
-		return (await res.json()) as T;
+		throw new Error(`Milou API failed: ${path}`);
 	}
 
 	private async loadPage(path: string): Promise<string> {
@@ -224,7 +234,7 @@ export class MilousArchiveSource extends BaseSource {
 		try {
 			return await fetchWithCf(url, { headers: this.headers });
 		} catch (e) {
-			console.warn('[milousarchive] fetchWithCf failed, plain fetch', e);
+			console.warn('[milousarchive] fetchWithCf failed, plain fetch', String(e).slice(0, 120));
 			const res = await fetch(url, { headers: this.headers });
 			if (!res.ok) {
 				const t = await res.text().catch(() => '');
@@ -236,7 +246,7 @@ export class MilousArchiveSource extends BaseSource {
 
 	private async getCategories(): Promise<WpCategory[]> {
 		const now = Date.now();
-		if (this.catCache && now - this.catCache.at < 30 * 60_000) {
+		if (this.catCache && now - this.catCache.at < CACHE_MS) {
 			return this.catCache.cats;
 		}
 		const cats = await this.apiGet<WpCategory[]>(
@@ -251,7 +261,7 @@ export class MilousArchiveSource extends BaseSource {
 
 	private async getNovelPages(): Promise<WpPage[]> {
 		const now = Date.now();
-		if (this.pageCache && now - this.pageCache.at < 30 * 60_000) {
+		if (this.pageCache && now - this.pageCache.at < CACHE_MS) {
 			return this.pageCache.pages;
 		}
 		const pages = await this.apiGet<WpPage[]>(
@@ -281,7 +291,6 @@ export class MilousArchiveSource extends BaseSource {
 			let page =
 				pageBySlug.get(slug) || pageByTitle.get(c.name.toLowerCase());
 
-			// fuzzy: page slug contains cat slug or vice versa
 			if (!page) {
 				page = pages.find(
 					(p) =>
@@ -308,31 +317,137 @@ export class MilousArchiveSource extends BaseSource {
 
 	private async resolveCover(mediaId?: number): Promise<string> {
 		if (!mediaId) return '';
+		if (this.coverCache.has(mediaId)) return this.coverCache.get(mediaId)!;
 		try {
 			const m = await this.apiGet<{
 				source_url?: string;
 				media_details?: { sizes?: Record<string, { source_url?: string }> };
 			}>(`/media/${mediaId}?_fields=source_url,media_details`);
-			return (
-				m.media_details?.sizes?.medium?.source_url ||
-				m.source_url ||
-				''
-			);
+			const url =
+				m.media_details?.sizes?.medium?.source_url || m.source_url || '';
+			this.coverCache.set(mediaId, url);
+			return url;
 		} catch {
 			return '';
 		}
 	}
 
 	/**
-	 * Latest Update — group recent posts by series category
+	 * Latest via homepage HTML — 1 request, no API spam (avoids 429).
+	 * Pattern: Recent Updates links like /gsmf/gsmf-chapter-129/
+	 */
+	private async getLatestFromHomepage(): Promise<Manga[]> {
+		const html = await this.loadPage('/');
+		const $ = cheerio.load(html);
+		const seen = new Set<string>();
+		const list: Manga[] = [];
+
+		// Recent Updates: anchors to chapter URLs
+		$('a[href]').each((_, a) => {
+			const href = $(a).attr('href') || '';
+			const text = cleanText($(a).text());
+			if (!href || !text) return;
+			const p = pathOnly(href);
+			// /gsmf/gsmf-chapter-129 or /tflf/tflf-extra-5
+			const m = p.match(/^\/([a-z0-9-]+)\/([a-z0-9-]+(?:-chapter-\d+|-extra-\d+)?)$/i);
+			if (!m) return;
+			const seriesSlug = m[1].toLowerCase();
+			if (isUtilitySlug(seriesSlug)) return;
+			if (!/chapter|extra/i.test(text) && !/chapter|extra/i.test(m[2])) return;
+
+			const seriesPath = `/${seriesSlug}`;
+			if (seen.has(seriesPath)) {
+				const existing = list.find((x) => x.id === seriesPath);
+				const num = parseChapterNumber(text, m[2]);
+				if (existing && num > (Number(existing.latestChapter) || 0) && num < 10000) {
+					existing.latestChapter = Math.floor(num);
+				}
+				return;
+			}
+			seen.add(seriesPath);
+			const num = parseChapterNumber(text, m[2]);
+			list.push({
+				id: seriesPath,
+				title: seriesSlug.toUpperCase(), // refined below if map ready
+				cover: '',
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				status: 'Ongoing',
+				...(num > 0 && num < 10000 ? { latestChapter: Math.floor(num) } : {})
+			});
+		});
+
+		// Recommended novels on homepage (series pages, better titles)
+		$('a[href]').each((_, a) => {
+			const href = $(a).attr('href') || '';
+			const text = cleanText($(a).text());
+			if (!href || !text || text.length < 3) return;
+			const p = pathOnly(href);
+			// series only: /gsmf or /farming-by-the-willows
+			if (!/^\/[a-z0-9-]+$/i.test(p)) return;
+			const slug = p.slice(1).toLowerCase();
+			if (isUtilitySlug(slug)) return;
+			if (seen.has(p)) {
+				const existing = list.find((x) => x.id === p);
+				if (existing && existing.title === existing.id.slice(1).toUpperCase()) {
+					existing.title = text;
+				}
+				return;
+			}
+			if (list.length >= PER_PAGE) return;
+			seen.add(p);
+			list.push({
+				id: p,
+				title: text,
+				cover: '',
+				sourceId: this.id,
+				type: 'novel',
+				lang: 'en',
+				status: 'Ongoing'
+			});
+		});
+
+		return list.slice(0, PER_PAGE);
+	}
+
+	/**
+	 * Latest Update — prefer homepage (1 req). API only if needed & not rate-limited.
 	 */
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const p = Math.max(1, page);
 		try {
-			await this.ensureSeriesMap();
+			// Page 1: homepage scrape = no API, no 429
+			if (p === 1) {
+				try {
+					const fromHome = await this.getLatestFromHomepage();
+					if (fromHome.length >= 3) {
+						// optional: enrich titles from series map (cached, may use API once)
+						try {
+							await this.ensureSeriesMap();
+							for (const item of fromHome) {
+								for (const [, s] of this.catToSeries) {
+									if (s.path === item.id) {
+										item.title = s.title;
+										break;
+									}
+								}
+							}
+						} catch (e) {
+							console.warn('[milousarchive] series map enrich skip', String(e).slice(0, 80));
+						}
+						console.log(`[milousarchive] latest from homepage n=${fromHome.length}`);
+						return fromHome;
+					}
+				} catch (e) {
+					console.warn('[milousarchive] homepage latest failed', String(e).slice(0, 120));
+				}
+			}
 
+			// API path (page > 1 or homepage failed) — NO per-item cover resolve
+			await this.ensureSeriesMap();
 			const posts = await this.apiGet<WpPost[]>(
-				`/posts?per_page=100&page=${p}&orderby=date&order=desc&_fields=id,slug,link,title,date,categories`
+				`/posts?per_page=50&page=${p}&orderby=date&order=desc&_fields=id,slug,link,title,date,categories`
 			);
 
 			const seen = new Set<string>();
@@ -346,59 +461,28 @@ export class MilousArchiveSource extends BaseSource {
 				const id = series.path;
 				if (seen.has(id)) {
 					const existing = list.find((x) => x.id === id);
-					const num = parseChapterNumber(
-						post.title.rendered,
-						post.slug
-					);
-					if (existing && num > (Number(existing.latestChapter) || 0)) {
+					const num = parseChapterNumber(post.title.rendered, post.slug);
+					if (existing && num > (Number(existing.latestChapter) || 0) && num < 10000) {
 						existing.latestChapter = Math.floor(num);
 					}
 					continue;
 				}
 				seen.add(id);
 				const num = parseChapterNumber(post.title.rendered, post.slug);
-				const cover = series.mediaId
-					? await this.resolveCover(series.mediaId)
-					: '';
-
 				list.push({
 					id,
 					title: series.title,
-					cover,
+					cover: '', // jangan resolveCover di list — bikin 429
 					sourceId: this.id,
 					type: 'novel',
 					lang: 'en',
 					status: 'Ongoing',
-					...(num > 0 && num < 10000
-						? { latestChapter: Math.floor(num) }
-						: {})
+					...(num > 0 && num < 10000 ? { latestChapter: Math.floor(num) } : {})
 				});
-
 				if (list.length >= PER_PAGE) break;
 			}
 
-			if (p === 1 && list.length < 12) {
-				const cats = await this.getCategories();
-				for (const c of cats) {
-					const series = this.catToSeries.get(c.id);
-					if (!series || seen.has(series.path)) continue;
-					seen.add(series.path);
-					list.push({
-						id: series.path,
-						title: series.title,
-						cover: series.mediaId
-							? await this.resolveCover(series.mediaId)
-							: '',
-						sourceId: this.id,
-						type: 'novel',
-						lang: 'en',
-						status: 'Ongoing',
-						latestChapter: c.count
-					});
-					if (list.length >= PER_PAGE) break;
-				}
-			}
-
+			console.log(`[milousarchive] latest from API page=${p} n=${list.length}`);
 			return list.slice(0, PER_PAGE);
 		} catch (e) {
 			console.error('[milousarchive] latest', e);
@@ -419,12 +503,12 @@ export class MilousArchiveSource extends BaseSource {
 			const cats = await this.getCategories();
 			const hits: Manga[] = [];
 			const seen = new Set<string>();
+			const qDash = q.replace(/\s+/g, '-');
 
 			for (const c of cats) {
 				const series = this.catToSeries.get(c.id);
 				if (!series) continue;
 				const title = series.title.toLowerCase();
-				const qDash = q.replace(/\s+/g, '-');
 				if (
 					!title.includes(q) &&
 					!c.slug.includes(qDash) &&
@@ -436,9 +520,7 @@ export class MilousArchiveSource extends BaseSource {
 				hits.push({
 					id: series.path,
 					title: series.title,
-					cover: series.mediaId
-						? await this.resolveCover(series.mediaId)
-						: '',
+					cover: '', // cover di details saja
 					sourceId: this.id,
 					type: 'novel',
 					lang: 'en',
@@ -459,182 +541,120 @@ export class MilousArchiveSource extends BaseSource {
 		const path = pathOnly(mangaId);
 		const slug = path.replace(/^\//, '').split('/')[0];
 
-		// Prefer category description + posts (no CF) for meta & chapters
-		await this.ensureSeriesMap();
-		const cats = await this.getCategories();
-		const cat =
-			cats.find(
-				(c) =>
-					this.catToSeries.get(c.id)?.path === path ||
-					c.slug === slug ||
-					pathOnly(c.link || '') === path
-			) || null;
+		const html = await this.loadPage(path.endsWith('/') ? path : `${path}/`);
+		const $ = cheerio.load(html);
 
-		let title = '';
+		let title =
+			cleanText($('h1.entry-title, h1').first().text()) ||
+			cleanText($('title').text().split(/[|\-–]/)[0]);
+
+		const bodyText = cleanText($('.entry-content, .wp-block-post-content').text());
 		let author = '';
 		let altTitle = '';
 		let status = 'Ongoing';
+
+		const authorM = bodyText.match(/Author\s*:\s*([^\n|]{2,80})/i);
+		if (authorM) author = cleanText(authorM[1]);
+
+		const rawM = bodyText.match(/Raw Title\s*:\s*([^\n]{2,120})/i);
+		if (rawM) altTitle = cleanText(rawM[1]);
+
+		if (/No\.?\s*Of\s*Chapters\s*:\s*Ongoing/i.test(bodyText)) status = 'Ongoing';
+		else if (/completed|complete/i.test(bodyText)) status = 'Completed';
+		else if (/hiatus/i.test(bodyText)) status = 'Hiatus';
+
+		let cover =
+			$('.entry-content img, .wp-block-post-content img, article img')
+				.filter((_, el) => {
+					const src = $(el).attr('src') || '';
+					return /cover|uploads/i.test(src) && !/logo|profile|avatar/i.test(src);
+				})
+				.first()
+				.attr('src') ||
+			$('meta[property="og:image"]').attr('content') ||
+			'';
+		if (cover.startsWith('//')) cover = `https:${cover}`;
+
 		let description = '';
-		let cover = '';
+		const synIdx = bodyText.search(/SYNOPSYS|SYNOPSIS|Synopsis/i);
+		if (synIdx >= 0) {
+			description = bodyText
+				.slice(synIdx)
+				.replace(/^(SYNOPSYS|SYNOPSIS|Synopsis)\s*:?\s*/i, '')
+				.split(/TABLE OF CONTENTS|━━━━|━━ 🐈/i)[0]
+				.trim()
+				.slice(0, 4000);
+		}
+		if (!description) {
+			description = cleanText($('meta[name="description"]').attr('content') || '');
+		}
+
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
+		$('.entry-content a, .wp-block-post-content a').each((_, a) => {
+			const href = $(a).attr('href') || '';
+			const text = cleanText($(a).text());
+			if (!href || !text) return;
+			const p = pathOnly(href);
+			if (
+				!p.startsWith(`/${slug}/`) &&
+				!p.includes(`/${slug}-`) &&
+				!p.match(new RegExp(`/${slug}/`, 'i'))
+			)
+				return;
+			if (/comment|author|login|patreon|ko-fi|discord/i.test(href)) return;
 
-		// Meta from category.description (rich, no HTML scrape needed)
-		if (cat?.description) {
-			const desc = cat.description.replace(/\\r\\n/g, '\n').replace(/\r\n/g, '\n');
-			title = cleanText(cat.name);
-			const authorM = desc.match(/Author\s*:\s*([^\n\r]{2,80})/i);
-			if (authorM) author = cleanText(authorM[1]);
-			const rawM = desc.match(/Raw Title\s*:\s*([^\n\r]{2,120})/i);
-			if (rawM) altTitle = cleanText(rawM[1]);
-			if (/No\.?\s*Of\s*Chapters\s*:\s*Ongoing/i.test(desc)) status = 'Ongoing';
-			else if (/completed|complete/i.test(desc)) status = 'Completed';
-			else if (/hiatus/i.test(desc)) status = 'Hiatus';
-		}
+			const num = parseChapterNumber(text, p);
+			if (!num) return;
+			if (seen.has(p)) return;
+			seen.add(p);
 
-		const series = cat ? this.catToSeries.get(cat.id) : undefined;
-		if (series?.mediaId) {
-			cover = await this.resolveCover(series.mediaId);
-		}
-		if (series?.title) title = series.title;
+			chapters.push({
+				id: p,
+				title: num >= 10000 ? `Extra ${num - 10000}` : `Chapter ${Math.floor(num)}`,
+				number: num >= 10000 ? num - 10000 + 0.5 : num
+			});
+		});
 
-		// Chapters from WP posts by category (reliable)
-		if (cat) {
+		// API posts fallback only if TOC thin — limited pages to avoid 429
+		if (chapters.length < 5) {
 			try {
-				for (let page = 1; page <= 30; page++) {
-					const posts = await this.apiGet<WpPost[]>(
-						`/posts?categories=${cat.id}&per_page=100&page=${page}&orderby=date&order=asc&_fields=id,slug,link,title,date`
-					);
-					if (!posts?.length) break;
-					for (const post of posts) {
-						const id = pathOnly(post.link);
-						if (seen.has(id)) continue;
-						seen.add(id);
-						const num = parseChapterNumber(
-							post.title.rendered,
-							post.slug
+				await this.ensureSeriesMap();
+				const cats = await this.getCategories();
+				const cat = cats.find(
+					(c) => this.catToSeries.get(c.id)?.path === path || c.slug === slug
+				);
+				if (cat) {
+					for (let page = 1; page <= 5; page++) {
+						const posts = await this.apiGet<WpPost[]>(
+							`/posts?categories=${cat.id}&per_page=100&page=${page}&orderby=date&order=asc&_fields=id,slug,link,title,date`
 						);
-						if (!num) continue;
-						chapters.push({
-							id,
-							title:
-								num >= 10000
-									? `Extra ${num - 10000}`
-									: `Chapter ${Math.floor(num)}`,
-							number: num >= 10000 ? num - 10000 + 0.5 : num,
-							date: formatDate(post.date)
-						});
+						if (!posts?.length) break;
+						for (const post of posts) {
+							const id = pathOnly(post.link);
+							if (seen.has(id)) continue;
+							seen.add(id);
+							const num = parseChapterNumber(post.title.rendered, post.slug);
+							if (!num) continue;
+							chapters.push({
+								id,
+								title:
+									num >= 10000
+										? `Extra ${num - 10000}`
+										: `Chapter ${Math.floor(num)}`,
+								number: num >= 10000 ? num - 10000 + 0.5 : num,
+								date: formatDate(post.date)
+							});
+						}
+						if (posts.length < 100) break;
 					}
-					if (posts.length < 100) break;
 				}
 			} catch (e) {
-				console.error('[milousarchive] posts by cat', e);
-			}
-		}
-
-		// HTML fallback for TOC / cover / synopsis if still thin
-		if (chapters.length < 3 || !description || !cover) {
-			try {
-				const html = await this.loadPage(
-					path.endsWith('/') ? path : `${path}/`
-				);
-				const $ = cheerio.load(html);
-
-				if (!title) {
-					title =
-						cleanText($('h1.entry-title, h1').first().text()) ||
-						cleanText($('title').text().split(/[|\-–]/)[0]);
-				}
-
-				const bodyText = cleanText(
-					$('.entry-content, .wp-block-post-content').text()
-				);
-
-				if (!author) {
-					const authorM = bodyText.match(/Author\s*:\s*([^\n|]{2,80})/i);
-					if (authorM) author = cleanText(authorM[1]);
-				}
-				if (!altTitle) {
-					const rawM = bodyText.match(/Raw Title\s*:\s*([^\n]{2,120})/i);
-					if (rawM) altTitle = cleanText(rawM[1]);
-				}
-				if (/No\.?\s*Of\s*Chapters\s*:\s*Ongoing/i.test(bodyText))
-					status = 'Ongoing';
-				else if (/completed|complete/i.test(bodyText)) status = 'Completed';
-				else if (/hiatus/i.test(bodyText)) status = 'Hiatus';
-
-				if (!cover) {
-					cover =
-						$('.entry-content img, .wp-block-post-content img, article img')
-							.filter((_, el) => {
-								const src = $(el).attr('src') || '';
-								return (
-									/cover|uploads/i.test(src) &&
-									!/logo|profile|avatar/i.test(src)
-								);
-							})
-							.first()
-							.attr('src') ||
-						$('meta[property="og:image"]').attr('content') ||
-						'';
-					if (cover.startsWith('//')) cover = `https:${cover}`;
-				}
-
-				const synIdx = bodyText.search(/SYNOPSYS|SYNOPSIS|Synopsis/i);
-				if (synIdx >= 0) {
-					description = bodyText
-						.slice(synIdx)
-						.replace(/^(SYNOPSYS|SYNOPSIS|Synopsis)\s*:?\s*/i, '')
-						.split(/TABLE OF CONTENTS|━━━━|━━ 🐈/i)[0]
-						.trim()
-						.slice(0, 4000);
-				}
-				if (!description) {
-					description = cleanText(
-						$('meta[name="description"]').attr('content') || ''
-					);
-				}
-
-				if (chapters.length < 3) {
-					$('.entry-content a, .wp-block-post-content a').each((_, a) => {
-						const href = $(a).attr('href') || '';
-						const text = cleanText($(a).text());
-						if (!href || !text) return;
-						const p = pathOnly(href);
-						if (
-							!p.startsWith(`/${slug}/`) &&
-							!p.includes(`/${slug}-`) &&
-							!p.match(new RegExp(`/${slug}/`, 'i'))
-						)
-							return;
-						if (/comment|author|login|patreon|ko-fi|discord/i.test(href))
-							return;
-
-						const num = parseChapterNumber(text, p);
-						if (!num) return;
-						const id = p;
-						if (seen.has(id)) return;
-						seen.add(id);
-
-						const titleLabel =
-							num >= 10000
-								? `Extra ${num - 10000}`
-								: `Chapter ${Math.floor(num)}`;
-
-						chapters.push({
-							id,
-							title: titleLabel,
-							number: num >= 10000 ? num - 10000 + 0.5 : num
-						});
-					});
-				}
-			} catch (e) {
-				console.error('[milousarchive] HTML series fallback', e);
+				console.error('[milousarchive] posts fallback', e);
 			}
 		}
 
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
-
 		if (!title) title = slug;
 
 		const details: MangaDetails = {
@@ -653,7 +673,6 @@ export class MilousArchiveSource extends BaseSource {
 
 		const extra = details as MangaDetails & { altTitles?: string[] };
 		if (altTitle) extra.altTitles = [altTitle];
-
 		return details;
 	}
 
@@ -675,7 +694,7 @@ export class MilousArchiveSource extends BaseSource {
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
-		// 1) Primary: WP REST by slug — no Cloudflare, works on Vercel
+		// 1) WP REST by slug (1 request, no CF)
 		try {
 			const posts = await this.apiGet<WpPost[]>(
 				`/posts?slug=${encodeURIComponent(slug)}&_fields=id,slug,link,title,content`
@@ -692,28 +711,21 @@ export class MilousArchiveSource extends BaseSource {
 							? `Extra ${num - 10000}`
 							: h || 'Chapter';
 				console.log(
-					`[milousarchive] content via API slug=${slug} len=${contentHtml.length}`
-				);
-			} else {
-				console.warn(
-					`[milousarchive] API no content for slug=${slug} posts=${posts?.length ?? 0}`
+					`[milousarchive] content API slug=${slug} len=${contentHtml.length}`
 				);
 			}
 		} catch (e) {
-			console.error('[milousarchive] API chapter content', e);
+			console.error('[milousarchive] API chapter', e);
 		}
 
-		// 2) Fallback: HTML page (may hit CF — needs Byparr on Vercel)
+		// 2) HTML fallback
 		if (!contentHtml || contentHtml.length < 50) {
 			try {
 				const html = await this.loadPage(
 					path.endsWith('/') ? path : `${path}/`
 				);
 				const $ = cheerio.load(html);
-
-				const h = cleanText(
-					$('h1.entry-title, h1, h2').first().text()
-				);
+				const h = cleanText($('h1.entry-title, h1, h2').first().text());
 				const num = parseChapterNumber(h, path);
 				title =
 					num > 0 && num < 10000
@@ -725,17 +737,14 @@ export class MilousArchiveSource extends BaseSource {
 				const contentEl = $(
 					'.entry-content, .wp-block-post-content, article .content, .post-content'
 				).first();
-				if (contentEl.length) {
-					contentHtml = contentEl.html() || '';
-				}
+				if (contentEl.length) contentHtml = contentEl.html() || '';
 
 				$('a').each((_, a) => {
 					const t = cleanText($(a).text()).toLowerCase();
 					const href = $(a).attr('href') || '';
 					if (!href || href === '#') return;
 					const p = pathOnly(href);
-					if (/^prev(ious)?(\s|$)/i.test(t) || t === '←')
-						prevChapterId = p;
+					if (/^prev(ious)?(\s|$)/i.test(t) || t === '←') prevChapterId = p;
 					if (/^next(\s|$)/i.test(t) || t === '→') nextChapterId = p;
 				});
 				const relPrev = $('a[rel="prev"]').attr('href');
@@ -744,10 +753,10 @@ export class MilousArchiveSource extends BaseSource {
 				if (relNext) nextChapterId = pathOnly(relNext);
 
 				console.log(
-					`[milousarchive] content via HTML path=${path} len=${contentHtml.length}`
+					`[milousarchive] content HTML path=${path} len=${contentHtml.length}`
 				);
 			} catch (e) {
-				console.error('[milousarchive] HTML chapter content', e);
+				console.error('[milousarchive] HTML chapter', e);
 			}
 		}
 
@@ -755,14 +764,9 @@ export class MilousArchiveSource extends BaseSource {
 		const content =
 			parts.length > 0
 				? parts.join('\n')
-				: '<p><em>Empty content — API and HTML both failed. Check Vercel logs for [milousarchive].</em></p>';
+				: '<p><em>Empty content — API/HTML gagal. Cek log [milousarchive].</em></p>';
 
-		return {
-			title,
-			content,
-			prevChapterId,
-			nextChapterId
-		};
+		return { title, content, prevChapterId, nextChapterId };
 	}
 }
 
