@@ -6,7 +6,7 @@
  *   List/Latest : GET /series/public/all?page=1&limit=24&sort=updated
  *   Detail+Chaps: GET /series/public/{slug}?page=1&limit=500
  *
- * Chapter content (server action on frontend):
+ * Chapter content (Next.js server action):
  *   POST https://www.mythoriatales.com/series/{slug}/chapter/{n}
  *   Header: Next-Action: 6057a758574533cff84d58cadf9a12e5f15a75e6d8
  *   Body:   ["slug", n]
@@ -61,7 +61,9 @@ type ApiSeriesFull = {
 function pathOnly(href: string): string {
 	try {
 		const u = new URL(
-			href.startsWith('http') ? href : `${BASE}${href.startsWith('/') ? '' : '/'}${href}`
+			href.startsWith('http')
+				? href
+				: `${BASE}${href.startsWith('/') ? '' : '/'}${href}`
 		);
 		return u.pathname.replace(/\/$/, '') || '/';
 	} catch {
@@ -157,6 +159,50 @@ function latestFromRecent(chs?: ApiChapter[]): number | undefined {
 	return max > 0 ? max : undefined;
 }
 
+function extractSuccessJson(raw: string): {
+	success: boolean;
+	data?: {
+		chapter?: ApiChapter & { content?: string };
+		prevChapter?: { chapterNumber: number } | null;
+		nextChapter?: { chapterNumber: number } | null;
+	};
+	error?: string;
+} | null {
+	const successIdx = raw.indexOf('{"success":');
+	if (successIdx < 0) return null;
+	const jsonStr = raw.slice(successIdx);
+	let depth = 0;
+	let end = -1;
+	for (let i = 0; i < jsonStr.length; i++) {
+		const ch = jsonStr[i];
+		if (ch === '{') depth++;
+		else if (ch === '}') {
+			depth--;
+			if (depth === 0) {
+				end = i + 1;
+				break;
+			}
+		}
+	}
+	if (end < 0) return null;
+	try {
+		return JSON.parse(jsonStr.slice(0, end));
+	} catch {
+		return null;
+	}
+}
+
+function extractFlightText(raw: string): string {
+	const m = raw.match(/:T[0-9a-fA-F]+,/);
+	if (!m || m.index == null) return '';
+	let body = raw.slice(m.index + m[0].length);
+	const cutNl = body.search(/\n\d+:/);
+	if (cutNl >= 0) body = body.slice(0, cutNl);
+	const cutJson = body.search(/\{"success":/);
+	if (cutJson >= 0) body = body.slice(0, cutJson);
+	return body.replace(/\u00a0/g, ' ').trim();
+}
+
 export class MythoriaTalesSource extends BaseSource {
 	id = 'mythoriatales';
 	name = 'Mythoria Tales';
@@ -212,14 +258,10 @@ export class MythoriaTalesSource extends BaseSource {
 					limit?: number;
 					totalPages?: number;
 				};
-			}>(
-				`/series/public/all?page=${p}&limit=${PER_PAGE}&sort=updated`
-			);
+			}>(`/series/public/all?page=${p}&limit=${PER_PAGE}&sort=updated`);
 
 			const items = res.data?.data || [];
-			return items
-				.filter((s) => s?.slug)
-				.map((s) => this.mapBrief(s));
+			return items.filter((s) => s?.slug).map((s) => this.mapBrief(s));
 		} catch (e) {
 			console.error('[mythoriatales] latest', e);
 			return [];
@@ -381,6 +423,7 @@ export class MythoriaTalesSource extends BaseSource {
 					'Content-Type': 'text/plain;charset=UTF-8',
 					'Next-Action': CHAPTER_ACTION_ID,
 					Accept: 'text/x-component',
+					Origin: BASE,
 					Referer: pageUrl
 				},
 				body
@@ -396,71 +439,63 @@ export class MythoriaTalesSource extends BaseSource {
 		let prevNum: number | null = null;
 		let nextNum: number | null = null;
 
-		const jsonMatch = raw.match(/\d+:(\{"success":true[\s\S]*)$/m);
-		if (jsonMatch) {
-			try {
-				let jsonStr = jsonMatch[1];
-				const lastBrace = jsonStr.lastIndexOf('}');
-				if (lastBrace > 0) jsonStr = jsonStr.slice(0, lastBrace + 1);
-				const obj = JSON.parse(jsonStr) as {
-					success: boolean;
-					data?: {
-						chapter?: ApiChapter & { content?: string };
-						prevChapter?: { chapterNumber: number };
-						nextChapter?: { chapterNumber: number };
-					};
-				};
-				const ch = obj.data?.chapter;
-				if (ch) {
-					isPremium = !!ch.isPremium;
-					if (ch.chapterNumber != null)
-						chapterTitle = `Chapter ${ch.chapterNumber}`;
-					if (obj.data?.prevChapter?.chapterNumber != null)
-						prevNum = obj.data.prevChapter.chapterNumber;
-					if (obj.data?.nextChapter?.chapterNumber != null)
-						nextNum = obj.data.nextChapter.chapterNumber;
-				}
-			} catch {
+		const obj = extractSuccessJson(raw);
+		if (obj?.data?.chapter) {
+			const ch = obj.data.chapter;
+			isPremium = !!ch.isPremium;
+			if (ch.chapterNumber != null)
+				chapterTitle = `Chapter ${ch.chapterNumber}`;
+			if (obj.data.prevChapter?.chapterNumber != null)
+				prevNum = obj.data.prevChapter.chapterNumber;
+			if (obj.data.nextChapter?.chapterNumber != null)
+				nextNum = obj.data.nextChapter.chapterNumber;
+			const c = ch.content;
+			if (c && typeof c === 'string' && !c.startsWith('$') && c.length > 20) {
+				contentText = c;
 			}
 		}
 
-		const textMatch = raw.match(/\d+:T\d+,([\s\S]*?)(?=\n\d+:\{|\n\d+:T|\Z)/);
-		if (textMatch) {
-			contentText = textMatch[1].trim();
-			const cut = contentText.search(/\d+:\{"success"/);
-			if (cut > 0) contentText = contentText.slice(0, cut).trim();
-			const cut2 = contentText.search(/1:\{"success"/);
-			if (cut2 > 0) contentText = contentText.slice(0, cut2).trim();
+		if (!contentText) {
+			contentText = extractFlightText(raw);
 		}
+
+		const prevId =
+			prevNum != null
+				? makeChapterId(parsed.slug, prevNum)
+				: parsed.number > 1
+					? makeChapterId(parsed.slug, parsed.number - 1)
+					: null;
+		const nextId =
+			nextNum != null
+				? makeChapterId(parsed.slug, nextNum)
+				: makeChapterId(parsed.slug, parsed.number + 1);
 
 		if (isPremium && !contentText) {
 			return {
 				title: chapterTitle,
 				content:
 					'<p><em>This chapter is locked (premium / coins). Read it on Mythoria Tales.</em></p>',
-				prevChapterId:
-					prevNum != null
-						? makeChapterId(parsed.slug, prevNum)
-						: parsed.number > 1
-							? makeChapterId(parsed.slug, parsed.number - 1)
-							: null,
-				nextChapterId:
-					nextNum != null
-						? makeChapterId(parsed.slug, nextNum)
-						: makeChapterId(parsed.slug, parsed.number + 1)
+				prevChapterId: prevId,
+				nextChapterId: nextId
 			};
 		}
 
 		if (!contentText) {
+			console.error(
+				'[mythoriatales] empty chapter',
+				parsed.slug,
+				parsed.number,
+				'rawLen',
+				raw.length,
+				'head',
+				raw.slice(0, 180)
+			);
 			return {
 				title: chapterTitle,
 				content:
 					'<p><em>Empty content — chapter may be locked or selector changed.</em></p>',
-				prevChapterId:
-					parsed.number > 1
-						? makeChapterId(parsed.slug, parsed.number - 1)
-						: null,
-				nextChapterId: makeChapterId(parsed.slug, parsed.number + 1)
+				prevChapterId: prevId,
+				nextChapterId: nextId
 			};
 		}
 
@@ -477,16 +512,8 @@ export class MythoriaTalesSource extends BaseSource {
 		return {
 			title: chapterTitle,
 			content: html,
-			prevChapterId:
-				prevNum != null
-					? makeChapterId(parsed.slug, prevNum)
-					: parsed.number > 1
-						? makeChapterId(parsed.slug, parsed.number - 1)
-						: null,
-			nextChapterId:
-				nextNum != null
-					? makeChapterId(parsed.slug, nextNum)
-					: makeChapterId(parsed.slug, parsed.number + 1)
+			prevChapterId: prevId,
+			nextChapterId: nextId
 		};
 	}
 }
