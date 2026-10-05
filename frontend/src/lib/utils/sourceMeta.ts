@@ -173,6 +173,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	mythoriatales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
 	milousarchive: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-500' },
 	primodialtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-teal-500'},
+	tangerinearchive: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-orange-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
