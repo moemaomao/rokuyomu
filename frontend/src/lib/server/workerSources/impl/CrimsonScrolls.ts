@@ -127,25 +127,78 @@ export class CrimsonScrollsSource extends BaseSource {
 	name = 'CrimsonScrolls';
 	baseUrl = BASE;
 
-	protected async fetchHtml(path: string): Promise<string> {
-		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const res = await fetch(url, {
-			headers: {
-				...this.headers,
-				Referer: this.baseUrl,
-				Accept:
-					'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-				'Accept-Language': 'en-US,en;q=0.9'
-			},
-			redirect: 'follow'
+	/** Byparr base — env or local Docker default */
+	private byparrBase(): string {
+		const env =
+			(typeof process !== 'undefined' &&
+				(process.env?.BYPARR_URL || process.env?.VITE_BYPARR_URL)) ||
+			'';
+		return (env || 'http://localhost:8191').replace(/\/$/, '');
+	}
+
+	private async fetchViaByparr(url: string): Promise<string> {
+		const endpoint = `${this.byparrBase()}/v1`;
+		console.log(`[crimsonscrolls] byparr → ${url}`);
+		const res = await fetch(endpoint, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				cmd: 'request.get',
+				url,
+				maxTimeout: 60000
+			})
 		});
-		const html = await res.text();
-		if (isBlockedHtml(res.status, html) || !res.ok) {
+		if (!res.ok) {
+			const t = await res.text().catch(() => '');
+			throw new Error(`Byparr HTTP ${res.status}: ${t.slice(0, 120)}`);
+		}
+		const data = (await res.json()) as {
+			status?: string;
+			message?: string;
+			solution?: { response?: string };
+		};
+		if (data.status !== 'ok' || !data.solution?.response) {
 			throw new Error(
-				`crimsonscrolls blocked ${res.status} (SiteGround/sgcaptcha). Worker edge IP often denied — use scraper + BYPARR_URL.`
+				`Byparr failed: ${data.message || data.status || 'no html'}`
 			);
 		}
+		const html = data.solution.response;
+		if (isBlockedHtml(200, html)) {
+			throw new Error('Byparr returned blocked page');
+		}
+		console.log(`[crimsonscrolls] byparr ok len=${html.length}`);
 		return html;
+	}
+
+	protected async fetchHtml(path: string): Promise<string> {
+		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+
+		// 1) Plain fetch
+		try {
+			const res = await fetch(url, {
+				headers: {
+					...this.headers,
+					Referer: this.baseUrl,
+					Accept:
+						'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+					'Accept-Language': 'en-US,en;q=0.9'
+				},
+				redirect: 'follow'
+			});
+			const html = await res.text();
+			if (!isBlockedHtml(res.status, html) && res.ok) return html;
+			console.warn(
+				`[crimsonscrolls] plain blocked ${res.status} → byparr`
+			);
+		} catch (e) {
+			console.warn(
+				'[crimsonscrolls] plain fail',
+				String(e).slice(0, 80)
+			);
+		}
+
+		// 2) Byparr (default http://localhost:8191)
+		return this.fetchViaByparr(url);
 	}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
@@ -208,94 +261,85 @@ export class CrimsonScrollsSource extends BaseSource {
 		}
 	}
 
-	private parseRecentlyUpdatedSection(html: string): Manga[] {
-		const $ = cheerio.load(html);
-		const list: Manga[] = [];
-		const seen = new Set<string>();
-
-		let section: ReturnType<typeof $> | null = null;
-		$('h1, h2, h3, .heading, .section-title').each((_, el) => {
-			if (/recently\s*updated/i.test(cleanText($(el).text()))) {
-				const grand = $(el).closest(
-					'section, .cs-section, .container, main, .content'
-				);
-				section = grand.length ? grand : $(el).parent();
-			}
-		});
-		const scope = section && (section as ReturnType<typeof $>).length
-			? (section as ReturnType<typeof $>)
-			: $.root();
-
-		scope.find('a[href*="/novel/"]').each((_, a) => {
-			const href = $(a).attr('href') || '';
-			const id = novelIdFromHref(href);
-			if (!id || seen.has(id)) return;
-			if (/\/chapter-/i.test(pathOnly(href))) return;
-
-			const root = $(a).closest('article, .card, .item, .cs-card, li, div');
-			const title =
-				cleanText(
-					root.find('h2, h3, h4, .title, .novel-title').first().text()
-				) ||
-				cleanText($(a).attr('title') || '') ||
-				cleanText($(a).find('img').attr('alt') || '') ||
-				cleanText($(a).text());
-
-			if (!title || title.length < 3) return;
-			if (/^(free|new|browse more|start reading)$/i.test(title)) return;
-
-			const img = root.find('img').first().length
-				? root.find('img').first()
-				: $(a).find('img').first();
-			const cover =
-				img.attr('data-src') ||
-				img.attr('data-lazy-src') ||
-				img.attr('src') ||
-				'';
-
-			let latest = 0;
-			root.find('a[href*="/chapter-"]').each((_, ca) => {
-				const n = parseChapterNumber(
-					$(ca).text() + ' ' + ($(ca).attr('href') || ''),
-					0
-				);
-				if (n > latest) latest = n;
-			});
-			const nearby = cleanText(root.text());
-			const n2 = parseChapterNumber(nearby, 0);
-			if (n2 > latest) latest = n2;
-
-			seen.add(id);
-			list.push({
-				id,
-				title: title.slice(0, 200),
-				cover: cover ? absUrl(cover.split('?')[0]) : '',
-				sourceId: this.id,
-				type: 'novel',
-				lang: 'en',
-				status: /completed/i.test(nearby) ? 'Completed' : 'Ongoing',
-				...(latest > 0 ? { latestChapter: Math.floor(latest) } : {})
-			});
-		});
-
-		return list;
-	}
-
+	/** Extract all unique /novel/{slug} cards from any HTML */
 	private parseNovelCards(html: string): Manga[] {
 		const $ = cheerio.load(html);
 		const list: Manga[] = [];
 		const seen = new Set<string>();
+		const covers = new Map<string, string>();
+		const titles = new Map<string, string>();
+		const latests = new Map<string, number>();
 
-		const push = (
-			id: string,
-			title: string,
-			cover: string,
-			latest?: number,
-			status?: string
-		) => {
-			if (seen.has(id) || !title || title.length < 3) return;
-			if (!/^\/novel\/[a-z0-9-]+$/i.test(id)) return;
+		const skipTitle = (t: string) =>
+			!t ||
+			t.length < 3 ||
+			/^(start reading|browse more|free|new|buy tier|home|store|rankings|library)$/i.test(
+				t
+			);
+
+		// Collect covers + titles from anchors
+		$('a[href*="/novel/"]').each((_, a) => {
+			const href = $(a).attr('href') || '';
+			const p = pathOnly(href);
+			if (/\/chapter-/i.test(p)) {
+				// chapter link → update latest only
+				const id = novelIdFromHref(href);
+				if (!id) return;
+				const n = parseChapterNumber(
+					$(a).text() + ' ' + href,
+					0
+				);
+				if (n > (latests.get(id) || 0)) latests.set(id, n);
+				return;
+			}
+			const id = novelIdFromHref(href);
+			if (!id) return;
+
+			const img = $(a).find('img').first();
+			const cover =
+				img.attr('data-src') ||
+				img.attr('data-lazy-src') ||
+				img.attr('src') ||
+				'';
+			if (cover && !covers.has(id)) covers.set(id, cover);
+
+			let title =
+				cleanText($(a).attr('title') || '') ||
+				cleanText(img.attr('alt') || '') ||
+				cleanText($(a).text());
+			// strip "novel cover" suffix from alt
+			title = title.replace(/\s*novel\s*cover\s*$/i, '').trim();
+			if (!skipTitle(title) && !titles.has(id)) titles.set(id, title);
+		});
+
+		// Headings next to links
+		$('h2 a[href*="/novel/"], h3 a[href*="/novel/"], h4 a[href*="/novel/"]').each(
+			(_, a) => {
+				const id = novelIdFromHref($(a).attr('href') || '');
+				if (!id) return;
+				const t = cleanText($(a).text());
+				if (!skipTitle(t)) titles.set(id, t);
+			}
+		);
+
+		// Regex fallback: /novel/slug/ in raw HTML
+		const re =
+			/https?:\/\/crimsonscrolls\.net\/novel\/([a-z0-9-]+)\/?/gi;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(html)) !== null) {
+			const id = `/novel/${m[1]}`;
+			if (!titles.has(id)) {
+				const slugTitle = m[1].replace(/-/g, ' ');
+				titles.set(id, slugTitle.replace(/\b\w/g, (c) => c.toUpperCase()));
+			}
+		}
+
+		for (const [id, title] of titles) {
+			if (seen.has(id)) continue;
+			if (skipTitle(title)) continue;
 			seen.add(id);
+			const latest = latests.get(id) || 0;
+			const cover = covers.get(id) || '';
 			list.push({
 				id,
 				title: title.slice(0, 200),
@@ -303,80 +347,22 @@ export class CrimsonScrollsSource extends BaseSource {
 				sourceId: this.id,
 				type: 'novel',
 				lang: 'en',
-				status: status || 'Ongoing',
-				...(latest != null && latest > 0
-					? { latestChapter: Math.floor(latest) }
-					: {})
-			});
-		};
-
-		$('article, .cs-card, .novel-card, .card, li, .item').each((_, el) => {
-			const root = $(el);
-			const a = root
-				.find('a[href*="/novel/"]')
-				.filter((_, x) => {
-					const p = pathOnly($(x).attr('href') || '');
-					return /^\/novel\/[a-z0-9-]+$/i.test(p);
-				})
-				.first();
-			if (!a.length) return;
-			const id = novelIdFromHref(a.attr('href') || '');
-			if (!id) return;
-
-			const title =
-				cleanText(
-					root.find('h2, h3, h4, .title, .novel-title').first().text()
-				) ||
-				cleanText(a.attr('title') || '') ||
-				cleanText(a.find('img').attr('alt') || '') ||
-				cleanText(a.text());
-
-			const img = root.find('img').first();
-			const cover =
-				img.attr('data-src') ||
-				img.attr('data-lazy-src') ||
-				img.attr('src') ||
-				'';
-
-			const body = cleanText(root.text());
-			let latest = 0;
-			const chMatch = body.match(/(\d+)\s*chapters?/i);
-			if (chMatch) latest = parseInt(chMatch[1], 10) || 0;
-			root.find('a[href*="/chapter-"]').each((_, ca) => {
-				const n = parseChapterNumber(
-					$(ca).text() + ' ' + ($(ca).attr('href') || ''),
-					0
-				);
-				if (n > latest) latest = n;
-			});
-
-			let status = 'Ongoing';
-			if (/completed/i.test(body)) status = 'Completed';
-			else if (/hiatus/i.test(body)) status = 'Hiatus';
-
-			push(id, title, cover, latest || undefined, status);
-		});
-
-		if (list.length < 5) {
-			$('a[href*="/novel/"]').each((_, a) => {
-				const href = $(a).attr('href') || '';
-				const id = novelIdFromHref(href);
-				if (!id || /\/chapter-/i.test(pathOnly(href))) return;
-				const title =
-					cleanText($(a).attr('title') || '') ||
-					cleanText($(a).find('img').attr('alt') || '') ||
-					cleanText($(a).text());
-				if (!title || title.length < 3) return;
-				if (/^(start reading|browse|free|new)$/i.test(title)) return;
-				const cover =
-					$(a).find('img').attr('data-src') ||
-					$(a).find('img').attr('src') ||
-					'';
-				push(id, title, cover);
+				status: 'Ongoing',
+				...(latest > 0 ? { latestChapter: Math.floor(latest) } : {})
 			});
 		}
 
+		console.log(`[crimsonscrolls] parseNovelCards n=${list.length}`);
 		return list;
+	}
+
+	private parseRecentlyUpdatedSection(html: string): Manga[] {
+		// Prefer slice after "Recently Updated" heading if present
+		const lower = html.toLowerCase();
+		const idx = lower.indexOf('recently updated');
+		const slice =
+			idx >= 0 ? html.slice(idx, idx + 80000) : html;
+		return this.parseNovelCards(slice);
 	}
 
 	async searchManga(
