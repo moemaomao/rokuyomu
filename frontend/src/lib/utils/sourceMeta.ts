@@ -175,6 +175,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	primodialtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-teal-500'},
 	tangerinearchive: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-orange-500' },
 	crimsonscrolls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-red-600' },
+	flyonthewalls: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-sky-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

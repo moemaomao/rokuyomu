@@ -65,8 +65,10 @@ import { MilousArchiveSource } from '../impl/novel/MilousArchive';
 import PrimodialTranslationSource from '../impl/novel/PrimodialTranslation';
 import TangerineArchiveSource from '../impl/novel/TangerineArchive';
 import CrimsonScrollsSource from '../impl/novel/CrimsonScrolls';
+import FlyOnTheWallsSource from '../impl/novel/FlyOnTheWalls';
 
 const novelSources: Record<string, IMangaSource> = {
+	flyonthewalls: new FlyOnTheWallsSource(),
 	crimsonscrolls: new CrimsonScrollsSource(),
 	tangerinearchive: new TangerineArchiveSource(),
 	primodialtranslation: new PrimodialTranslationSource(),
