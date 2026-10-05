@@ -218,6 +218,67 @@
 			.trim()
 	);
 
+	let isNovel = $derived(isNovelSource(source));
+	let trackerSearchTitle = $derived(
+		String(manga?.title || '')
+			.replace(/\s*\(.*?\)\s*$/g, '')
+			.trim()
+	);
+	let mangaUpdatesSearchUrl = $derived(
+		`https://www.mangaupdates.com/series?search=${encodeURIComponent(trackerSearchTitle)}`
+	);
+	let novelUpdatesUrl = $derived(
+		`https://www.novelupdates.com/series-finder/?sf=1&sh=${encodeURIComponent(trackerSearchTitle)}&sort=srank&order=asc`
+	);
+	let mangaUpdatesUrl = $state<string | null>(null);
+	let mangaUpdatesResolved = $state(false);
+	let mangaUpdatesTitle = $state<string | null>(null);
+
+	async function resolveMangaUpdates(title: string) {
+		if (!title || isNovelSource(source)) {
+			mangaUpdatesUrl = null;
+			mangaUpdatesResolved = true;
+			return;
+		}
+		mangaUpdatesResolved = false;
+		mangaUpdatesUrl = null;
+		mangaUpdatesTitle = null;
+		try {
+			const res = await fetch(`/api/tracker/mangaupdates?q=${encodeURIComponent(title)}`);
+			if (!res.ok) throw new Error(String(res.status));
+			const data = (await res.json()) as {
+				ok?: boolean;
+				matched?: boolean;
+				url?: string;
+				title?: string | null;
+			};
+			if (data?.url) {
+				mangaUpdatesUrl = data.url;
+				mangaUpdatesTitle = data.matched ? (data.title ?? null) : null;
+			} else {
+				mangaUpdatesUrl = mangaUpdatesSearchUrl;
+			}
+		} catch {
+			mangaUpdatesUrl = mangaUpdatesSearchUrl;
+		} finally {
+			mangaUpdatesResolved = true;
+		}
+	}
+
+	$effect(() => {
+		const title = trackerSearchTitle;
+		const novel = isNovel;
+		if (!title || novel) {
+			mangaUpdatesUrl = null;
+			mangaUpdatesResolved = true;
+			return;
+		}
+		const t = setTimeout(() => {
+			resolveMangaUpdates(title);
+		}, 50);
+		return () => clearTimeout(t);
+	});
+
 	// ── SEO / share card ─────────────────────────────────────────────────────
 	let pageTitle = $derived(
 		manga?.title ? `${manga.title} - RokuYomu` : 'RokuYomu'
@@ -707,7 +768,59 @@
 								</div>
 							{/if}
 
-							{#if demographic}
+							{#if isNovel}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
+									<span class="flex min-w-0 items-center gap-1.5">
+										<strong class="detail-label">Tracker:</strong>
+										<a
+											href={novelUpdatesUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="tracker-link inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold transition md:text-[13px]"
+											title="Search on NovelUpdates"
+										>
+											<img
+												src="https://www.google.com/s2/favicons?domain=novelupdates.com&sz=32"
+												alt=""
+												width="14"
+												height="14"
+												class="h-3.5 w-3.5 shrink-0 rounded-sm"
+												loading="lazy"
+											/>
+											NovelUpdates
+										</a>
+									</span>
+								</div>
+							{:else}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
+									<span class="flex min-w-0 items-center gap-1.5">
+										<strong class="detail-label">Tracker:</strong>
+										<a
+											href={mangaUpdatesUrl || mangaUpdatesSearchUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="tracker-link inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold transition md:text-[13px]"
+											title={mangaUpdatesTitle
+												? `Open on MangaUpdates: ${mangaUpdatesTitle}`
+												: 'Search on MangaUpdates'}
+										>
+											<img
+												src="https://www.google.com/s2/favicons?domain=mangaupdates.com&sz=32"
+												alt=""
+												width="14"
+												height="14"
+												class="h-3.5 w-3.5 shrink-0 rounded-sm"
+												loading="lazy"
+											/>
+											MangaUpdates
+										</a>
+									</span>
+								</div>
+							{/if}
+
+						{#if demographic}
 								<div class="flex flex-wrap items-start gap-1">
 									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon mt-0.5 w-5 shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
 									<span class="detail-label"><strong>Demographic:</strong></span>
@@ -1235,6 +1348,16 @@
 		background: #ffcc00 !important;
 		color: #000 !important;
 	}
+	.tracker-link {
+		background: rgba(255, 255, 255, 0.06);
+		border-color: rgba(255, 255, 255, 0.18);
+		color: #e4e4e7;
+	}
+	.tracker-link:hover {
+		background: rgba(255, 255, 255, 0.12);
+		border-color: rgba(255, 255, 255, 0.28);
+		color: #fff;
+	}
 
 	:global(html.light) .detail-container {
 		background: rgba(255, 255, 255, 0.74);
@@ -1308,5 +1431,15 @@
 	}
 	:global(html.light) .bookmark-btn:not(.bookmarked):hover {
 		background: rgba(0, 0, 0, 0.06);
+	}
+	:global(html.light) .tracker-link {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.15);
+		color: #18181b;
+	}
+	:global(html.light) .tracker-link:hover {
+		background: rgba(0, 0, 0, 0.08);
+		border-color: rgba(0, 0, 0, 0.22);
+		color: #000;
 	}
 </style>
