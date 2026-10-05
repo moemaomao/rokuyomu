@@ -14,10 +14,24 @@
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
 import { fetchWithCf } from '../../../lib/fetchWithCf';
+import { isByparrEnabled, solveWithByparr } from '../../../lib/byparr';
 import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const BASE = 'https://crimsonscrolls.net';
 const PER_PAGE = 24;
+
+/** SiteGround Bot Protect / CF / plain 403 */
+function isBlockedResponse(status: number, html: string): boolean {
+	if (status === 403 || status === 503 || status === 429) return true;
+	const lower = (html || '').slice(0, 8000).toLowerCase();
+	return (
+		lower.includes('sgcaptcha') ||
+		lower.includes('just a moment') ||
+		lower.includes('cf-browser-verification') ||
+		lower.includes('challenge-platform') ||
+		(lower.includes('attention required') && lower.includes('cloudflare'))
+	);
+}
 
 function absUrl(href: string | undefined): string {
 	if (!href) return '';
@@ -127,22 +141,57 @@ export class CrimsonScrollsSource extends BaseSource {
 
 	protected async fetchHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+
+		// 1) Normal fetchWithCf (cookie jar + CF detect)
 		try {
-			return await fetchWithCf(url, {
+			const html = await fetchWithCf(url, {
 				headers: { ...this.headers, Referer: this.baseUrl }
 			});
+			if (!isBlockedResponse(200, html)) return html;
+			console.warn('[crimsonscrolls] blocked body after fetchWithCf');
 		} catch (e) {
 			console.warn(
-				'[crimsonscrolls] fetchWithCf fail, plain',
+				'[crimsonscrolls] fetchWithCf fail',
+				String(e).slice(0, 120)
+			);
+		}
+
+		// 2) Plain fetch (local/dev may work)
+		try {
+			const res = await fetch(url, {
+				headers: this.headers,
+				redirect: 'follow'
+			});
+			const html = await res.text();
+			if (!isBlockedResponse(res.status, html) && res.ok) return html;
+			console.warn(
+				`[crimsonscrolls] plain fetch blocked status=${res.status}`
+			);
+		} catch (e) {
+			console.warn(
+				'[crimsonscrolls] plain fetch error',
 				String(e).slice(0, 80)
 			);
-			const res = await fetch(url, { headers: this.headers });
-			if (!res.ok) {
-				const t = await res.text().catch(() => '');
-				throw new Error(`fetchHtml ${res.status}: ${t.slice(0, 100)}`);
-			}
-			return await res.text();
 		}
+
+		// 3) Byparr solver (SiteGround / CF) — requires BYPARR_URL
+		if (isByparrEnabled()) {
+			console.log(`[crimsonscrolls] byparr solve ${url}`);
+			const solved = await solveWithByparr(url);
+			if (solved.html && !isBlockedResponse(200, solved.html)) {
+				console.log(
+					`[crimsonscrolls] byparr ok len=${solved.html.length}`
+				);
+				return solved.html;
+			}
+			throw new Error(
+				`Byparr still blocked for ${url} (len=${solved.html?.length || 0})`
+			);
+		}
+
+		throw new Error(
+			`crimsonscrolls blocked (403/sgcaptcha). Set BYPARR_URL to enable solver. url=${url}`
+		);
 	}
 
 	// ─── Latest (Recently Updated) ───────────────────────────────────────
