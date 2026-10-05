@@ -59,8 +59,10 @@ import { StarlitTalesSource } from '../impl/novel/StarlitTales';
 import { SekaiTranslationsSource } from '../impl/novel/SekaiTranslations';
 import { NoBadNovelSource } from '../impl/novel/NoBadNovel';
 import { NoiceTranslationsSource } from '../impl/novel/NoiceTranslations';
+import { TigerTranslationsSource } from '../impl/novel/TigerTranslations';
 
 const novelSources: Record<string, IMangaSource> = {
+	tigertranslations: new TigerTranslationsSource(),
 	noicetranslations: new NoiceTranslationsSource(),
 	nobadnovel: new NoBadNovelSource(),
 	sekaitranslations: new SekaiTranslationsSource(),

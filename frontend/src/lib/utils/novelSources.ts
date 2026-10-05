@@ -58,7 +58,8 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'starlittales',
 	'sekaitranslations',
 	'nobadnovel',
-	'noicetranslations'
+	'noicetranslations',
+	'tigertranslations',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
