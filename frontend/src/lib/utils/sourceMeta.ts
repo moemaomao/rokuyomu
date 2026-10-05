@@ -170,6 +170,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	nobadnovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-500' },
 	noicetranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-fuchsia-500' },
 	tigertranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-orange-500' },
+	mythoriatales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
