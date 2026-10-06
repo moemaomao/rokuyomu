@@ -199,27 +199,27 @@
 
 	function statusClass(status?: string) {
 		const s = (status || '').toLowerCase();
-		if (s.includes('ongoing')) return 'bg-green-600';
-		if (s.includes('completed') || s.includes('complete')) return 'bg-blue-600';
-		if (s.includes('hiatus')) return 'bg-orange-500';
-		if (s.includes('dropped')) return 'bg-red-700';
-		return 'bg-green-600';
+		if (s.includes('ongoing')) return 'badge-status-ongoing';
+		if (s.includes('completed') || s.includes('complete')) return 'badge-status-completed';
+		if (s.includes('hiatus')) return 'badge-status-hiatus';
+		if (s.includes('dropped')) return 'badge-status-dropped';
+		return 'badge-status-ongoing';
 	}
 
 	function typeBadgeClass(type?: string) {
 		const t = (type || 'manga').toLowerCase();
 		const map: Record<string, string> = {
-			doujinshi: 'bg-[#8b1e42]',
-			artistcg: 'bg-[#009688]',
-			gamecg: 'bg-[#009688]',
-			imageset: 'bg-[#616161]',
-			anime: 'bg-[#7b1fa2]',
-			western: 'bg-[#5d4037]',
-			'non-h': 'bg-[#455a64]',
-			manhwa: 'bg-[#1976D2]',
-			manhua: 'bg-[#2E7D32]'
+			doujinshi: 'badge-type-doujinshi',
+			artistcg: 'badge-type-artistcg',
+			gamecg: 'badge-type-gamecg',
+			imageset: 'badge-type-imageset',
+			anime: 'badge-type-anime',
+			western: 'badge-type-western',
+			'non-h': 'badge-type-nonh',
+			manhwa: 'badge-type-manhwa',
+			manhua: 'badge-type-manhua'
 		};
-		return map[t] || 'bg-[#c91714]';
+		return map[t] || 'badge-type-manga';
 	}
 
 	function listChapterFlag(lang?: string): string {
@@ -296,6 +296,130 @@
 	<meta name="twitter:image" content={pageImage} />
 
 	<link rel="canonical" href={$page.url.href} />
+
+	<style>
+		.badge-stick {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.15rem;
+			padding: 0.18rem 0.4rem;
+			font-size: 0.55rem;
+			font-weight: 800;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			line-height: 1.1;
+			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+		}
+
+		@media (min-width: 640px) {
+			.badge-stick {
+				font-size: 0.6rem;
+				padding: 0.2rem 0.45rem;
+			}
+		}
+
+		.badge-stick-tl {
+			border-radius: 0 0 0.35rem 0;
+		}
+
+		.badge-stick-tr {
+			border-radius: 0 0 0 0.35rem;
+		}
+
+		.badge-stick-ch {
+			border-radius: 0 0.3rem 0.3rem 0;
+			margin-top: 1px;
+		}
+
+		.badge-stick-bl {
+			border-radius: 0 0.35rem 0 0;
+		}
+
+		.badge-stick-br {
+			border-radius: 0.35rem 0 0 0;
+		}
+
+		/* ── Colors ─────────────────────────────────────────────────────────── */
+		.badge-status-ongoing {
+			background: #16a34a;
+			color: #fff;
+			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+		}
+		.badge-status-completed {
+			background: #2563eb;
+			color: #fff;
+			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+		}
+		.badge-status-hiatus {
+			background: #ea580c;
+			color: #fff;
+			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+		}
+		.badge-status-dropped {
+			background: #b91c1c;
+			color: #fff;
+			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+		}
+
+		.badge-chapter {
+			background: #eab308;
+			color: #1a1a1a;
+			font-weight: 800;
+		}
+
+		.badge-type-manga {
+			background: #c91714;
+			color: #fff;
+		}
+		.badge-type-manhwa {
+			background: #1976d2;
+			color: #fff;
+		}
+		.badge-type-manhua {
+			background: #2e7d32;
+			color: #fff;
+		}
+		.badge-type-doujinshi {
+			background: #8b1e42;
+			color: #fff;
+		}
+		.badge-type-artistcg,
+		.badge-type-gamecg {
+			background: #009688;
+			color: #fff;
+		}
+		.badge-type-imageset {
+			background: #616161;
+			color: #fff;
+		}
+		.badge-type-anime {
+			background: #7b1fa2;
+			color: #fff;
+		}
+		.badge-type-western {
+			background: #5d4037;
+			color: #fff;
+		}
+		.badge-type-nonh {
+			background: #455a64;
+			color: #fff;
+		}
+
+		.badge-source {
+			background: rgba(147, 51, 234, 0.92);
+			color: #fff;
+			max-width: 55%;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.badge-backup {
+			background: #f59e0b;
+			color: #1a1a1a;
+			font-weight: 800;
+		}
+	</style>
 </svelte:head>
 
 <div class="mx-auto w-full max-w-none px-2 py-3 sm:px-3 sm:py-4 lg:px-4">
@@ -450,64 +574,49 @@
 			{/if}
 
 			{#if (manga as { fromBackup?: boolean }).fromBackup}
-				<span
-					class="absolute top-1 right-1 z-20 rounded bg-amber-500/90 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow"
-				>
+				<span class="badge-stick badge-stick-tr badge-backup absolute top-0 right-0 z-20">
 					Backup
 				</span>
 			{/if}
 
-			<span
-				class="absolute top-1 left-1 z-20 rounded px-1 py-0.5 text-[8px] font-bold uppercase text-white sm:text-[9px]
-					{statusClass(manga.status)}"
-			>
+			<span class="badge-stick badge-stick-tl absolute top-0 left-0 z-20 {statusClass(manga.status)}">
 				{manga.status || 'ONGOING'}
 			</span>
 
-								<!-- CHAPTER -->
-								{#if manga.latestChapter || (manga as any).chapter}
-									<span
-										class="absolute top-[24px] left-1 z-20 flex items-center gap-0.5 rounded bg-yellow-400 px-1 py-0.5 text-[8px] font-bold text-black sm:text-[9px]"
-									>
-										{#if listChapterFlag(manga.lang)}
-											<span
-												class="fi fi-{listChapterFlag(manga.lang)} text-[9px] leading-none sm:text-[10px]"
-											></span>
-										{/if}
-										<span>Ch. {manga.latestChapter || (manga as any).chapter}</span>
-									</span>
-								{/if}
+			{#if manga.latestChapter || (manga as any).chapter}
+				<span class="badge-stick badge-stick-ch badge-chapter absolute top-[18px] left-0 z-20 sm:top-[20px]">
+					{#if listChapterFlag(manga.lang)}
+						<span
+							class="fi fi-{listChapterFlag(manga.lang)} text-[9px] leading-none sm:text-[10px]"
+						></span>
+					{/if}
+					<span>Ch. {manga.latestChapter || (manga as any).chapter}</span>
+				</span>
+			{/if}
 
-								<!-- TYPE -->
-								<span
-									class="absolute bottom-1 left-1 z-20 rounded px-1 py-0.5 text-[8px] font-bold uppercase text-white shadow-sm sm:text-[9px]
-										{typeBadgeClass(manga.type)}"
-								>
-									{manga.type || 'manga'}
-								</span>
+			<span class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {typeBadgeClass(manga.type)}">
+				{manga.type || 'manga'}
+			</span>
 
-								<!-- SOURCE badge (multi mode) -->
-								{#if isMulti && manga.sourceId}
-									<span
-										class="absolute right-1 bottom-1 z-20 max-w-[60%] truncate rounded bg-purple-500/50 px-1 py-0.5 text-[8px] font-bold uppercase text-white shadow-sm sm:text-[9px]"
-									>
-										{manga.sourceId}
-									</span>
-								{/if}
+			{#if isMulti && manga.sourceId}
+				<span class="badge-stick badge-stick-br badge-source absolute bottom-0 right-0 z-20">
+					{manga.sourceId}
+				</span>
+			{/if}
 
-								<!-- TITLE -->
-                                <div
-                                    class="absolute inset-x-0 bottom-0 z-10 max-h-12 bg-gradient-to-t from-black/95 via-black/80 to-transparent px-1 pt-4 pb-13 transition-all duration-300 group-hover:max-h-full group-hover:pt-8 group-active:max-h-full group-active:pt-8"
-                                >
-                                    <h3
-                                        class="line-clamp-2 text-center text-[10px] font-semibold leading-tight text-white drop-shadow-md transition-all duration-300 group-hover:line-clamp-none group-active:line-clamp-none sm:text-[11px]"
-                                    >
-                                        {manga.title}
-                                    </h3>
-                                </div>
-							</div>
-						</div>
-					</a>
+			<!-- TITLE -->
+			<div
+				class="absolute inset-x-0 bottom-0 z-10 max-h-12 bg-gradient-to-t from-black/95 via-black/80 to-transparent px-1 pt-4 pb-13 transition-all duration-300 group-hover:max-h-full group-hover:pt-8 group-active:max-h-full group-active:pt-8"
+			>
+				<h3
+					class="line-clamp-2 text-center text-[10px] font-semibold leading-tight text-white drop-shadow-md transition-all duration-300 group-hover:line-clamp-none group-active:line-clamp-none sm:text-[11px]"
+				>
+					{manga.title}
+				</h3>
+			</div>
+		</div>
+	</div>
+</a>
 				{/each}
 			</div>
 		{/key}
