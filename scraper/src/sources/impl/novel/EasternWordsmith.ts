@@ -10,12 +10,7 @@
  *   Chapter       : /chapter/{numericId}
  *   Cover         : /novel-image/{id}
  *
- * Notes:
- *   - Homepage "Latest Updates" ≈ 10 series; we merge with /novels + /updates
- *     and always return up to PAGE_SIZE (24) unique titles per page.
- *   - Chapter list titles are cleaned to "Chapter {n}" (no subtitle).
- *   - Paywalled chapters: fa-lock / lock icon near the chapter link → isLocked.
- *   - Uses fetchWithCf (Byparr) because the site is behind Cloudflare.
+ * Test: curl.exe "http://localhost:3000/easternwordsmith/latest?page=1"
  */
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
@@ -28,11 +23,10 @@ const BASE = 'https://easternwordsmith.com';
 
 function absUrl(href: string | undefined): string {
 	if (!href) return '';
-	let h = href.trim();
-	// strip wayback prefixes if any leak in
+	let h = String(href).trim();
 	h = h.replace(/^https?:\/\/web\.archive\.org\/web\/\d+(?:id_|im_)?\//i, '');
 	if (h.startsWith('//')) return `https:${h}`;
-	if (h.startsWith('http')) return h;
+	if (/^https?:\/\//i.test(h)) return h;
 	try {
 		return new URL(h, BASE).href;
 	} catch {
@@ -40,17 +34,37 @@ function absUrl(href: string | undefined): string {
 	}
 }
 
-/** Path only, keep encoded spaces; drop trailing slash (except root). */
 function pathOnly(href: string): string {
 	try {
 		const u = new URL(absUrl(href));
 		let p = u.pathname || '/';
+		// decode then re-normalize
+		try {
+			p = decodeURIComponent(p);
+		} catch {
+			/* keep */
+		}
 		if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
 		return p || '/';
 	} catch {
-		const p = href.startsWith('/') ? href : `/${href}`;
-		return p.replace(/\/$/, '') || '/';
+		let p = href.startsWith('/') ? href : `/${href}`;
+		p = p.replace(/\/$/, '') || '/';
+		return p;
 	}
+}
+
+/** Encode path for fetch — keep /novel/Foo Bar as /novel/Foo%20Bar */
+function encodePath(path: string): string {
+	if (path.startsWith('http')) return path;
+	const parts = path.split('/').map((seg, i) => {
+		if (i === 0 && seg === '') return '';
+		try {
+			return encodeURIComponent(decodeURIComponent(seg));
+		} catch {
+			return encodeURIComponent(seg);
+		}
+	});
+	return parts.join('/');
 }
 
 function decodeEntities(s: string): string {
@@ -88,9 +102,8 @@ function escapeHtml(s: string): string {
 
 function parseChapterNumber(text: string, fallback = 0): number {
 	const t = (text || '').replace(/\s+/g, ' ').trim();
-	// "Chapter 38: Judy (4)" / "Chapter v1 c1-4" / "Ch. 12"
 	const patterns = [
-		/(?:chapter|ch\.?)\s*v?\d*\s*c?(\d+(?:\.\d+)?)/i,
+		/(?:chapter|ch\.?)\s*v?\d*\s*[cC]?[.\-_]?\s*(\d+(?:\.\d+)?)/i,
 		/(?:chapter|ch\.?)\s*[.\-_]?\s*(\d+(?:\.\d+)?)/i,
 		/\/chapter\/(\d+)(?:\/|$)/i,
 		/\b(\d+(?:\.\d+)?)\b/
@@ -105,35 +118,38 @@ function parseChapterNumber(text: string, fallback = 0): number {
 	return fallback;
 }
 
-/** Clean chapter label — number only, no subtitle. */
 function shortChapterTitle(number: number, raw?: string): string {
-	if (number > 0) {
-		return Number.isInteger(number) ? `Chapter ${number}` : `Chapter ${number}`;
-	}
+	if (number > 0) return `Chapter ${number}`;
 	const n = parseChapterNumber(raw || '', 0);
 	return n > 0 ? `Chapter ${n}` : 'Chapter';
 }
 
 function isNovelPath(path: string): boolean {
-	return /^\/novel\/.+/i.test(path) && !/\/chapter\//i.test(path);
+	const p = pathOnly(path);
+	return /^\/novel\/.+/i.test(p) && !/\/chapter\//i.test(p);
 }
 
 function isChapterPath(path: string): boolean {
-	return /^\/chapter\/\d+/i.test(path);
+	return /^\/chapter\/\d+/i.test(pathOnly(path));
 }
 
 function normalizeCover(src: string | undefined): string {
 	if (!src) return '';
 	let s = absUrl(src);
-	// prefer live host
-	s = s.replace(
-		/^https?:\/\/web\.archive\.org\/web\/\d+im_\//i,
-		''
-	);
-	if (s.includes('No-Image') || s.includes('No_image') || s.includes('no-image')) {
-		return '';
-	}
+	s = s.replace(/^https?:\/\/web\.archive\.org\/web\/\d+im_\//i, '');
+	if (/no[_-]?image/i.test(s)) return '';
 	return s;
+}
+
+function isChallengeHtml(html: string): boolean {
+	const head = html.slice(0, 8000).toLowerCase();
+	return (
+		head.includes('just a moment') ||
+		head.includes('cf-browser-verification') ||
+		head.includes('challenge-platform') ||
+		head.includes('checking your browser') ||
+		(head.includes('cloudflare') && head.includes('enable javascript'))
+	);
 }
 
 export class EasternWordsmithSource extends BaseSource {
@@ -144,37 +160,80 @@ export class EasternWordsmithSource extends BaseSource {
 
 	protected headers: Record<string, string> = {
 		'User-Agent':
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: BASE + '/'
 	};
 
-	/** Override: always go through fetchWithCf (CF challenge). */
 	protected async fetchHtml(path: string): Promise<string> {
-		const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
-		return fetchWithCf(url, {
-			headers: {
-				...this.headers,
-				Referer: this.baseUrl + '/'
+		const raw = path.startsWith('http')
+			? path
+			: `${this.baseUrl}${encodePath(path.startsWith('/') ? path : `/${path}`)}`;
+
+		// 1) Normal path (cookie jar + Byparr if CF HTML detected)
+		try {
+			const html = await fetchWithCf(raw, {
+				headers: {
+					...this.headers,
+					Referer: this.baseUrl + '/'
+				}
+			});
+			if (!isChallengeHtml(html) && html.length > 500) {
+				return html;
 			}
-		});
+			console.warn(
+				`[easternwordsmith] fetchWithCf returned challenge/short body len=${html.length}, forcing Byparr`
+			);
+		} catch (e: any) {
+			// Node "fetch failed" / ECONNRESET / etc. — never reached CF detector
+			console.warn(
+				`[easternwordsmith] direct fetch failed (${e?.message || e}), forcing Byparr for ${raw}`
+			);
+		}
+
+		// 2) Force Byparr solve (site often blocks bare Node TLS before CF page)
+		const { solveWithByparr, isByparrEnabled } = await import('../../../lib/byparr');
+		if (!isByparrEnabled()) {
+			throw new Error(
+				`Cannot reach ${raw} and BYPARR_URL is not set. Start Byparr and set BYPARR_URL.`
+			);
+		}
+
+		const solved = await solveWithByparr(raw, { maxTimeoutMs: 90_000 });
+		if (!solved.html || isChallengeHtml(solved.html)) {
+			throw new Error(
+				`Byparr did not return usable HTML for ${raw} (len=${solved.html?.length || 0})`
+			);
+		}
+		console.log(
+			`[easternwordsmith] Byparr OK ${raw} len=${solved.html.length} cookies=${Boolean(solved.cookieHeader)}`
+		);
+		return solved.html;
 	}
 
 	// ─── List parsers ────────────────────────────────────────────────────
 
-	/** Parse series cards from homepage Latest Updates / updates / novels. */
-	private parseSeriesCards($: cheerio.CheerioAPI): Manga[] {
+	private parseSeriesCards($: cheerio.CheerioAPI, htmlLen: number): Manga[] {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		const push = (path: string, title: string, cover: string, latest?: number) => {
+		const push = (href: string, title: string, cover: string, latest?: number) => {
+			let path = pathOnly(href);
+			// relative "novel/Foo" → "/novel/Foo"
+			if (!path.startsWith('/novel/') && /novel\//i.test(href)) {
+				const m = href.match(/novel\/([^?#]+)/i);
+				if (m) path = `/novel/${decodeURIComponent(m[1]).replace(/\/$/, '')}`;
+			}
 			if (!isNovelPath(path)) return;
-			const key = decodeURIComponent(path).toLowerCase();
+
+			const key = path.toLowerCase();
 			if (seen.has(key)) return;
 			seen.add(key);
+
 			const t = decodeEntities(title).slice(0, 200);
-			if (!t) return;
+			if (!t || t.length < 2) return;
+
 			list.push({
 				id: path,
 				title: t,
@@ -186,86 +245,96 @@ export class EasternWordsmithSource extends BaseSource {
 			});
 		};
 
-		// Primary: h6.stm.oneliner > a[href*="novel/"] (Latest Updates cards)
-		$('h6.stm.oneliner a[href*="novel/"], h6 a[href*="novel/"]').each((_, el) => {
+		// A) Latest Updates cards: h6 > a[href*="novel"]
+		$('h6 a[href*="novel"], h5 a[href*="novel"], h4 a[href*="novel"]').each((_, el) => {
 			const a = $(el);
 			const href = a.attr('href') || '';
-			const path = pathOnly(href);
-			if (!isNovelPath(path)) return;
-
 			const title = a.text().replace(/\s+/g, ' ').trim();
+			if (!title) return;
+
 			let cover = '';
 			let latest = 0;
-
 			const row = a.closest('.row');
-			if (row.length) {
-				const img =
-					row.find('img').first().attr('src') ||
-					row.find('img').first().attr('data-src') ||
-					'';
-				cover = normalizeCover(img);
-				const chText =
-					row.find('a[href*="chapter/"]').first().text().replace(/\s+/g, ' ').trim() ||
-					'';
-				latest = parseChapterNumber(chText, 0);
-			}
-			push(path, title, cover, latest);
+			const scope = row.length ? row : a.parent().parent();
+			const img =
+				scope.find('img').first().attr('src') ||
+				scope.find('img').first().attr('data-src') ||
+				'';
+			cover = normalizeCover(img);
+			const chText =
+				scope.find('a[href*="chapter"]').first().text().replace(/\s+/g, ' ').trim() || '';
+			latest = parseChapterNumber(chText, 0);
+			push(href, title, cover, latest);
 		});
 
-		// Fallback: any a[href*="novel/"] with visible title + nearby img
-		$('a[href*="novel/"]').each((_, el) => {
+		// B) Any anchor with novel/ in href
+		$('a[href*="novel"]').each((_, el) => {
 			const a = $(el);
 			const href = a.attr('href') || '';
-			const path = pathOnly(href);
-			if (!isNovelPath(path)) return;
-			const key = decodeURIComponent(path).toLowerCase();
-			if (seen.has(key)) return;
+			if (!/novel\//i.test(href)) return;
+			if (/chapter/i.test(href) && !/\/novel\//i.test(href)) return;
 
 			let title = a.text().replace(/\s+/g, ' ').trim();
 			if (!title || title.length < 2) {
-				title = a.find('img').attr('alt') || '';
+				title = a.attr('title') || a.find('img').attr('alt') || '';
 			}
+			title = title.replace(/\s+/g, ' ').trim();
 			if (!title || title.length < 2) return;
+			// skip nav labels
+			if (/^(home|novels?|updates?|contact|login|register|all novels)$/i.test(title)) return;
 
 			let cover = '';
-			const img =
-				a.find('img').attr('src') ||
-				a.find('img').attr('data-src') ||
-				a.closest('.row, .col-12, .col-6, .card').find('img').first().attr('src') ||
-				'';
-			cover = normalizeCover(img);
+			const imgEl = a.find('img').first();
+			if (imgEl.length) {
+				cover = normalizeCover(imgEl.attr('src') || imgEl.attr('data-src'));
+			} else {
+				const near = a.closest('.row, .col-12, .col-6, .col-lg-6, .card, article');
+				cover = normalizeCover(
+					near.find('img').first().attr('src') || near.find('img').first().attr('data-src')
+				);
+			}
 
 			let latest = 0;
-			const parent = a.closest('.row, .col-12, .col-lg-6');
+			const parent = a.closest('.row, .col-12, .col-lg-6, .col-6');
 			const chText =
-				parent.find('a[href*="chapter/"]').first().text().replace(/\s+/g, ' ').trim() ||
-				'';
+				parent.find('a[href*="chapter"]').first().text().replace(/\s+/g, ' ').trim() || '';
 			latest = parseChapterNumber(chText, 0);
 
-			push(path, title, cover, latest);
+			push(href, title, cover, latest);
 		});
 
+		// C) Regex fallback on raw-ish text links if still empty
+		if (list.length === 0) {
+			const body = $.root().html() || '';
+			const re = /href=["']([^"']*novel\/[^"']+)["'][^>]*>([^<]{3,200})</gi;
+			let m: RegExpExecArray | null;
+			while ((m = re.exec(body))) {
+				const href = m[1];
+				const title = decodeEntities(m[2]).replace(/\s+/g, ' ').trim();
+				if (/chapter/i.test(href) && !/\/novel\//i.test(href)) continue;
+				push(href, title, '', 0);
+			}
+		}
+
+		console.log(
+			`[easternwordsmith] parse cards htmlLen=${htmlLen} → ${list.length} titles`
+		);
 		return list;
 	}
 
 	private async collectLatestPool(): Promise<Manga[]> {
 		const merged: Manga[] = [];
 		const seen = new Set<string>();
+		const errors: string[] = [];
 
 		const addAll = (items: Manga[]) => {
 			for (const m of items) {
-				const key = decodeURIComponent(m.id).toLowerCase();
+				const key = m.id.toLowerCase();
 				if (seen.has(key)) {
-					// upgrade cover / latest if missing
-					const existing = merged.find(
-						(x) => decodeURIComponent(x.id).toLowerCase() === key
-					);
+					const existing = merged.find((x) => x.id.toLowerCase() === key);
 					if (existing) {
 						if (!existing.cover && m.cover) existing.cover = m.cover;
-						if (
-							(!existing.latestChapter || existing.latestChapter === 0) &&
-							m.latestChapter
-						) {
+						if (!existing.latestChapter && m.latestChapter) {
 							existing.latestChapter = m.latestChapter;
 						}
 					}
@@ -276,31 +345,27 @@ export class EasternWordsmithSource extends BaseSource {
 			}
 		};
 
-		// 1) Homepage — Latest Updates (priority order)
-		try {
-			const homeHtml = await this.fetchHtml('/');
-			const $home = cheerio.load(homeHtml);
-			addAll(this.parseSeriesCards($home));
-		} catch (e) {
-			console.warn('[easternwordsmith] home failed', e);
-		}
+		const tryPath = async (path: string) => {
+			try {
+				const html = await this.fetchHtml(path);
+				console.log(`[easternwordsmith] fetched ${path} len=${html.length}`);
+				const $ = cheerio.load(html);
+				addAll(this.parseSeriesCards($, html.length));
+			} catch (e: any) {
+				const msg = e?.message || String(e);
+				errors.push(`${path}: ${msg}`);
+				console.warn(`[easternwordsmith] ${path} failed:`, msg);
+			}
+		};
 
-		// 2) /updates
-		try {
-			const upHtml = await this.fetchHtml('/updates');
-			const $up = cheerio.load(upHtml);
-			addAll(this.parseSeriesCards($up));
-		} catch (e) {
-			console.warn('[easternwordsmith] updates failed', e);
-		}
+		await tryPath('/');
+		await tryPath('/updates');
+		await tryPath('/novels');
 
-		// 3) /novels — full catalog
-		try {
-			const novHtml = await this.fetchHtml('/novels');
-			const $nov = cheerio.load(novHtml);
-			addAll(this.parseSeriesCards($nov));
-		} catch (e) {
-			console.warn('[easternwordsmith] novels failed', e);
+		if (merged.length === 0 && errors.length) {
+			throw new Error(
+				`Eastern Wordsmith: no titles parsed. Errors: ${errors.join(' | ')}`
+			);
 		}
 
 		return merged;
@@ -314,7 +379,6 @@ export class EasternWordsmithSource extends BaseSource {
 		const pool = await this.collectLatestPool();
 		const start = (p - 1) * PAGE_SIZE;
 		const slice = pool.slice(start, start + PAGE_SIZE);
-
 		console.log(
 			`[easternwordsmith] latest page=${p} pool=${pool.length} → ${slice.length}`
 		);
@@ -331,56 +395,43 @@ export class EasternWordsmithSource extends BaseSource {
 
 		const qLower = q.toLowerCase();
 		const pool = await this.collectLatestPool();
-
-		// Client-side filter (site has no reliable public search API in archives)
 		let matched = pool.filter((m) => m.title.toLowerCase().includes(qLower));
 
-		// Optional: try server search endpoints
 		if (matched.length === 0) {
-			const tryUrls = [
+			for (const path of [
 				`/?s=${encodeURIComponent(q)}`,
 				`/novels?search=${encodeURIComponent(q)}`,
 				`/search?q=${encodeURIComponent(q)}`
-			];
-			for (const path of tryUrls) {
+			]) {
 				try {
 					const html = await this.fetchHtml(path);
 					const $ = cheerio.load(html);
-					const found = this.parseSeriesCards($).filter((m) =>
-						m.title.toLowerCase().includes(qLower)
-					);
-					if (found.length) {
+					const found = this.parseSeriesCards($, html.length);
+					const filtered = found.filter((m) => m.title.toLowerCase().includes(qLower));
+					if (filtered.length) {
+						matched = filtered;
+						break;
+					}
+					if (found.length && found.length <= 30) {
 						matched = found;
 						break;
 					}
-					// if page returned any novel cards, take them as search results
-					const any = this.parseSeriesCards($);
-					if (any.length && any.length < pool.length) {
-						matched = any;
-						break;
-					}
 				} catch {
-					// ignore
+					/* ignore */
 				}
 			}
 		}
 
 		const start = (page - 1) * PAGE_SIZE;
-		const slice = matched.slice(start, start + PAGE_SIZE);
-		console.log(
-			`[easternwordsmith] search "${q}" page=${page} hits=${matched.length} → ${slice.length}`
-		);
-		return slice;
+		return matched.slice(start, start + PAGE_SIZE);
 	}
-
-	// ─── Details ─────────────────────────────────────────────────────────
 
 	async getMangaDetails(
 		mangaId: string,
 		_opts?: { lang?: string }
 	): Promise<MangaDetails> {
 		let path = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
-		if (!path.startsWith('/novel/')) {
+		if (!path.toLowerCase().startsWith('/novel/')) {
 			path = `/novel/${mangaId.replace(/^\/+/, '')}`;
 		}
 		path = path.replace(/\/$/, '');
@@ -402,13 +453,9 @@ export class EasternWordsmithSource extends BaseSource {
 		$('img').each((_, img) => {
 			if (cover) return;
 			const src = $(img).attr('src') || $(img).attr('data-src') || '';
-			if (/novel-image/i.test(src)) {
-				cover = normalizeCover(src);
-			}
+			if (/novel-image/i.test(src)) cover = normalizeCover(src);
 		});
-		if (!cover) {
-			cover = normalizeCover($('img').first().attr('src'));
-		}
+		if (!cover) cover = normalizeCover($('img').first().attr('src'));
 
 		const authors: string[] = [];
 		const genres: string[] = [];
@@ -416,7 +463,6 @@ export class EasternWordsmithSource extends BaseSource {
 		let description = '';
 		const altTitles: string[] = [];
 
-		// Metadata rows: col-4 label + col-8 value
 		$('.row').each((_, row) => {
 			const $row = $(row);
 			const label = $row
@@ -435,49 +481,28 @@ export class EasternWordsmithSource extends BaseSource {
 				.trim();
 			if (!label || !value) return;
 
-			if (label.includes('author') || label.includes('artist') || label.includes('writer')) {
+			if (/author|artist|writer/.test(label)) {
 				value.split(/,|\/|&/).forEach((a) => {
 					const t = a.trim();
 					if (t && !authors.includes(t)) authors.push(t);
 				});
-			} else if (label.includes('genre') || label.includes('tag')) {
+			} else if (/genre|tag/.test(label)) {
 				value.split(/,|\//).forEach((g) => {
 					const t = g.trim();
 					if (t && !genres.includes(t)) genres.push(t);
 				});
-			} else if (label.includes('status')) {
+			} else if (/status/.test(label)) {
 				status = value;
-			} else if (
-				label.includes('alternate') ||
-				label.includes('alt') ||
-				label.includes('other name')
-			) {
+			} else if (/alternate|alt|other name/.test(label)) {
 				value.split(/,/).forEach((a) => {
 					const t = a.trim();
 					if (t && t.toLowerCase() !== title.toLowerCase()) altTitles.push(t);
 				});
-			} else if (label.includes('release') || label.includes('year')) {
-				// keep as genre-ish tag if useful
-				if (value && !genres.includes(value)) {
-					/* skip putting year into genres */
-				}
-			} else if (label.includes('description') || label.includes('synopsis')) {
+			} else if (/description|synopsis/.test(label)) {
 				description = value;
 			}
 		});
 
-		// Description block fallback
-		if (!description) {
-			const descLabel = $('a, span, div, strong, b')
-				.filter((_, el) => /^description|synopsis$/i.test($(el).text().replace(/:/g, '').trim()))
-				.first();
-			if (descLabel.length) {
-				const parent = descLabel.closest('.row');
-				if (parent.length) {
-					description = parent.find('.col-8, .col-12').last().text().replace(/\s+/g, ' ').trim();
-				}
-			}
-		}
 		if (!description) {
 			description =
 				$('meta[name="description"]').attr('content')?.trim() ||
@@ -486,16 +511,10 @@ export class EasternWordsmithSource extends BaseSource {
 		}
 		if (description.length > 4000) description = description.slice(0, 4000) + '…';
 
-		// Chapters — prefer scrollable list (.Dscroll) then any chapter links
 		const chapters: Chapter[] = [];
 		const seenCh = new Set<string>();
 
-		const ingestChapter = (
-			href: string,
-			rawTitle: string,
-			date: string,
-			locked: boolean
-		) => {
+		const ingest = (href: string, rawTitle: string, date: string, locked: boolean) => {
 			const id = pathOnly(href);
 			if (!isChapterPath(id)) return;
 			if (seenCh.has(id)) return;
@@ -514,38 +533,34 @@ export class EasternWordsmithSource extends BaseSource {
 			});
 		};
 
-		const scanChapterAnchors = (root: cheerio.Cheerio<AnyNode>) => {
-			root.find('a[href*="chapter/"]').each((_, el) => {
+		const scan = (root: cheerio.Cheerio<AnyNode>) => {
+			root.find('a[href*="chapter"]').each((_, el) => {
 				const a = $(el);
 				const href = a.attr('href') || '';
+				if (!/chapter\/\d+/i.test(href)) return;
 				const rawTitle = a.text().replace(/\s+/g, ' ').trim();
 				if (!rawTitle) return;
 
-				// date often in sibling col-4
 				let date = '';
 				const row = a.closest('.row');
 				if (row.length) {
-					date =
-						row.find('.col-4, .right').last().text().replace(/\s+/g, ' ').trim() ||
-						'';
+					date = row.find('.col-4, .right').last().text().replace(/\s+/g, ' ').trim() || '';
 					if (/chapter/i.test(date)) date = '';
 				}
 
 				const locked =
-					a.find('.fa-lock, .fa-solid.fa-lock, i.fa-lock').length > 0 ||
-					row.find('.fa-lock, .fa-solid.fa-lock').length > 0 ||
-					/\b(lock|premium|paywall|vip)\b/i.test(a.attr('class') || '') ||
-					/\b(lock|premium|paywall|vip)\b/i.test(row.attr('class') || '');
+					a.find('.fa-lock, i.fa-lock').length > 0 ||
+					row.find('.fa-lock, i.fa-lock').length > 0 ||
+					/\b(lock|premium|paywall|vip)\b/i.test(`${a.attr('class')} ${row.attr('class')}`);
 
-				ingestChapter(href, rawTitle, date, locked);
+				ingest(href, rawTitle, date, locked);
 			});
 		};
 
 		const scroll = $('.Dscroll');
-		if (scroll.length) scanChapterAnchors(scroll);
-		else scanChapterAnchors($.root());
+		if (scroll.length) scan(scroll);
+		else scan($.root());
 
-		// Newest first
 		chapters.sort((a, b) => b.number - a.number);
 
 		console.log(
@@ -564,13 +579,11 @@ export class EasternWordsmithSource extends BaseSource {
 			chapters,
 			type: 'novel',
 			lang: 'en',
-			...(altTitles.length ? { altTitles } : {}),
 			...(chapters[0]?.number != null ? { latestChapter: chapters[0].number } : {})
-		} as MangaDetails;
+		};
 	}
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
-		// Novel source — text content via getChapterContent
 		return [];
 	}
 
@@ -589,35 +602,26 @@ export class EasternWordsmithSource extends BaseSource {
 		const html = await this.fetchHtml(path);
 		const $ = cheerio.load(html);
 
-		const pageTitle =
-			$('title').first().text().replace(/\s+/g, ' ').trim() || 'Chapter';
+		const pageTitle = $('title').first().text().replace(/\s+/g, ' ').trim() || 'Chapter';
 		const number = parseChapterNumber(pageTitle, parseChapterNumber(path, 0));
 		const title = shortChapterTitle(number, pageTitle);
 
-		// Locked / paywall detection
 		const bodyText = $('body').text().toLowerCase();
-		const lockedUi =
-			$('.fa-lock, .premium-block, .c-blocked-content').length > 0 ||
-			/you need to (buy|unlock|login|subscribe)|premium chapter|patreon|not enough coin|members only/i.test(
-				bodyText
-			);
-		if (lockedUi && $('p').length < 3) {
+		if (
+			($('.fa-lock, .premium-block').length > 0 ||
+				/premium chapter|members only|subscribe to read|login to (view|read)/i.test(bodyText)) &&
+			$('p').length < 3
+		) {
 			throw new Error('Chapter is locked / paywalled on Eastern Wordsmith');
 		}
 
-		// Remove chrome
-		$(
-			'script, style, nav, header, footer, iframe, noscript, .navbar, .nav, .ads, .advertisement, #disqus_thread, .disclaimer'
-		).remove();
+		$('script, style, nav, header, footer, iframe, noscript, .navbar, #disqus_thread').remove();
 
-		// Build content from paragraph blocks
 		const paragraphs: string[] = [];
 		$('p').each((_, p) => {
 			const t = $(p).text().replace(/\s+/g, ' ').trim();
-			if (!t) return;
-			if (/please (enable|disable|turn off)|ad-blocker|ads are our only|disqus|cloudflare/i.test(t))
-				return;
-			if (t.length < 2) return;
+			if (!t || t.length < 2) return;
+			if (/ad-blocker|ads are our only|please enable|disqus|cloudflare/i.test(t)) return;
 			paragraphs.push(t);
 		});
 
@@ -625,7 +629,6 @@ export class EasternWordsmithSource extends BaseSource {
 		if (paragraphs.length >= 2) {
 			content = paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n');
 		} else {
-			// fallback: largest texty div
 			let best = '';
 			$('div, article, section').each((_, el) => {
 				const t = stripHtml($.html(el) || '');
@@ -643,42 +646,25 @@ export class EasternWordsmithSource extends BaseSource {
 			throw new Error('Chapter content empty or locked on Eastern Wordsmith');
 		}
 
-		// Prev / Next from on-page links if present
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
 		$('a[href*="chapter/"]').each((_, el) => {
 			const a = $(el);
 			const t = a.text().replace(/\s+/g, ' ').trim().toLowerCase();
-			const href = a.attr('href') || '';
-			const id = pathOnly(href);
+			const id = pathOnly(a.attr('href') || '');
 			if (!isChapterPath(id) || id === path) return;
-			if (
-				t.includes('prev') ||
-				t.includes('previous') ||
-				t === '«' ||
-				t === '‹'
-			) {
-				prevChapterId = id;
-			}
-			if (t.includes('next') || t === '»' || t === '›') {
-				nextChapterId = id;
-			}
+			if (t.includes('prev') || t === '«' || t === '‹') prevChapterId = id;
+			if (t.includes('next') || t === '»' || t === '›') nextChapterId = id;
 		});
 
-		// Numeric neighbor fallback from chapter id sequence (best-effort)
 		const curNum = parseInt(path.split('/').pop() || '', 10);
 		if (!Number.isNaN(curNum) && curNum > 0) {
 			if (!prevChapterId) prevChapterId = `/chapter/${curNum - 1}`;
 			if (!nextChapterId) nextChapterId = `/chapter/${curNum + 1}`;
 		}
 
-		return {
-			title,
-			content,
-			prevChapterId,
-			nextChapterId
-		};
+		return { title, content, prevChapterId, nextChapterId };
 	}
 }
 
