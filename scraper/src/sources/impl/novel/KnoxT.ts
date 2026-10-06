@@ -13,6 +13,9 @@
  *   detail     : .infox, .thumb img, .entry-content[itemprop=description]
  *   chapters   : .eplister li a  (.epl-num / .epl-title / .epl-date)
  *   content    : .entry-content[itemprop=text], .epcontent
+ *
+ * Catatan: site sering kena bot-check → wajib fetchWithCf (Byparr).
+ * Chapter list: "Chapter {n}" saja (tanpa judul panjang).
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -132,12 +135,19 @@ export class KnoxTSource extends BaseSource {
 
 	protected async fetchHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		return fetchWithCf(url, {
-			headers: {
-				...this.headers,
-				Referer: this.baseUrl + '/'
-			}
-		});
+		const headers: Record<string, string> = {
+		...this.headers,
+		Referer: this.baseUrl + '/',
+		Cookie: 'STACKSCALING=web99o'
+	   };
+		const jar =
+			(typeof process !== 'undefined' &&
+				(process.env?.KNOXT_COOKIE || process.env?.KNOXT_COOKIES)) ||
+			'';
+		if (jar) {
+			headers.Cookie = headers.Cookie ? `${headers.Cookie}; ${jar}` : jar;
+		}
+		return fetchWithCf(url, { headers });
 	}
 
 	private parseListCards($: cheerio.CheerioAPI, scope?: string): Manga[] {
@@ -166,6 +176,7 @@ export class KnoxTSource extends BaseSource {
 			out.push(card);
 		};
 
+		// 1) Latest Release cards: .utao / .uta (homepage .releases.latesthome)
 		root.find('.utao, .uta').each((_, el) => {
 			const $el = $(el);
 			const a = $el.find('a.series').first().length
@@ -182,7 +193,7 @@ export class KnoxTSource extends BaseSource {
 				$el.find('img').attr('data-lazy-src') ||
 				$el.find('img').attr('src') ||
 				'';
-	
+			// Badge: chapter terbaru dari .luf ul li a pertama (Ch. 68)
 			let latest: number | undefined;
 			const chText =
 				$el.find('.luf ul li a').first().text() ||
@@ -194,6 +205,7 @@ export class KnoxTSource extends BaseSource {
 			push(href, title, cover, latest);
 		});
 
+		// 2) Standard Themesia grid: .listupd .bsx
 		if (out.length < 5) {
 			root.find('.listupd .bs, .listupd .bsx, .bsx').each((_, el) => {
 				const $el = $(el);
@@ -240,19 +252,23 @@ export class KnoxTSource extends BaseSource {
 
 		let list: Manga[] = [];
 
+		// Page 1: section Latest Release di homepage (prioritas)
 		if (p === 1) {
 			try {
 				const home = await this.fetchHtml('/');
 				const $h = cheerio.load(home);
+				// Scope ke blok Latest Release saja
 				const fromLatest = this.parseListCards(
 					$h,
 					'.releases.latesthome, .bixbox .listupd, .listupd'
 				);
 				list = merge(fromLatest);
 			} catch {
+				/* continue */
 			}
 		}
 
+		// Series sorted by update (pagination) — isi sampai ≥24
 		if (list.length < PAGE_SIZE) {
 			const path =
 				p <= 1
@@ -262,9 +278,11 @@ export class KnoxTSource extends BaseSource {
 				const html = await this.fetchHtml(path);
 				list = merge([...list, ...this.parseListCards(cheerio.load(html))]);
 			} catch {
+				/* continue */
 			}
 		}
 
+		// Page 1: jika masih kurang, ambil page 2 series
 		if (p === 1 && list.length < PAGE_SIZE) {
 			try {
 				const html2 = await this.fetchHtml(
@@ -272,9 +290,11 @@ export class KnoxTSource extends BaseSource {
 				);
 				list = merge([...list, ...this.parseListCards(cheerio.load(html2))]);
 			} catch {
+				/* continue */
 			}
 		}
 
+		// Last resort: all-novels (alphabetical — hindari jika bisa)
 		if (list.length < 1) {
 			const allPath = p <= 1 ? '/all-novels/' : `/all-novels/page/${p}/`;
 			const allHtml = await this.fetchHtml(allPath);
@@ -368,6 +388,8 @@ export class KnoxTSource extends BaseSource {
 			}
 		});
 
+		// Genre HANYA dari blok info novel (.genxed / .mgen di dalam .infox / .bigcontent)
+		// Jangan ambil semua a[href*="/genre/"] — itu nyampur sidebar/rekomendasi.
 		const genres: string[] = [];
 		const genreRoot = $(
 			'.infox .genxed, .infox .mgen, .bigcontent .genxed, .bigcontent .mgen, .info-content .genxed'
@@ -400,6 +422,7 @@ export class KnoxTSource extends BaseSource {
 				$('meta[property="og:description"]').attr('content')?.trim() || '';
 		}
 
+		// Meta lines for frontend parseMeta (satu key per baris)
 		const metaLines: string[] = [];
 		if (altTitle) metaLines.push(`Alt title: ${altTitle}`);
 		if (typeMeta) metaLines.push(`Type: ${typeMeta}`);
@@ -428,6 +451,7 @@ export class KnoxTSource extends BaseSource {
 			const num = parseChapterNumber(numText + ' ' + id, chapters.length + 1);
 			const date = decodeEntities($(a).find('.epl-date').text()) || undefined;
 
+			// Clean list title
 			chapters.push({
 				id,
 				title: `Chapter ${num}`,
@@ -517,6 +541,7 @@ export class KnoxTSource extends BaseSource {
 			throw new Error('Chapter content empty or locked on KnoxT');
 		}
 
+		// Prev / next from chapter nav links
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 		$('a[href*="chapter"], .nav-previous a, .nav-next a, a.ch-prev-btn, a.ch-next-btn').each(
