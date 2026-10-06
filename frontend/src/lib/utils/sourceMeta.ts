@@ -178,6 +178,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	flyonthewalls: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-sky-600' },
 	sakuraze: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-pink-500' },
 	novelsocean: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-600' },
+	knoxt: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

@@ -68,8 +68,10 @@ import CrimsonScrollsSource from '../impl/novel/CrimsonScrolls';
 import FlyOnTheWallsSource from '../impl/novel/FlyOnTheWalls';
 import { SakurazeSource } from '../impl/novel/Sakuraze';
 import { NovelsOceanSource } from '../impl/novel/NovelsOcean';
+import { KnoxTSource } from '../impl/novel/KnoxT';
 
 const novelSources: Record<string, IMangaSource> = {
+	knoxt: new KnoxTSource(),
 	novelsocean: new NovelsOceanSource(),
 	sakuraze: new SakurazeSource(),
 	flyonthewalls: new FlyOnTheWallsSource(),
