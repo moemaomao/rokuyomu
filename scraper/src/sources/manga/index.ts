@@ -1,3 +1,4 @@
+import type { IMangaSource } from '../types-manga';
 import { AsuraSource } from '../impl/manga/Asura';
 import { WelomaSource } from '../impl/manga/weloma';
 import { HitomiSource } from '../impl/manga/Hitomi';
@@ -93,15 +94,12 @@ import { SilentQuillSource } from '../impl/manga/SilentQuill';
 import { AreakomikSource } from '../impl/manga/Areakomik';
 import { GenzToonsSource } from '../impl/manga/GenzToons';
 import { SetsuScansSource } from '../impl/manga/SetsuScans';
-import ComicGardoSource from '../impl/manga/ComicGardo';
 import { VioletMangaSource } from '../impl/manga/VioletManga';
 import { KappaBeastSource } from '../impl/manga/KappaBeast';
-import type { IMangaSource } from '../types-manga';
 
 const mangaSources: Record<string, IMangaSource> = {
 	kappabeast: new KappaBeastSource(),
 	violetmanga: new VioletMangaSource(),
-	comicgardo: new ComicGardoSource(),
 	silentquill: new SilentQuillSource(),
 	genztoons: new GenzToonsSource(),
 	setsuscans: new SetsuScansSource(),

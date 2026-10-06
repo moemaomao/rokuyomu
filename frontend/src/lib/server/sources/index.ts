@@ -124,7 +124,6 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'storyseedling', name: 'Story Seedling' },
 	{ id: 'azurechronicles', name: 'Azure Chronicles' },
 	{ id: 'novelshaven', name: 'Novels Haven' },
-	{ id: 'comicgardo', name: 'Comic Gardo' },
 	{ id: 'nulltranslation', name: 'Null Translation' },
 	{ id: 'novelspyramid', name: 'Novels Pyramid' },
 	{ id: 'fenrirealm', name: 'Fenrir Realm' },
@@ -176,6 +175,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'crimsonscrolls', name: 'CrimsonScrolls' },
 	{ id: 'flyonthewalls', name: 'Fly on the Walls' },
 	{ id: 'sakuraze', name: 'Sakuraze' },
+	{ id: 'novelsocean', name: 'NovelsOcean' },
 ];
 
 export function getSourceList(): SourceMeta[] {

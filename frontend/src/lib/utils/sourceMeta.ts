@@ -177,6 +177,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	crimsonscrolls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-red-600' },
 	flyonthewalls: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-sky-600' },
 	sakuraze: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-pink-500' },
+	novelsocean: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
