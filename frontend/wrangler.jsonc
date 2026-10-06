@@ -36,6 +36,7 @@
 		]
 	},
 	"vars": {
-		"SCRAPER_BASE_URL": "https://rokuyomu.vercel.app"
+		"SCRAPER_BASE_URL": "https://rokuyomu.vercel.app",
+        "SCRAPER_URL": "https://sold-compile-contractors-cumulative.trycloudflare.com"
 	}
 }
