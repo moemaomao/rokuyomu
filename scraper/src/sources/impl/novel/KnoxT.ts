@@ -13,16 +13,13 @@
  *   detail     : .infox, .thumb img, .entry-content[itemprop=description]
  *   chapters   : .eplister li a  (.epl-num / .epl-title / .epl-date)
  *   content    : .entry-content[itemprop=text], .epcontent
- *
- * Catatan: site sering kena bot-check → wajib fetchWithCf (Byparr).
- * Chapter list: "Chapter {n}" saja (tanpa judul panjang).
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
 import { fetchWithCf } from '../../../lib/fetchWithCf';
 import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
-const PAGE_SIZE = 24; // UI expects ~24; site page size may differ
+const PAGE_SIZE = 24;
 
 function absUrl(base: string, href: string | undefined): string {
 	if (!href) return '';
@@ -169,7 +166,6 @@ export class KnoxTSource extends BaseSource {
 			out.push(card);
 		};
 
-		// 1) Latest Release cards: .utao / .uta (homepage .releases.latesthome)
 		root.find('.utao, .uta').each((_, el) => {
 			const $el = $(el);
 			const a = $el.find('a.series').first().length
@@ -186,6 +182,7 @@ export class KnoxTSource extends BaseSource {
 				$el.find('img').attr('data-lazy-src') ||
 				$el.find('img').attr('src') ||
 				'';
+	
 			let latest: number | undefined;
 			const chText =
 				$el.find('.luf ul li a').first().text() ||

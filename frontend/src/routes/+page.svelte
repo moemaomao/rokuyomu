@@ -302,112 +302,126 @@
 			display: inline-flex;
 			align-items: center;
 			gap: 0.15rem;
-			padding: 0.18rem 0.4rem;
+			padding: 0.2rem 0.45rem;
 			font-size: 0.55rem;
-			font-weight: 800;
-			letter-spacing: 0.04em;
+			font-weight: 700;
+			letter-spacing: 0.03em;
 			text-transform: uppercase;
-			line-height: 1.1;
-			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+			line-height: 1.15;
+			border: 1px solid transparent;
+			backdrop-filter: none;
+			-webkit-backdrop-filter: none;
+			box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 		}
 
 		@media (min-width: 640px) {
 			.badge-stick {
 				font-size: 0.6rem;
-				padding: 0.2rem 0.45rem;
+				padding: 0.22rem 0.5rem;
 			}
 		}
 
 		.badge-stick-tl {
-			border-radius: 0 0 0.35rem 0;
+			border-radius: 0 0 0.4rem 0;
 		}
 
 		.badge-stick-tr {
-			border-radius: 0 0 0 0.35rem;
+			border-radius: 0 0 0 0.4rem;
 		}
 
 		.badge-stick-ch {
-			border-radius: 0 0.3rem 0.3rem 0;
+			border-radius: 0 0.35rem 0.35rem 0;
 			margin-top: 1px;
 		}
 
 		.badge-stick-bl {
-			border-radius: 0 0.35rem 0 0;
+			border-radius: 0 0.4rem 0 0;
 		}
 
 		.badge-stick-br {
-			border-radius: 0.35rem 0 0 0;
+			border-radius: 0.4rem 0 0 0;
 		}
 
-		/* ── Colors ─────────────────────────────────────────────────────────── */
+		/* ── Transparent modern colors ─────────────────────────────────────── */
 		.badge-status-ongoing {
-			background: #16a34a;
-			color: #fff;
-			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+			background: rgba(22, 163, 74, 0.78);
+			border-color: rgba(74, 222, 128, 0.35);
+			color: #ecfdf5;
 		}
 		.badge-status-completed {
-			background: #2563eb;
-			color: #fff;
-			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+			background: rgba(37, 99, 235, 0.78);
+			border-color: rgba(96, 165, 250, 0.35);
+			color: #eff6ff;
 		}
 		.badge-status-hiatus {
-			background: #ea580c;
-			color: #fff;
-			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+			background: rgba(234, 88, 12, 0.78);
+			border-color: rgba(251, 146, 60, 0.35);
+			color: #fff7ed;
 		}
 		.badge-status-dropped {
-			background: #b91c1c;
-			color: #fff;
-			text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+			background: rgba(185, 28, 28, 0.78);
+			border-color: rgba(248, 113, 113, 0.35);
+			color: #fef2f2;
 		}
 
 		.badge-chapter {
-			background: #eab308;
-			color: #1a1a1a;
+			background: rgba(234, 179, 8, 0.82);
+			border-color: rgba(250, 204, 21, 0.4);
+			color: #1c1917;
 			font-weight: 800;
 		}
 
 		.badge-type-manga {
-			background: #c91714;
-			color: #fff;
+			background: rgba(201, 23, 20, 0.78);
+			border-color: rgba(248, 113, 113, 0.35);
+			color: #fef2f2;
 		}
 		.badge-type-manhwa {
-			background: #1976d2;
-			color: #fff;
+			background: rgba(25, 118, 210, 0.78);
+			border-color: rgba(96, 165, 250, 0.35);
+			color: #eff6ff;
 		}
 		.badge-type-manhua {
-			background: #2e7d32;
-			color: #fff;
+			background: rgba(46, 125, 50, 0.78);
+			border-color: rgba(74, 222, 128, 0.35);
+			color: #ecfdf5;
 		}
 		.badge-type-doujinshi {
-			background: #8b1e42;
-			color: #fff;
+			background: rgba(139, 30, 66, 0.8);
+			border-color: rgba(244, 114, 182, 0.35);
+			color: #fdf2f8;
 		}
 		.badge-type-artistcg,
 		.badge-type-gamecg {
-			background: #009688;
-			color: #fff;
+			background: rgba(0, 150, 136, 0.78);
+			border-color: rgba(45, 212, 191, 0.35);
+			color: #f0fdfa;
 		}
 		.badge-type-imageset {
-			background: #616161;
-			color: #fff;
+			background: rgba(97, 97, 97, 0.8);
+			border-color: rgba(161, 161, 170, 0.35);
+			color: #f4f4f5;
 		}
 		.badge-type-anime {
-			background: #7b1fa2;
-			color: #fff;
+			background: rgba(123, 31, 162, 0.78);
+			border-color: rgba(192, 132, 252, 0.35);
+			color: #faf5ff;
 		}
 		.badge-type-western {
-			background: #5d4037;
-			color: #fff;
+			background: rgba(93, 64, 55, 0.82);
+			border-color: rgba(168, 137, 122, 0.35);
+			color: #fafaf9;
 		}
 		.badge-type-nonh {
-			background: #455a64;
-			color: #fff;
+			background: rgba(69, 90, 100, 0.8);
+			border-color: rgba(148, 163, 184, 0.35);
+			color: #f8fafc;
 		}
 
 		.badge-source {
-			background: rgba(147, 51, 234, 0.92);
-			color: #fff;
+			background: rgba(147, 51, 234, 0.78);
+			border-color: rgba(192, 132, 252, 0.35);
+			color: #faf5ff;
 			max-width: 55%;
 			overflow: hidden;
 			text-overflow: ellipsis;
@@ -415,8 +429,9 @@
 		}
 
 		.badge-backup {
-			background: #f59e0b;
-			color: #1a1a1a;
+			background: rgba(245, 158, 11, 0.85);
+			border-color: rgba(251, 191, 36, 0.4);
+			color: #1c1917;
 			font-weight: 800;
 		}
 	</style>
