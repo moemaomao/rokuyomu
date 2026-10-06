@@ -69,8 +69,10 @@ import FlyOnTheWallsSource from '../impl/novel/FlyOnTheWalls';
 import { SakurazeSource } from '../impl/novel/Sakuraze';
 import { NovelsOceanSource } from '../impl/novel/NovelsOcean';
 import { KnoxTSource } from '../impl/novel/KnoxT';
+import { EasternWordsmithSource } from '../impl/novel/EasternWordsmith';
 
 const novelSources: Record<string, IMangaSource> = {
+	easternwordsmith: new EasternWordsmithSource(),
 	knoxt: new KnoxTSource(),
 	novelsocean: new NovelsOceanSource(),
 	sakuraze: new SakurazeSource(),

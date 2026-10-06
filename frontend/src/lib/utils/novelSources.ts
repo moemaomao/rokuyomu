@@ -69,6 +69,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'sakuraze',
 	'novelsocean',
 	'knoxt',
+	'easternwordsmith',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

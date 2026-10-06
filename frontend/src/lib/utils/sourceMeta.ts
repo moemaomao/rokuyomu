@@ -179,6 +179,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	sakuraze: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-pink-500' },
 	novelsocean: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-600' },
 	knoxt: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
+	easternwordsmith: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
