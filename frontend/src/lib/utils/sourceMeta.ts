@@ -176,6 +176,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	tangerinearchive: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-orange-500' },
 	crimsonscrolls: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-red-600' },
 	flyonthewalls: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-sky-600' },
+	sakuraze: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-pink-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

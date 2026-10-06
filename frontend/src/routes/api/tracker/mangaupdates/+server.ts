@@ -37,17 +37,14 @@ function scoreMatch(query: string, title: string): number {
 	return Math.round((hit / qt.size) * 40);
 }
 
-/** Prefer shorter query for very long English titles (better API hit rate). */
 function searchQueries(title: string): string[] {
 	const t = title.trim();
 	if (!t) return [];
 	const out: string[] = [t];
-	// First clause before comma / "so I" style
 	const beforeComma = t.split(',')[0]?.trim();
 	if (beforeComma && beforeComma.length >= 12 && beforeComma !== t) {
 		out.push(beforeComma);
 	}
-	// First ~8 words
 	const words = t.split(/\s+/);
 	if (words.length > 10) {
 		out.push(words.slice(0, 8).join(' '));
@@ -90,8 +87,6 @@ export const GET: RequestHandler = async ({ url, fetch }) => {
 		const qLow = q.toLowerCase();
 		const wantsDoujin = /\b(dj|doujin)\b/i.test(qLow);
 
-		// Rank by title similarity, but DO NOT require high score —
-		// MU API ranks by relevance; English query often maps to Japanese title.
 		const ranked = results
 			.map((r) => {
 				const rec = r?.record || {};
@@ -105,9 +100,7 @@ export const GET: RequestHandler = async ({ url, fetch }) => {
 			.filter((x) => !!x.url)
 			.sort((a, b) => b.score - a.score);
 
-		// Prefer high title similarity when available
 		const strong = ranked.find((x) => x.score >= 40);
-		// Otherwise trust MU's first result (API order), skipping doujin unless wanted
 		const firstOk =
 			ranked.find((x) => wantsDoujin || !/doujin/i.test(x.type)) || ranked[0];
 
