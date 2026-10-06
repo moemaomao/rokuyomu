@@ -13,9 +13,6 @@
  *   detail     : .infox, .thumb img, .entry-content[itemprop=description]
  *   chapters   : .eplister li a  (.epl-num / .epl-title / .epl-date)
  *   content    : .entry-content[itemprop=text], .epcontent
- *
- * Catatan: site sering kena bot-check → wajib fetchWithCf (Byparr).
- * Chapter list: "Chapter {n}" saja (tanpa judul panjang).
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -134,21 +131,23 @@ export class KnoxTSource extends BaseSource {
 	};
 
 	protected async fetchHtml(path: string): Promise<string> {
-		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const headers: Record<string, string> = {
+	const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+	const headers: Record<string, string> = {
 		...this.headers,
-		Referer: this.baseUrl + '/',
-		Cookie: 'STACKSCALING=web99o'
-	   };
-		const jar =
-			(typeof process !== 'undefined' &&
-				(process.env?.KNOXT_COOKIE || process.env?.KNOXT_COOKIES)) ||
-			'';
-		if (jar) {
-			headers.Cookie = headers.Cookie ? `${headers.Cookie}; ${jar}` : jar;
-		}
-		return fetchWithCf(url, { headers });
+		Referer: this.baseUrl + '/'
+	};
+	const jar =
+		(typeof process !== 'undefined' &&
+			(process.env?.KNOXT_COOKIE || process.env?.KNOXT_COOKIES)) ||
+		'';
+	if (jar) {
+		headers.Cookie = jar;
 	}
+	console.log(
+		`[knoxt] GET ${url} cookie=${jar ? 'yes' : 'no'}`
+	);
+	return fetchWithCf(url, { headers });
+    }
 
 	private parseListCards($: cheerio.CheerioAPI, scope?: string): Manga[] {
 		const out: Manga[] = [];
