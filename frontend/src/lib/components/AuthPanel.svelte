@@ -7,7 +7,7 @@
 		logout
 	} from '$lib/stores/auth.svelte';
 	import { getBookmarks } from '$lib/stores/bookmark.svelte';
-	import { getHistory, type ReadingEntry } from '$lib/stores/history';
+	import { getHistory } from '$lib/stores/history';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
 		LogOut,
@@ -18,8 +18,7 @@
 		Trophy,
 		Star,
 		Zap,
-		Library,
-		Clock
+		Library
 	} from 'lucide-svelte';
 
 	let {
@@ -36,7 +35,6 @@
 	let bookmarkCount = $state(0);
 	let chaptersRead = $state(0);
 	let uniqueSources = $state(0);
-	let recentTitles = $state<ReadingEntry[]>([]);
 	let level = $state(1);
 	let xp = $state(0);
 	let xpToNext = $state(100);
@@ -52,11 +50,12 @@
 		chaptersRead = hist.reduce((sum, h) => sum + (Number(h.chapterNumber) || 1), 0);
 		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
 		uniqueSources = sources.size;
-		recentTitles = hist.slice(0, 3);
 
+		// XP: history*10 + bookmarks*15 + chapters*2
 		const totalXp = historyCount * 10 + bookmarkCount * 15 + chaptersRead * 2;
 		xp = totalXp;
 
+		// Level curve: 100, 250, 450, 700, 1000...
 		let lv = 1;
 		let need = 100;
 		let remaining = totalXp;
@@ -252,38 +251,17 @@
 			</div>
 		</div>
 
-		<!-- ═══ RECENT READS ═══ -->
-		{#if recentTitles.length > 0}
-			<div class="px-3 pb-2">
-				<p
-					class="mb-1.5 flex items-center gap-1 text-[10px] font-semibold tracking-wide uppercase {isDarkMode
-						? 'text-zinc-500'
-						: 'text-zinc-400'}"
-				>
-					<Clock class="h-3 w-3" />
-					Recent Activity
-				</p>
-				<div class="space-y-1">
-					{#each recentTitles as item}
-						<div
-							class="flex items-center gap-2 rounded-lg px-2 py-1.5 {isDarkMode
-								? 'bg-zinc-800/40'
-								: 'bg-zinc-50'}"
-						>
-							<span class="truncate text-[11px] font-medium {isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}">
-								{item.mangaTitle || 'Untitled'}
-							</span>
-							<span class="ml-auto shrink-0 text-[10px] text-violet-400">
-								Ch.{item.chapterNumber || '?'}
-							</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
-
-		<!-- Logout -->
-		<div class="border-t p-2 {isDarkMode ? 'border-zinc-800' : 'border-zinc-100'}">
+		<!-- Stats link + Logout -->
+		<div class="border-t p-2 space-y-1 {isDarkMode ? 'border-zinc-800' : 'border-zinc-100'}">
+			<a
+				href="/stats"
+				class="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition
+					{isDarkMode
+					? 'text-violet-300 hover:bg-violet-500/10'
+					: 'text-violet-600 hover:bg-violet-50'}"
+			>
+				My Stats
+			</a>
 			<button
 				onclick={onLogout}
 				class="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition
