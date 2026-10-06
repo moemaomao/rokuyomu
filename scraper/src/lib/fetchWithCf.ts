@@ -7,8 +7,10 @@ import {
 import { isByparrEnabled, solveWithByparr } from './byparr';
 
 export function isCloudflareChallenge(status: number, html: string): boolean {
-	const lower = html.slice(0, 15000).toLowerCase();
+	const head = html.slice(0, 15000);
+	const lower = head.toLowerCase();
 
+	// ── Cloudflare classic ──────────────────────────────────────────
 	if (
 		lower.includes('just a moment...') ||
 		lower.includes('cf-browser-verification') ||
@@ -28,8 +30,41 @@ export function isCloudflareChallenge(status: number, html: string): boolean {
 		return true;
 	}
 
-	if ((status === 403 || status === 503) && /cf-ray|cloudflare/i.test(html.slice(0, 5000))) {
+	if ((status === 403 || status === 503) && /cf-ray|cloudflare/i.test(head.slice(0, 5000))) {
 		if (lower.includes('challenge') || lower.includes('captcha')) return true;
+	}
+
+	if (
+		lower.includes('stackprotect') ||
+		lower.includes('/.stackprotect/') ||
+		lower.includes('verification could not be completed') ||
+		(lower.includes('please refresh the page to try again') &&
+			(status === 401 || status === 403 || status === 503))
+	) {
+		return true;
+	}
+
+	if (status === 401 || status === 403 || status === 503) {
+		if (
+			lower.includes('captcha') ||
+			lower.includes('bot detection') ||
+			lower.includes('access denied') ||
+			lower.includes('ray id') ||
+			(lower.includes('verification') && lower.includes('refresh'))
+		) {
+			return true;
+		}
+	
+		if (html.trim().length > 0 && html.trim().length < 2500) {
+			if (
+				lower.includes('javascript') ||
+				lower.includes('enable cookies') ||
+				lower.includes('browser') ||
+				lower.includes('security check')
+			) {
+				return true;
+			}
+		}
 	}
 
 	return false;
@@ -71,7 +106,7 @@ export async function fetchWithCf(
 
 	if (!isByparrEnabled()) {
 		throw new Error(
-			`Cloudflare challenge on ${url} (Byparr disabled; set BYPARR_URL)`
+			`Cloudflare/StackProtect challenge on ${url} (Byparr disabled; set BYPARR_URL)`
 		);
 	}
 
@@ -102,10 +137,10 @@ export async function fetchWithCf(
 
 	if (isCloudflareChallenge(retry.status, retryHtml)) {
 		clearCfSession(url);
-		throw new Error(`CF still blocked after Byparr for ${url}`);
+		throw new Error(`Still blocked after Byparr for ${url}`);
 	}
 	if (!retry.ok) {
-		throw new Error(`Failed to fetch ${url} after CF solve: ${retry.status}`);
+		throw new Error(`Failed to fetch ${url} after solve: ${retry.status}`);
 	}
 
 	console.log(`[cf] ok after solve ${safeHost(url)} status=${retry.status}`);
