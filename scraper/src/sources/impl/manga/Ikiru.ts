@@ -20,7 +20,7 @@ import * as cheerio from 'cheerio';
 export class IkiruSource extends BaseSource {
 	id = 'ikiru';
 	name = 'Ikiru';
-	baseUrl = 'https://08.ikiru.wtf';
+	baseUrl = 'https://09.ikiru.wtf/';
 
 	private readonly PER_PAGE = 24;
 	private readonly DEFAULT_LANG = 'id';
