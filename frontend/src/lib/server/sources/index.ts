@@ -183,6 +183,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'razure', name: 'Razure' },
 	{ id: 'etherreads', name: 'EtherReads' },
 	{ id: 'freewebnovel', name: 'FreeWebNovel' },
+	{ id: 'genesistudio', name: 'GenesisStudio' },
 ];
 
 export function getSourceList(): SourceMeta[] {

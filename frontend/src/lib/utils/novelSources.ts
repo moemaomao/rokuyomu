@@ -75,6 +75,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'razure',
 	'etherreads',
 	'freewebnovel',
+	'genesistudio',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

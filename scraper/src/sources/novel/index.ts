@@ -75,8 +75,10 @@ import { MboogNovelSource } from '../impl/novel/MboogNovel';
 import { RazureSource } from '../impl/novel/Razure';
 import { EtherReadsSource } from '../impl/novel/EtherReads';
 import { FreeWebNovelSource } from '../impl/novel/FreeWebNovel';
+import { GenesisStudioSource } from '../impl/novel/GenesisStudio';
 
 const novelSources: Record<string, IMangaSource> = {
+	genesistudio: new GenesisStudioSource(),
 	freewebnovel: new FreeWebNovelSource(),
 	etherreads: new EtherReadsSource(),
 	razure: new RazureSource(),
