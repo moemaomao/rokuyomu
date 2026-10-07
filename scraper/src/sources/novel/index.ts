@@ -74,8 +74,10 @@ import { PuffberrySource } from '../impl/novel/Puffberry';
 import { MboogNovelSource } from '../impl/novel/MboogNovel';
 import { RazureSource } from '../impl/novel/Razure';
 import { EtherReadsSource } from '../impl/novel/EtherReads';
+import { FreeWebNovelSource } from '../impl/novel/FreeWebNovel';
 
 const novelSources: Record<string, IMangaSource> = {
+	freewebnovel: new FreeWebNovelSource(),
 	etherreads: new EtherReadsSource(),
 	razure: new RazureSource(),
 	mboognovel: new MboogNovelSource(),
