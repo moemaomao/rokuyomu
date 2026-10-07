@@ -76,8 +76,10 @@ import { RazureSource } from '../impl/novel/Razure';
 import { EtherReadsSource } from '../impl/novel/EtherReads';
 import { FreeWebNovelSource } from '../impl/novel/FreeWebNovel';
 import { GenesisStudioSource } from '../impl/novel/GenesisStudio';
+import { OpheliaScansSource } from '../impl/novel/OpheliaScans';
 
 const novelSources: Record<string, IMangaSource> = {
+	opheliascans: new OpheliaScansSource(),
 	genesistudio: new GenesisStudioSource(),
 	freewebnovel: new FreeWebNovelSource(),
 	etherreads: new EtherReadsSource(),

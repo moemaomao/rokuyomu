@@ -186,6 +186,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	etherreads: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	freewebnovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-600' },
 	genesistudio: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
+	opheliascans: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
