@@ -132,15 +132,125 @@ export class MzNovelsSource extends BaseSource {
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const p = Math.max(1, page);
 		try {
-			const html = await this.fetchHtml('/');
-			const list = this.parseHomeNovels(html);
+			const seen = new Set<string>();
+			const list: Manga[] = [];
+			const absorb = (items: Manga[]) => {
+				for (const m of items) {
+					if (seen.has(m.id)) continue;
+					seen.add(m.id);
+					list.push(m);
+				}
+			};
+
+			if (p === 1) {
+				try {
+					absorb(this.parseHomeNovels(await this.fetchHtml('/')));
+				} catch (e) {
+					console.warn('[mznovels] home', String(e).slice(0, 80));
+				}
+		
+				if (list.length < PER_PAGE) {
+					try {
+						absorb(
+							this.parseLatestUpdatesPage(
+								await this.fetchHtml('/latest-updates/?page=1')
+							)
+						);
+					} catch (e) {
+						console.warn(
+							'[mznovels] latest-updates',
+							String(e).slice(0, 80)
+						);
+					}
+				}
+			} else {
+				const html = await this.fetchHtml(
+					`/latest-updates/?page=${p}`
+				);
+				absorb(this.parseLatestUpdatesPage(html));
+			}
+
 			console.log(`[mznovels] latest page=${p} n=${list.length}`);
-			const start = (p - 1) * PER_PAGE;
-			return list.slice(start, start + PER_PAGE);
+			return list.slice(0, PER_PAGE);
 		} catch (e) {
 			console.error('[mznovels] latest', e);
 			return [];
 		}
+	}
+
+	private parseLatestUpdatesPage(html: string): Manga[] {
+		const $ = cheerio.load(html);
+		const ordered: Manga[] = [];
+		const seen = new Set<string>();
+
+		$('.search-result-item, .novel-update-card-v2, .novel-update-card').each(
+			(_, el) => {
+				const $card = $(el);
+				const $story = $card
+					.find('a[href*="/novel/"]')
+					.filter((__, a) => {
+						const p = pathOnly($(a).attr('href') || '');
+						return (
+							/^\/novel\/\d+$/i.test(p) &&
+							cleanText($(a).text()).length > 2
+						);
+					})
+					.first();
+				const href = $story.attr('href') || '';
+				const id = novelIdFromPath(pathOnly(href));
+				if (!id || seen.has(id)) return;
+
+				const title =
+					cleanText(
+						$card.find('h2.search-result-title, h2, h3').first().text()
+					) || cleanText($story.text());
+				if (!title || /^(see more|chapter\s*\d+)$/i.test(title)) return;
+
+				const img = $card
+					.find(
+						'img.search-result-image, img[src*="novel_images"], img'
+					)
+					.first();
+				let cover = absUrl(
+					(img.attr('src') || img.attr('data-src') || '').split('?')[0]
+				);
+				if (/User_Profile|default\.|avatar/i.test(cover)) cover = '';
+
+				let latest = 0;
+				$card.find('a[href*="/chapter/"]').each((__, ca) => {
+					const n = parseChapterNumber(
+						pathOnly($(ca).attr('href') || '') +
+							' ' +
+							$(ca).text(),
+						0
+					);
+					if (n > latest) latest = n;
+				});
+
+				const body = cleanText($card.text());
+				let updatedAt: number | undefined;
+				const rel = body.match(
+					/(\d+)\s*(second|minute|hour|day|week|month|year)s?\s*ago/i
+				);
+				if (rel) updatedAt = parseRelativeDate(rel[0]);
+
+				seen.add(id);
+				ordered.push({
+					id,
+					title: title.slice(0, 200),
+					cover,
+					sourceId: this.id,
+					type: 'novel',
+					lang: 'en',
+					status: 'Ongoing',
+					...(latest > 0 ? { latestChapter: Math.floor(latest) } : {}),
+					...(updatedAt ? { updatedAt } : {})
+				});
+			}
+		);
+
+		console.log(`[mznovels] parseLatestUpdates n=${ordered.length}`);
+		return ordered;
 	}
 
 	private parseHomeNovels(html: string): Manga[] {
@@ -493,8 +603,10 @@ export class MzNovelsSource extends BaseSource {
 		const novelPath = m[1];
 		const number = parseFloat(m[2]);
 		const fetchPath = path.endsWith('/') ? path : `${path}/`;
+
 		const html = await this.fetchHtml(fetchPath);
 		const $ = cheerio.load(html);
+
 		const rawTitle =
 			cleanText($('h1').first().text()) ||
 			cleanText(
