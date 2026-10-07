@@ -2,15 +2,10 @@
  * Puffberry.top — Fictioneer (WordPress) novel site
  * Path: scraper/src/sources/impl/novel/Puffberry.ts
  *
- * - Homepage Latest Updates → 24 judul
  * - Novel list: /novels/ + /novels/page/{n}/
  * - Story: /story/{slug}/
  * - Chapter: /story/{slug}/{chapter-slug}/
  * - Search: /?s={q}
- * - Premium chapters: li.chapter-group__list-item._premium → isLocked + lock badge
- * - Chapter list: title bersih (Chapter N), tanpa judul novel
- * - Pagination + prev/next chapter content
- * - fetchWithCf via BaseSource.fetchHtml
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -80,7 +75,6 @@ function stripHtml(html: string): string {
 function parseChapterNumber(text: string, fallback = 0): number {
 	const t = cleanText(text);
 	if (!t) return fallback;
-	// Prefer C75 / Chapter 75 / Ch. 12 patterns
 	const m =
 		t.match(/(?:^|\s)c(?:h(?:apter)?)?\.?\s*(\d+(?:\.\d+)?)\b/i) ||
 		t.match(/(?:chapter|chap|ep\.?|episode)\s*(\d+(?:\.\d+)?)/i) ||
@@ -94,10 +88,8 @@ function parseChapterNumber(text: string, fallback = 0): number {
 	return any ? parseFloat(any[1]) : fallback;
 }
 
-/** Chapter title bersih: "Chapter 12" saja, tanpa judul novel */
 function cleanChapterTitle(raw: string, number: number): string {
 	const t = cleanText(raw);
-	// Buang prefix judul novel yang biasanya di depan "C12" / "Chapter 12"
 	const stripped = t
 		.replace(/^.*?\b(?:chapter|ch\.?|c)\s*(\d+(?:\.\d+)?)\b.*$/i, (_, n) => `Chapter ${n}`)
 		.replace(/^.*?\b(\d+(?:\.\d+)?)\s*$/i, (_, n) => `Chapter ${n}`);
@@ -117,7 +109,6 @@ function normalizeStatus(raw: string): string {
 }
 
 function isStoryPath(id: string): boolean {
-	// /story/slug  (bukan chapter)
 	return /^\/story\/[^/]+\/?$/.test(id);
 }
 
@@ -138,8 +129,6 @@ export class PuffberrySource extends BaseSource {
 		Referer: `${BASE}/`
 	};
 
-	// ─── Latest (homepage Latest Updates → 24 judul) ─────────────────────
-
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
 		if (pageNum <= 1) {
@@ -150,7 +139,6 @@ export class PuffberrySource extends BaseSource {
 		return this.fetchNovelsPage(pageNum);
 	}
 
-	/** Ambil dari section "Latest Updates" di homepage */
 	private async parseLatestUpdatesHome(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
@@ -159,7 +147,6 @@ export class PuffberrySource extends BaseSource {
 		const list: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Prioritas: section Latest Updates
 		let $section = $('h2.wp-block-heading')
 			.filter((_, el) => /Latest Updates/i.test($(el).text()))
 			.first()
@@ -227,12 +214,10 @@ export class PuffberrySource extends BaseSource {
 			});
 		};
 
-		// Card di Latest Updates
 		$section.find('.card, li.card, .post-card, article.card, [class*="card"]').each((_, el) => {
 			parseCard(el);
 		});
 
-		// Fallback: semua link story unik di section
 		if (list.length < 8) {
 			$section.find('a[href*="/story/"]').each((_, el) => {
 				const href = $(el).attr('href') || '';
@@ -259,7 +244,6 @@ export class PuffberrySource extends BaseSource {
 			});
 		}
 
-		// Kalau masih kurang, ambil dari Latest Stories carousel juga
 		if (list.length < PER_PAGE) {
 			$('.latest-stories .card, .small-card-block .card, .splide__slide .card').each((_, el) => {
 				parseCard(el);
@@ -269,7 +253,6 @@ export class PuffberrySource extends BaseSource {
 		return this.dedupeById(list).slice(0, PER_PAGE);
 	}
 
-	/** /novels/ + pagination */
 	private async fetchNovelsPage(page: number): Promise<Manga[]> {
 		const path =
 			page <= 1 ? '/novels/' : `/novels/page/${page}/`;
@@ -351,7 +334,6 @@ export class PuffberrySource extends BaseSource {
 		const page = Math.max(1, opts?.page ?? 1);
 		if (!q) return this.getLatestManga(page);
 
-		// Fictioneer search: /?s=query  (+ page/n/ untuk pagination)
 		const path =
 			page <= 1
 				? `/?s=${encodeURIComponent(q)}`
@@ -363,16 +345,13 @@ export class PuffberrySource extends BaseSource {
 			const list: Manga[] = [];
 			const seen = new Set<string>();
 
-			// Hasil search bisa chapter atau story — prioritaskan story card
 			$('.card, article, .search-result, li').each((_, el) => {
 				const $el = $(el);
-				// Skip pure chapter results yang menunjuk ke -cN
 				const storyLink = $el
 					.find('a[href*="/story/"]')
 					.filter((_, a) => isStoryPath(pathOnly($(a).attr('href') || '')))
 					.first();
 				let href = storyLink.attr('href') || '';
-				// Kadang hanya chapter link; ambil parent story
 				if (!href) {
 					const ch = $el.find('a[href*="/story/"]').first().attr('href') || '';
 					const m = pathOnly(ch).match(/^(\/story\/[^/]+)/);
@@ -386,7 +365,6 @@ export class PuffberrySource extends BaseSource {
 					cleanText($el.find('h2, h3, h4, .card__title, .entry-title').first().text()) ||
 					cleanText(storyLink.text());
 				if (!title || title.length < 2) return;
-				// Skip judul yang cuma "C75" dll
 				if (/^c\d+$/i.test(title) || /chapter\s*\d+$/i.test(title)) return;
 
 				const img =
@@ -405,7 +383,6 @@ export class PuffberrySource extends BaseSource {
 				});
 			});
 
-			// Fallback: kumpulkan story unik dari semua link
 			if (list.length < 4) {
 				$('a[href*="/story/"]').each((_, el) => {
 					const href = $(el).attr('href') || '';
@@ -444,7 +421,6 @@ export class PuffberrySource extends BaseSource {
 		if (!path.startsWith('/story/')) {
 			path = `/story/${path.replace(/^\//, '')}`;
 		}
-		// Pastikan hanya story path, buang chapter slug jika ada
 		const m = path.match(/^(\/story\/[^/]+)/);
 		if (m) path = m[1];
 		path = path.endsWith('/') ? path : `${path}/`;
@@ -470,7 +446,6 @@ export class PuffberrySource extends BaseSource {
 			'';
 		cover = absUrl((cover || '').split('?')[0]);
 
-		// Description
 		let description = '';
 		const descEl = $(
 			'.story__content, .story-content, .content-section .wp-block-post-content, .singular__content > p'
@@ -484,7 +459,6 @@ export class PuffberrySource extends BaseSource {
 				cleanText($('meta[property="og:description"]').attr('content') || '');
 		}
 
-		// Author
 		const authors: string[] = [];
 		$('a[href*="/author/"], .story__meta a[rel="author"], .byline a, .author a').each((_, a) => {
 			const n = cleanText($(a).text());
@@ -492,7 +466,6 @@ export class PuffberrySource extends BaseSource {
 				authors.push(n);
 			}
 		});
-		// Situs ini sering "by berry"
 		if (!authors.length) {
 			const by = cleanText($('.story__meta, .byline, .author').first().text());
 			const am = by.match(/by\s+([^\n|,]+)/i);
@@ -500,7 +473,6 @@ export class PuffberrySource extends BaseSource {
 		}
 		if (!authors.length) authors.push('berry');
 
-		// Genres / tags
 		const genres: string[] = [];
 		$(
 			'a[href*="/tag/"], a[href*="/genre/"], a[href*="/fcn_genre/"], .tag-cloud a, .story__taxonomies a, .genre a'
@@ -509,14 +481,12 @@ export class PuffberrySource extends BaseSource {
 			if (n && n.length < 60 && !genres.includes(n)) genres.push(n);
 		});
 
-		// Status
 		let status = 'Ongoing';
 		const bodyText = cleanText($('body').text());
 		if (/\bCompleted\b/i.test(bodyText)) status = 'Completed';
 		else if (/\bHiatus\b/i.test(bodyText)) status = 'Hiatus';
 		else if (/\bOngoing\b/i.test(bodyText)) status = 'Ongoing';
 
-		// Chapters
 		const chapters = this.parseChapterList($, path);
 
 		return {
@@ -535,12 +505,6 @@ export class PuffberrySource extends BaseSource {
 		};
 	}
 
-	/**
-	 * Parse chapter list dari story page.
-	 * - Title bersih: "Chapter N" saja
-	 * - isLocked = true jika class _premium (paywall / gembok)
-	 * - Sort newest first
-	 */
 	private parseChapterList($: cheerio.CheerioAPI, storyPath: string): Chapter[] {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
@@ -548,7 +512,6 @@ export class PuffberrySource extends BaseSource {
 
 		$('li.chapter-group__list-item, .chapter-group__list-item').each((_, el) => {
 			const $li = $(el);
-			// Skip fold toggle rows
 			if ($li.hasClass('_folding-toggle')) return;
 
 			const a = $li.find('a.chapter-group__list-item-link, a[href*="/story/"]').first();
@@ -565,7 +528,6 @@ export class PuffberrySource extends BaseSource {
 				cleanText($li.find('time .list-view, time').first().text()) ||
 				undefined;
 
-			// Premium / paywall → gembok
 			const isLocked =
 				$li.hasClass('_premium') ||
 				!!$li.find('.fa-lock, [class*="lock"], [class*="premium"]').length ||
@@ -581,7 +543,6 @@ export class PuffberrySource extends BaseSource {
 			});
 		});
 
-		// Fallback kalau selector Fictioneer berubah
 		if (out.length === 0) {
 			$(`a[href*="/story/${storySlug}/"]`).each((_, el) => {
 				const href = $(el).attr('href') || '';
@@ -599,12 +560,9 @@ export class PuffberrySource extends BaseSource {
 			});
 		}
 
-		// Newest first
 		out.sort((a, b) => b.number - a.number);
 		return out;
 	}
-
-	// ─── Chapter content (novel reader) ──────────────────────────────────
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
@@ -624,7 +582,6 @@ export class PuffberrySource extends BaseSource {
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
 
-		// Locked / premium gate
 		const bodyText = $('body').text().toLowerCase();
 		if (
 			(/premium|unlock|purchase|buy berrys|paywall|locked chapter/i.test(bodyText) &&
@@ -641,7 +598,6 @@ export class PuffberrySource extends BaseSource {
 		const number = parseChapterNumber(rawTitle || path);
 		const title = cleanChapterTitle(rawTitle, number);
 
-		// Content body
 		let contentHtml = '';
 		const contentSelectors = [
 			'.chapter__content',
@@ -661,14 +617,12 @@ export class PuffberrySource extends BaseSource {
 			}
 		}
 
-		// Fallback: main text blocks
 		if (!contentHtml || contentHtml.length < 80) {
 			const main = $('main, article, .singular__content').first();
 			main.find('script, style, nav, header, footer, .ads, .chapter-nav').remove();
 			contentHtml = main.html() || '';
 		}
 
-		// Bersihkan iklan / noise yang sering muncul di Fictioneer
 		contentHtml = (contentHtml || '')
 			.replace(/Discover more[\s\S]*?(?=<p|$)/gi, '')
 			.replace(/Book a Safari[\s\S]*?(?=<p|$)/gi, '')
@@ -678,7 +632,6 @@ export class PuffberrySource extends BaseSource {
 			.replace(/Find Grief Support[\s\S]*?(?=<p|$)/gi, '');
 
 		let content = contentHtml.trim();
-		// Jika plain text, bungkus jadi paragraf
 		if (content && !/<p|<br|<div/i.test(content)) {
 			content = content
 				.split(/\n{2,}/)
@@ -686,7 +639,6 @@ export class PuffberrySource extends BaseSource {
 				.join('');
 		}
 
-		// Prev / Next
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
@@ -706,7 +658,6 @@ export class PuffberrySource extends BaseSource {
 			if (isChapterPath(n)) nextChapterId = n;
 		}
 
-		// Fallback dari micro-menu / chapter nav
 		if (!prevChapterId || !nextChapterId) {
 			$('a[href*="/story/"]').each((_, el) => {
 				const href = $(el).attr('href') || '';

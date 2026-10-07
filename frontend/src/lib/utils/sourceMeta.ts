@@ -181,6 +181,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	knoxt: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
 	easternwordsmith: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 	puffberry: { flag: 'gb', lang: 'EN', isR18: true, isBL: true, color: 'bg-amber-500' },
+	mboognovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
+	razure: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

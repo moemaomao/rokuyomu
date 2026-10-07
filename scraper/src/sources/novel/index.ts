@@ -71,8 +71,12 @@ import { NovelsOceanSource } from '../impl/novel/NovelsOcean';
 import { KnoxTSource } from '../impl/novel/KnoxT';
 import { EasternWordsmithSource } from '../impl/novel/EasternWordsmith';
 import { PuffberrySource } from '../impl/novel/Puffberry';
+import { MboogNovelSource } from '../impl/novel/MboogNovel';
+import { RazureSource } from '../impl/novel/Razure';
 
 const novelSources: Record<string, IMangaSource> = {
+	razure: new RazureSource(),
+	mboognovel: new MboogNovelSource(),
 	puffberry: new PuffberrySource(),
 	easternwordsmith: new EasternWordsmithSource(),
 	knoxt: new KnoxTSource(),
