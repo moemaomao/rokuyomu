@@ -191,6 +191,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	readgon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 	kjnovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	bailiantales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-pink-600' },
+	nightjarreads: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-slate-700' },
 };
 
 export const DEFAULT_META: SourceMeta = {
