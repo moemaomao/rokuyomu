@@ -80,9 +80,10 @@ import { OpheliaScansSource } from '../impl/novel/OpheliaScans';
 import { XianhuaTalesSource } from '../impl/novel/XianhuaTales';
 import { ReadGonSource } from '../impl/novel/ReadGon';
 import { KJNovelsSource } from '../impl/novel/KJNovels';
-
+import { BaiLianTalesSource } from '../impl/novel/BaiLianTales';
 
 const novelSources: Record<string, IMangaSource> = {
+	bailiantales: new BaiLianTalesSource(),
 	kjnovels: new KJNovelsSource(),
 	readgon: new ReadGonSource(),
 	xianhuatales: new XianhuaTalesSource(),
