@@ -189,6 +189,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	opheliascans: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
 	xianhuatales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
 	readgon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
+	kjnovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

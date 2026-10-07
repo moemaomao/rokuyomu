@@ -187,6 +187,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'opheliascans', name: 'OpheliaScans' },
 	{ id: 'xianhuatales', name: 'XianhuaTales' },
 	{ id: 'readgon', name: 'ReadGon' },
+	{ id: 'kjnovels', name: 'KJNovels' },
 ];
 
 export function getSourceList(): SourceMeta[] {
