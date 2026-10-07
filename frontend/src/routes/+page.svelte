@@ -301,13 +301,13 @@
 		.badge-stick {
 			display: inline-flex;
 			align-items: center;
-			gap: 0.15rem;
-			padding: 0.2rem 0.45rem;
-			font-size: 0.55rem;
+			gap: 0.1rem;
+			padding: 0.12rem 0.3rem;
+			font-size: 0.48rem;
 			font-weight: 700;
-			letter-spacing: 0.03em;
+			letter-spacing: 0.02em;
 			text-transform: uppercase;
-			line-height: 1.15;
+			line-height: 1.1;
 			border: 1px solid transparent;
 			backdrop-filter: none;
 			-webkit-backdrop-filter: none;
@@ -316,30 +316,31 @@
 
 		@media (min-width: 640px) {
 			.badge-stick {
-				font-size: 0.6rem;
-				padding: 0.22rem 0.5rem;
+				font-size: 0.55rem;
+				padding: 0.18rem 0.4rem;
+				gap: 0.12rem;
 			}
 		}
 
 		.badge-stick-tl {
-			border-radius: 0 0 0.4rem 0;
+			border-radius: 0 0 0.3rem 0;
 		}
 
 		.badge-stick-tr {
-			border-radius: 0 0 0 0.4rem;
+			border-radius: 0 0 0 0.3rem;
 		}
 
 		.badge-stick-ch {
-			border-radius: 0 0.35rem 0.35rem 0;
+			border-radius: 0 0.3rem 0.3rem 0;
 			margin-top: 1px;
 		}
 
 		.badge-stick-bl {
-			border-radius: 0 0.4rem 0 0;
+			border-radius: 0 0.3rem 0 0;
 		}
 
 		.badge-stick-br {
-			border-radius: 0.4rem 0 0 0;
+			border-radius: 0.3rem 0 0 0;
 		}
 
 		/* ── Transparent modern colors ─────────────────────────────────────── */
@@ -599,10 +600,10 @@
 			</span>
 
 			{#if manga.latestChapter || (manga as any).chapter}
-				<span class="badge-stick badge-stick-ch badge-chapter absolute top-[18px] left-0 z-20 sm:top-[20px]">
+				<span class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]">
 					{#if listChapterFlag(manga.lang)}
 						<span
-							class="fi fi-{listChapterFlag(manga.lang)} text-[9px] leading-none sm:text-[10px]"
+							class="fi fi-{listChapterFlag(manga.lang)} text-[8px] leading-none sm:text-[9px]"
 						></span>
 					{/if}
 					<span>Ch. {manga.latestChapter || (manga as any).chapter}</span>
@@ -621,10 +622,10 @@
 
 			<!-- TITLE -->
 			<div
-				class="absolute inset-x-0 bottom-0 z-10 max-h-12 bg-gradient-to-t from-black/95 via-black/80 to-transparent px-1 pt-4 pb-13 transition-all duration-300 group-hover:max-h-full group-hover:pt-8 group-active:max-h-full group-active:pt-8"
+				class="absolute inset-x-0 bottom-0 z-10 max-h-14 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-1 pt-4 pb-12 transition-all duration-300 group-hover:max-h-full group-hover:from-black/90 group-hover:via-black/70 group-hover:pt-8 group-hover:pb-5 group-active:max-h-full group-active:from-black/90 group-active:via-black/70 group-active:pt-8 group-active:pb-5"
 			>
 				<h3
-					class="line-clamp-2 text-center text-[10px] font-semibold leading-tight text-white drop-shadow-md transition-all duration-300 group-hover:line-clamp-none group-active:line-clamp-none sm:text-[11px]"
+					class="line-clamp-2 text-center text-[10px] font-semibold leading-tight text-white drop-shadow-sm transition-all duration-300 group-hover:line-clamp-none group-active:line-clamp-none sm:text-[11px]"
 				>
 					{manga.title}
 				</h3>
