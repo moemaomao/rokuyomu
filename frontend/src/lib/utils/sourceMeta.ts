@@ -180,6 +180,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	novelsocean: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-cyan-600' },
 	knoxt: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-amber-600' },
 	easternwordsmith: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
+	puffberry: { flag: 'gb', lang: 'EN', isR18: true, isBL: true, color: 'bg-amber-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {
