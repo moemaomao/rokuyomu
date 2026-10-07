@@ -78,8 +78,10 @@ import { FreeWebNovelSource } from '../impl/novel/FreeWebNovel';
 import { GenesisStudioSource } from '../impl/novel/GenesisStudio';
 import { OpheliaScansSource } from '../impl/novel/OpheliaScans';
 import { XianhuaTalesSource } from '../impl/novel/XianhuaTales';
+import { ReadGonSource } from '../impl/novel/ReadGon';
 
 const novelSources: Record<string, IMangaSource> = {
+	readgon: new ReadGonSource(),
 	xianhuatales: new XianhuaTalesSource(),
 	opheliascans: new OpheliaScansSource(),
 	genesistudio: new GenesisStudioSource(),

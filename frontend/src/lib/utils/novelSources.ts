@@ -78,6 +78,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'genesistudio',
 	'opheliascans',
 	'xianhuatales',
+	'readgon',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

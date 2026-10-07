@@ -188,6 +188,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	genesistudio: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 	opheliascans: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
 	xianhuatales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
+	readgon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
