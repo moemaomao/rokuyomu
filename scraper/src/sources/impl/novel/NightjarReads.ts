@@ -8,7 +8,6 @@
  * - Content: article / .prose paragraphs
  * - Cover: supabase.co/storage/.../covers/...
  * - Search: /browse?q= or client filter
- * - Chapter title: "Chapter N"
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -110,7 +109,7 @@ export class NightjarReadsSource extends BaseSource {
 		const pageNum = Math.max(1, page);
 		try {
 			const paths =
-				pageNum <= 1 ? ['/', '/browse'] : [`/browse?page=${pageNum}`];
+				pageNum <= 1 ? ['/browse', '/'] : [`/browse?page=${pageNum}`];
 			const ordered: Manga[] = [];
 			const seen = new Set<string>();
 			for (const p of paths) {
@@ -133,100 +132,90 @@ export class NightjarReadsSource extends BaseSource {
 	}
 
 	private parseNovelCards(html: string): Manga[] {
+		const $ = cheerio.load(html);
 		const ordered: Manga[] = [];
 		const seen = new Set<string>();
-		const slugRe = /\/novel\/([a-z0-9\-]+)(?!\/\d)/gi;
-		const slugs: string[] = [];
-		let sm: RegExpExecArray | null;
-		while ((sm = slugRe.exec(html))) {
-			if (!slugs.includes(sm[1])) slugs.push(sm[1]);
-		}
 
-		for (const slug of slugs) {
-			const id = `/novel/${slug}`;
-			if (seen.has(id)) continue;
+		$('a[href*="/novel/"]').each((_, el) => {
+			const href = $(el).attr('href') || '';
+			const id = pathOnly(href);
+			if (!isNovelPath(id) || seen.has(id)) return;
 
-			const latestLink = html.match(
-				new RegExp(
-					`href="(/novel/${slug}/(\\d+))"[^>]*>\\s*Latest ch\\.`,
-					'i'
-				)
-			);
-			const idx = latestLink
-				? html.indexOf(latestLink[0])
-				: html.indexOf(`/novel/${slug}`);
-			const chunk =
-				idx >= 0
-					? html.slice(Math.max(0, idx - 2000), idx + 800)
-					: html;
+			let title =
+				cleanText($(el).find('h1, h2, h3, h4').first().text()) ||
+				cleanText($(el).attr('title') || '');
+			if (!title) {
+				title = cleanText($(el).text())
+					.replace(/\bTrending\b/gi, '')
+					.replace(/\+\s*\d+/g, '')
+					.replace(/\d+\s*ch\b/gi, '')
+					.replace(/\s+/g, ' ')
+					.trim();
 
-			let title = '';
-			const tm = chunk.match(/\\"title\\":\\"((?:[^\\]|\\.)*?)\\"/);
-			if (tm) title = cleanText(decodeRsc(tm[1]));
-			if (!title || title.length < 2) {
-				title = slug
-					.split('-')
-					.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-					.join(' ');
+				const half = Math.floor(title.length / 2);
+				if (
+					title.length > 10 &&
+					title.slice(0, half).trim() === title.slice(half).trim()
+				) {
+					title = title.slice(0, half).trim();
+				}
 			}
-		
+			if (!title || title.length < 2) return;
 			if (
-				/^(nightjar|browse|library|genres|home|popular|trending|latest|originals?)$/i.test(
+				/being read a lot|nightjar reads|browse|library|^trending$/i.test(
 					title
-				) ||
-				/being read a lot/i.test(title)
+				)
 			) {
-				continue;
+				return;
 			}
 			if (title.length > 180) title = title.slice(0, 180);
 
+			const $card = $(el).closest('article, li, a, div');
 			let cover = '';
-			const cm = chunk.match(
-				/(https:\/\/[^"'\\]*supabase\.co\/[^"'\\]*covers[^"'\\]+\.(?:jpg|jpeg|png|webp))/i
-			);
-			if (cm) cover = cm[1].replace(/\\+/g, '');
-			if (!cover) {
-				const pm = chunk.match(/_next\/image\?url=([^&"']+)/i);
-				if (pm) {
+			$card.find('img').each((__, img) => {
+				const src =
+					$(img).attr('src') ||
+					$(img).attr('data-src') ||
+					'';
+				const m = String(src).match(/url=([^&]+)/);
+				if (m) {
 					try {
-						cover = decodeURIComponent(pm[1]);
+						cover = decodeURIComponent(m[1]);
 					} catch {
-						cover = pm[1];
+						cover = m[1];
 					}
+				} else if (/supabase|covers/i.test(src)) {
+					cover = absUrl(String(src).split('?')[0]);
+				}
+			});
+		
+			if (!cover) {
+				const idx = html.indexOf(href);
+				if (idx >= 0) {
+					const chunk = html.slice(Math.max(0, idx - 1200), idx + 200);
+					const cm = chunk.match(
+						/(https:\/\/[^"'\\]*supabase\.co\/[^"'\\]*covers[^"'\\]+\.(?:jpg|jpeg|png|webp))/i
+					);
+					if (cm) cover = cm[0].replace(/\\+/g, '');
 				}
 			}
 
 			let latestChapter: number | undefined;
-			if (latestLink) {
-				latestChapter = parseInt(latestLink[2], 10);
-			} else {
-				const nums = [
-					...chunk.matchAll(
-						new RegExp(`/novel/${slug}/(\\d+)`, 'gi')
-					)
-				].map((x) => parseInt(x[1], 10));
-				if (nums.length) latestChapter = Math.max(...nums);
+			const cardText = cleanText($card.text());
+			const chBadge = cardText.match(/(\d+)\s*ch\b/i);
+			if (chBadge) latestChapter = parseInt(chBadge[1], 10);
+			const latestA = $card
+				.find(`a[href*="${id}/"]`)
+				.filter((__, a) => /Latest ch/i.test($(a).text()))
+				.first();
+			if (latestA.length) {
+				const n = parseChapterNumber(latestA.attr('href') || '');
+				if (n > 0) latestChapter = n;
 			}
 
 			let status: string | undefined;
-			if (
-				/\\"status\\":\\"Completed\\"/i.test(chunk) ||
-				/\bCompleted\b/i.test(chunk)
-			) {
-				status = 'Completed';
-			} else if (/\\"status\\":\\"Ongoing\\"/i.test(chunk)) {
-				status = 'Ongoing';
-			}
-
-			let updatedAt: number | undefined;
-			const iso =
-				chunk.match(/\\"updatedAt\\":\\"([^\\"]+)\\"/i) ||
-				chunk.match(/\\"updated_at\\":\\"([^\\"]+)\\"/i) ||
-				chunk.match(/\\"lastUpdated\\":\\"([^\\"]+)\\"/i);
-			if (iso) {
-				const parsed = Date.parse(iso[1]);
-				if (!Number.isNaN(parsed)) updatedAt = parsed;
-			}
+			if (/\bCompleted\b/i.test(cardText)) status = 'Completed';
+			else if (/\bOngoing\b/i.test(cardText)) status = 'Ongoing';
 
 			seen.add(id);
 			ordered.push({
@@ -237,9 +226,62 @@ export class NightjarReadsSource extends BaseSource {
 				type: 'novel',
 				lang: 'en',
 				status,
-				...(latestChapter != null ? { latestChapter } : {}),
-				...(updatedAt != null ? { updatedAt } : {})
+				...(latestChapter != null ? { latestChapter } : {})
 			});
+		});
+
+		if (ordered.length < 10) {
+			const raw = [
+				...html.matchAll(/\/novel\/([a-z0-9\-]+)(?!\/\d)/gi)
+			].map((m) => m[1]);
+			const unique: string[] = [];
+			for (const s of raw) {
+				const longer = raw.find((o) => o !== s && o.startsWith(s));
+				if (longer) continue;
+				if (!unique.includes(s)) unique.push(s);
+			}
+			for (const slug of unique) {
+				const id = `/novel/${slug}`;
+				if (seen.has(id)) continue;
+				const idx = html.indexOf(`/novel/${slug}`);
+				const chunk =
+					idx >= 0
+						? html.slice(Math.max(0, idx - 800), idx + 800)
+						: '';
+				const titles = [
+					...chunk.matchAll(/\\"title\\":\\"((?:[^\\]|\\.)*?)\\"/g)
+				]
+					.map((m) => cleanText(decodeRsc(m[1])))
+					.filter(
+						(t) =>
+							t &&
+							!/being read a lot|nightjar/i.test(t) &&
+							t.length > 2
+					);
+				const title =
+					titles.find((t) =>
+						t.toLowerCase().includes(slug.split('-')[0])
+					) ||
+					titles[0] ||
+					slug
+						.split('-')
+						.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+						.join(' ');
+				let cover = '';
+				const cm = chunk.match(
+					/(https:\/\/[^"'\\]*supabase\.co\/[^"'\\]*covers[^"'\\]+\.(?:jpg|jpeg|png|webp))/i
+				);
+				if (cm) cover = cm[1].replace(/\\+/g, '');
+				seen.add(id);
+				ordered.push({
+					id,
+					title: title.slice(0, 180),
+					cover,
+					sourceId: this.id,
+					type: 'novel',
+					lang: 'en'
+				});
+			}
 		}
 
 		return ordered;
@@ -366,7 +408,6 @@ export class NightjarReadsSource extends BaseSource {
 	private parseChapterList(html: string, novelPath: string): Chapter[] {
 		const slug = novelPath.replace(/^\/novel\//, '');
 		const byNum = new Map<number, string>();
-
 		const re = new RegExp(`/novel/${slug}/(\\d+)`, 'gi');
 		let m: RegExpExecArray | null;
 		while ((m = re.exec(html))) {
