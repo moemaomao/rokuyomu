@@ -51,7 +51,6 @@
 		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
 		uniqueSources = sources.size;
 
-		// XP: history*10 + bookmarks*15 + chapters*2
 		const totalXp = historyCount * 10 + bookmarkCount * 15 + chaptersRead * 2;
 		xp = totalXp;
 
@@ -112,6 +111,10 @@
 			await loginWithGithub();
 			onSuccess();
 		} catch {}
+	}
+
+	function goToStats() {
+		onSuccess();
 	}
 </script>
 
@@ -255,6 +258,7 @@
 		<div class="border-t p-2 space-y-1 {isDarkMode ? 'border-zinc-800' : 'border-zinc-100'}">
 			<a
 				href="/stats"
+				onclick={goToStats}
 				class="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition
 					{isDarkMode
 					? 'text-violet-300 hover:bg-violet-500/10'

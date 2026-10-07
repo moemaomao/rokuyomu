@@ -59,22 +59,31 @@
 	});
 
 	let topSources = $derived(sourceMap.slice(0, 8));
+	
+	function localDateKey(d: Date): string {
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	}
 
 	let activityDays = $derived.by(() => {
 		const days: { label: string; count: number; key: string }[] = [];
 		const now = new Date();
 		for (let i = 13; i >= 0; i--) {
-			const d = new Date(now);
-			d.setDate(d.getDate() - i);
-			d.setHours(0, 0, 0, 0);
-			const key = d.toISOString().slice(0, 10);
+			const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+			const key = localDateKey(d);
 			const label =
 				i === 0 ? 'Today' : i === 1 ? 'Yday' : d.toLocaleDateString('en', { weekday: 'short' });
 			days.push({ label, count: 0, key });
 		}
 		const map = new Map(days.map((x) => [x.key, x]));
 		for (const h of history) {
-			const key = new Date(h.timestamp).toISOString().slice(0, 10);
+			const ts = Number(h.timestamp);
+			if (!ts) continue;
+			// support both ms and seconds
+			const ms = ts < 1e12 ? ts * 1000 : ts;
+			const key = localDateKey(new Date(ms));
 			const row = map.get(key);
 			if (row) row.count++;
 		}
@@ -82,6 +91,36 @@
 	});
 
 	let maxActivity = $derived(Math.max(1, ...activityDays.map((d) => d.count)));
+
+	const CHART_H = 120;
+	const CHART_PAD_TOP = 16;
+	const CHART_PAD_BOT = 4;
+	const CHART_USABLE = CHART_H - CHART_PAD_TOP - CHART_PAD_BOT;
+
+	let activityChart = $derived.by(() => {
+		const n = activityDays.length || 1;
+		const step = 100 / n;
+		const points = activityDays.map((d, i) => {
+			const x = step * i + step / 2;
+			const h = d.count === 0 ? 0 : Math.max(0.08, d.count / maxActivity);
+			const y = CHART_PAD_TOP + CHART_USABLE * (1 - h);
+			return { x, y, h, count: d.count, key: d.key, label: d.label, i };
+		});
+		const linePoints = points.map((p) => `${p.x},${(p.y / CHART_H) * 100}`).join(' ');
+		const areaPoints =
+			`${step / 2},${((CHART_PAD_TOP + CHART_USABLE) / CHART_H) * 100} ` +
+			linePoints +
+			` ${step * (n - 1) + step / 2},${((CHART_PAD_TOP + CHART_USABLE) / CHART_H) * 100}`;
+		const bars = points.map((p) => {
+			const x = step * p.i + step * 0.2;
+			const barW = step * 0.6;
+			const hRatio = p.count === 0 ? 0.015 : Math.max(0.08, p.count / maxActivity);
+			const barH = CHART_USABLE * hRatio;
+			const y = CHART_PAD_TOP + CHART_USABLE - barH;
+			return { x, y, barW, barH, count: p.count, key: p.key, label: p.label };
+		});
+		return { step, linePoints, areaPoints, bars, points };
+	});
 
 	let totalXp = $derived(totalTitles * 10 + bookmarkCount * 15 + totalChapters * 2);
 	let levelInfo = $derived.by(() => {
@@ -163,7 +202,8 @@
 	let recent = $derived(history.slice(0, 10));
 
 	function formatTime(ts: number): string {
-		const diff = Date.now() - ts;
+		const ms = ts < 1e12 ? ts * 1000 : ts;
+		const diff = Date.now() - ms;
 		const m = Math.floor(diff / 60000);
 		const h = Math.floor(diff / 3600000);
 		const d = Math.floor(diff / 86400000);
@@ -461,17 +501,88 @@
 				<Activity class="h-4 w-4 text-sky-500" />
 				Activity — last 14 days
 			</h2>
-			<div class="flex h-28 items-end gap-1 sm:gap-1.5">
-				{#each activityDays as day}
-					<div class="flex flex-1 flex-col items-center gap-1">
-						<div
-							class="w-full max-w-[28px] rounded-t-md bg-gradient-to-t from-violet-600 to-fuchsia-400 transition-all"
-							style="height: {Math.max(4, (day.count / maxActivity) * 100)}%"
-							title="{day.count} reads"
-						></div>
-						<span class="text-[9px] {textMuted} sm:text-[10px]">{day.label}</span>
-					</div>
-				{/each}
+			<div class="relative w-full" style="height: {CHART_H + 22}px">
+				<svg
+					viewBox="0 0 100 {CHART_H}"
+					preserveAspectRatio="none"
+					class="absolute inset-x-0 top-0 w-full"
+					style="height: {CHART_H}px"
+				>
+					{#each [0.25, 0.5, 0.75, 1] as g}
+						<line
+							x1="0"
+							y1={CHART_PAD_TOP + CHART_USABLE * (1 - g)}
+							x2="100"
+							y2={CHART_PAD_TOP + CHART_USABLE * (1 - g)}
+							stroke={isDark ? '#3f3f46' : '#e4e4e7'}
+							stroke-width="0.3"
+							stroke-dasharray="1.5 1.5"
+							vector-effect="non-scaling-stroke"
+						/>
+					{/each}
+
+					<polygon
+						points={activityChart.areaPoints}
+						fill="url(#activityGrad)"
+						opacity="0.25"
+					/>
+
+					<polyline
+						points={activityChart.linePoints}
+						fill="none"
+						stroke="#8b5cf6"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						vector-effect="non-scaling-stroke"
+					/>
+
+					{#each activityChart.points as p}
+						<circle
+							cx={p.x}
+							cy={p.y}
+							r={p.count > 0 ? 1.8 : 1.1}
+							fill={p.count > 0 ? '#a78bfa' : isDark ? '#52525b' : '#d4d4d8'}
+							stroke={isDark ? '#18181b' : '#fff'}
+							stroke-width="0.7"
+							vector-effect="non-scaling-stroke"
+						>
+							<title>{p.count} reads · {p.key}</title>
+						</circle>
+					{/each}
+
+					<defs>
+						<linearGradient id="activityGrad" x1="0" y1="0" x2="0" y2="1">
+							<stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.45" />
+							<stop offset="100%" stop-color="#8b5cf6" stop-opacity="0" />
+						</linearGradient>
+					</defs>
+				</svg>
+
+				<!-- count labels above peaks -->
+				<div class="pointer-events-none absolute inset-x-0 top-0 flex" style="height: {CHART_H}px">
+					{#each activityChart.points as p}
+						<div class="relative flex-1">
+							{#if p.count > 0}
+								<span
+									class="absolute left-1/2 -translate-x-1/2 text-[9px] font-bold tabular-nums text-violet-500"
+									style="top: {Math.max(0, (p.y / CHART_H) * CHART_H - 14)}px"
+								>
+									{p.count}
+								</span>
+							{/if}
+						</div>
+					{/each}
+				</div>
+
+				<!-- day labels -->
+				<div class="absolute inset-x-0 bottom-0 flex">
+					{#each activityDays as day}
+						<span class="flex-1 text-center text-[9px] {textMuted} sm:text-[10px]">
+							{day.label}
+						</span>
+					{/each}
+				</div>
 			</div>
 		</div>
 
