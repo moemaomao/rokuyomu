@@ -183,6 +183,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	puffberry: { flag: 'gb', lang: 'EN', isR18: true, isBL: true, color: 'bg-amber-500' },
 	mboognovel: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-500' },
 	razure: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
+	etherreads: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

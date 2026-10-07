@@ -73,6 +73,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'puffberry',
 	'mboognovel',
 	'razure',
+	'etherreads',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

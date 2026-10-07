@@ -73,8 +73,10 @@ import { EasternWordsmithSource } from '../impl/novel/EasternWordsmith';
 import { PuffberrySource } from '../impl/novel/Puffberry';
 import { MboogNovelSource } from '../impl/novel/MboogNovel';
 import { RazureSource } from '../impl/novel/Razure';
+import { EtherReadsSource } from '../impl/novel/EtherReads';
 
 const novelSources: Record<string, IMangaSource> = {
+	etherreads: new EtherReadsSource(),
 	razure: new RazureSource(),
 	mboognovel: new MboogNovelSource(),
 	puffberry: new PuffberrySource(),
