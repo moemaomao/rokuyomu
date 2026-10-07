@@ -85,8 +85,10 @@ import { NightjarReadsSource } from '../impl/novel/NightjarReads';
 import { NoveoStoriesSource } from '../impl/novel/NoveoStories';
 import LittlePandaTranslationsSource from '../impl/novel/LittlePandaTranslations';
 import MzNovelsSource from '../impl/novel/MzNovels';
+import ZirusMusingsSource from '../impl/novel/ZirusMusings';
 
 const novelSources: Record<string, IMangaSource> = {
+	zirusmusings: new ZirusMusingsSource(),
 	mznovels: new MzNovelsSource(),
 	littlepandatranslations: new LittlePandaTranslationsSource(),
 	noveostories: new NoveoStoriesSource(),

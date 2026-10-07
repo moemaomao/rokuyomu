@@ -194,7 +194,8 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	nightjarreads: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-slate-700' },
 	noveostories: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 	littlepandatranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
-	mznovels: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
+	mznovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-600' },
+	zirusmusings: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

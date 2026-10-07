@@ -1,7 +1,5 @@
 PROPRIETARY SOFTWARE LICENSE
 
-Copyright (c) 2026 moemaomao. All Rights Reserved.
-
 This software and its associated documentation files (the "Software") are 
 the exclusive property of the copyright holder.
 
