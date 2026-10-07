@@ -129,46 +129,8 @@ export class RazureSource extends BaseSource {
 		const pageNum = Math.max(1, page);
 		if (pageNum > 1) return this.fetchSeriesList(pageNum);
 
-		const [fromHome, fromList] = await Promise.all([
-			this.parseLatestHome().catch(() => [] as Manga[]),
-			this.fetchSeriesList(1).catch(() => [] as Manga[])
-		]);
-
-		const byId = new Map<string, Manga>();
-
-		for (const m of fromHome) {
-			byId.set(m.id, { ...m });
-		}
-		for (const m of fromList) {
-			const prev = byId.get(m.id);
-			if (!prev) {
-				byId.set(m.id, { ...m });
-				continue;
-			}
-			byId.set(m.id, {
-				...prev,
-				cover: this.pickCover(prev.cover, m.cover),
-				status: prev.status || m.status,
-				latestChapter: prev.latestChapter ?? m.latestChapter,
-				title: prev.title || m.title
-			});
-		}
-
-		const ordered: Manga[] = [];
-		const seen = new Set<string>();
-		for (const m of fromHome) {
-			if (seen.has(m.id)) continue;
-			seen.add(m.id);
-			const merged = byId.get(m.id)!;
-			ordered.push(merged);
-		}
-		for (const m of fromList) {
-			if (seen.has(m.id)) continue;
-			seen.add(m.id);
-			ordered.push(byId.get(m.id)!);
-		}
-
-		return ordered.slice(0, PER_PAGE);
+		const fromHome = await this.parseLatestHome().catch(() => [] as Manga[]);
+		return fromHome.slice(0, PER_PAGE);
 	}
 
 	private pickCover(a?: string, b?: string): string {
@@ -188,6 +150,7 @@ export class RazureSource extends BaseSource {
 			img.attr('data-lazy-src'),
 			img.attr('data-original'),
 			img.attr('src'),
+	
 			(img.attr('srcset') || '').split(',').pop()?.trim().split(/\s+/)[0],
 			$el.find('[style*="background"]').attr('style')?.match(
 				/url\(['"]?([^'")\s]+)/
@@ -206,40 +169,47 @@ export class RazureSource extends BaseSource {
 		const $ = cheerio.load(html);
 		$('script, style, noscript, iframe').remove();
 
+		let $scope: any = null;
+		$('h1, h2, h3, h4, .section-title, [class*="heading"]').each((_, el) => {
+			if (/latest\s*updates?/i.test(cleanText($(el).text()))) {
+				const $sec = $(el).closest('section, .section, main, div');
+				$scope = $sec.length ? $sec : $(el).parent();
+				return false;
+			}
+		});
+
+		const $root = $scope && $scope.length ? $scope : $('body');
+
+		const ordered: Manga[] = [];
 		const byId = new Map<string, Manga>();
 
-		$('a[href*="/series/"]').each((_, el) => {
+		$root.find('a[href*="/series/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			const id = pathOnly(href);
 			if (!isSeriesPath(id)) return;
 
 			const $parent = $(el).closest(
-				'article, .card, li, .series-item, .update-item, section, div'
+				'article, .card, li, .series-item, .update-item, .update, section, div'
 			);
 			const title =
 				cleanText($(el).attr('title') || '') ||
 				cleanText($(el).find('img').attr('alt') || '') ||
 				cleanText($(el).text());
 			if (!title || title.length < 2) return;
-			if (/^(explore|all series|view all|bookmark|read|series details)/i.test(title))
+			if (
+				/^(explore|all series|view all|bookmark|read|series details|dropping)/i.test(
+					title
+				)
+			)
 				return;
 
 			let latestChapter: number | undefined;
-			const chTexts: string[] = [];
 			$parent.find('a[href*="-chapter-"]').each((__, a) => {
-				chTexts.push(cleanText($(a).text()));
-			});
-			for (const t of chTexts) {
-				const n = parseChapterNumber(t);
+				const n = parseChapterNumber(cleanText($(a).text()));
 				if (n > 0 && (latestChapter == null || n > latestChapter)) {
 					latestChapter = n;
 				}
-			}
-		
-			if (latestChapter == null) {
-				const cm = cleanText($parent.text()).match(/(?:📖\s*)?(\d+)\s*Chapters?/i);
-				if (cm) latestChapter = parseInt(cm[1], 10);
-			}
+			});
 
 			const cover = this.extractImg($parent, $) || this.extractImg($(el), $);
 
@@ -251,12 +221,12 @@ export class RazureSource extends BaseSource {
 					latestChapter:
 						prev.latestChapter != null && latestChapter != null
 							? Math.max(Number(prev.latestChapter), latestChapter)
-							: prev.latestChapter ?? latestChapter
+							: (prev.latestChapter ?? latestChapter)
 				});
 				return;
 			}
 
-			byId.set(id, {
+			const item: Manga = {
 				id,
 				title: title.slice(0, 200),
 				cover,
@@ -264,10 +234,12 @@ export class RazureSource extends BaseSource {
 				type: 'novel',
 				lang: 'en',
 				...(latestChapter != null ? { latestChapter } : {})
-			});
+			};
+			byId.set(id, item);
+			ordered.push(item);
 		});
 
-		return Array.from(byId.values());
+		return ordered.map((m) => byId.get(m.id)!).slice(0, PER_PAGE);
 	}
 
 	private async fetchSeriesList(page: number): Promise<Manga[]> {
@@ -388,8 +360,8 @@ export class RazureSource extends BaseSource {
 							: $el.find('a').first();
 				const href = a.attr('href') || '';
 				let id = pathOnly(href);
-	
 				if (!isSeriesPath(id)) {
+			
 					const sa = $el
 						.closest('article, li, div')
 						.find('a[href*="/series/"]')
@@ -517,7 +489,7 @@ export class RazureSource extends BaseSource {
 			const n = cleanText($(a).text());
 			if (n && n.length < 40 && !genres.includes(n)) genres.push(n);
 		});
-	
+		
 		if (!genres.length) {
 			const headerLine = cleanText($('h1').parent().text() || $('main').text().slice(0, 500));
 			const gm = headerLine.match(
@@ -570,11 +542,12 @@ export class RazureSource extends BaseSource {
 			const number = parseChapterNumber(rawTitle || id);
 			if (number <= 0 && !/prologue/i.test(rawTitle)) return;
 
-			const rowHtml = $row.html() || '';
-			const rowText = $row.text() || '';
+			const linkText = $(el).text() || '';
+			const linkHtml = $(el).html() || '';
 			const isLocked =
-				/🔒|lock|premium|fa-lock|paid/i.test(rowHtml + rowText) ||
-				!!$row.find('.lock, .premium, [class*="lock"], [class*="premium"]').length;
+				/🔒/.test(linkText + linkHtml) ||
+				/free\s+on\s+\d/i.test(linkText) ||
+				$(el).find('.lock, [class*="lock-icon"], .fa-lock, svg[class*="lock"]').length > 0;
 
 			const date =
 				cleanText($row.find('time').attr('datetime') || '') ||
