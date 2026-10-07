@@ -82,8 +82,10 @@ import { ReadGonSource } from '../impl/novel/ReadGon';
 import { KJNovelsSource } from '../impl/novel/KJNovels';
 import { BaiLianTalesSource } from '../impl/novel/BaiLianTales';
 import { NightjarReadsSource } from '../impl/novel/NightjarReads';
+import { NoveoStoriesSource } from '../impl/novel/NoveoStories';
 
 const novelSources: Record<string, IMangaSource> = {
+	noveostories: new NoveoStoriesSource(),
 	nightjarreads: new NightjarReadsSource(),
 	bailiantales: new BaiLianTalesSource(),
 	kjnovels: new KJNovelsSource(),

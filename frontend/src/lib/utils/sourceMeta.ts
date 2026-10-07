@@ -192,6 +192,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	kjnovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	bailiantales: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-pink-600' },
 	nightjarreads: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-slate-700' },
+	noveostories: { flag: 'kr', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
