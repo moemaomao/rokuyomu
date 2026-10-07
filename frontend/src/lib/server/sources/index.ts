@@ -192,6 +192,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'nightjarreads', name: 'NightjarReads' },
 	{ id: 'noveostories', name: 'NoveoStories' },
 	{ id: 'littlepandatranslations', name: 'Little Panda Translations' },
+	{ id: 'mznovels', name: 'MZ Novels' },
 ];
 
 export function getSourceList(): SourceMeta[] {
