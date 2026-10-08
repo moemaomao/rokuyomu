@@ -201,6 +201,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	asmotoon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-600' },
 	orionscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 	lhtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-600' },
+	ezmanga: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-pink-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

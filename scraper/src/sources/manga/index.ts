@@ -101,8 +101,10 @@ import { ThunderScansSource } from '../impl/manga/ThunderScans';
 import { AsmoToonSource } from '../impl/manga/AsmoToon';
 import { OrionScansSource } from '../impl/manga/OrionScans';
 import { LHTranslationSource } from '../impl/manga/LHTranslation';
+import { EZMangaSource } from '../impl/manga/EZManga';
 
 const mangaSources: Record<string, IMangaSource> = {
+	ezmanga: new EZMangaSource(),
 	lhtranslation: new LHTranslationSource(),
 	orionscans: new OrionScansSource(),
 	asmotoon: new AsmoToonSource(),
