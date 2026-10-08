@@ -11,17 +11,6 @@
  * ID format:
  *   manga   : /comics/{slug}
  *   chapter : /{chapter-path}   e.g. /howling-chapter-5
- *
- * Requirements:
- * - 24 judul per page
- * - Metadata lengkap (author, artist, alt, release, genre, type, status, rating)
- * - Chapter list bersih (Chapter N saja)
- * - Pagination + next/prev (via page param)
- * - Chapter badge (latestChapter)
- * - isLocked + 🔒 untuk paywall
- * - Search jalan
- * - Latest dari order=update
- * - fetchWithCf via BaseSource.fetchHtml
  */
 
 import { BaseSource } from '../../BaseSource';
@@ -51,7 +40,6 @@ export class ThunderScansSource extends BaseSource {
 			try {
 				id = new URL(id).pathname;
 			} catch {
-				/* ignore */
 			}
 		}
 		if (!id.startsWith('/')) id = `/${id}`;
@@ -105,29 +93,6 @@ export class ThunderScansSource extends BaseSource {
 		return n ? parseFloat(n[1]) : 0;
 	}
 
-	/**
-	 * Extract latest chapter number from card HTML.
-	 * Site often wraps .epxs inside HTML comments: <!-- <div class="epxs">Chapter 18</div> -->
-	 * so cheerio won't see it as an element — parse raw outerHTML instead.
-	 */
-	private extractLatestChapter(cardHtml: string, $card: cheerio.Cheerio<any>): string | undefined {
-		// 1) live .epxs element
-		const live = $card.find('.epxs').first().text().replace(/\s+/g, ' ').trim();
-		let m = live.match(/(?:chapter|chap|ch\.?)?\s*(\d+(?:\.\d+)?)/i);
-		if (m) return m[1];
-
-		// 2) commented epxs: <!-- <div class="epxs">Chapter 18</div> -->
-		m = cardHtml.match(/class=["']epxs["'][^>]*>\s*(?:Chapter\s*)?(\d+(?:\.\d+)?)/i);
-		if (m) return m[1];
-
-		// 3) any "Chapter N" in card markup
-		m = cardHtml.match(/Chapter\s+(\d+(?:\.\d+)?)/i);
-		if (m) return m[1];
-
-		return undefined;
-	}
-
-	/** Parse .bsx cards (list/search/latest) */
 	private parseCards($: cheerio.CheerioAPI): Manga[] {
 		const res: Manga[] = [];
 		const seen = new Set<string>();
@@ -158,9 +123,10 @@ export class ThunderScansSource extends BaseSource {
 				'';
 			cover = this.absUrl(cover);
 
-			// outerHTML keeps HTML comments (where epxs often lives)
-			const cardHtml = $.html($card) || '';
-			const latestChapter = this.extractLatestChapter(cardHtml, $card);
+			const epxs = $card.find('.epxs').first().text().replace(/\s+/g, ' ').trim();
+			let latestChapter: string | undefined;
+			const chM = epxs.match(/(\d+(?:\.\d+)?)/);
+			if (chM) latestChapter = chM[1];
 
 			const cardText = $card.text().toLowerCase();
 			const type = this.mapType(cardText);
@@ -192,17 +158,15 @@ export class ThunderScansSource extends BaseSource {
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			// Site uses query param: /comics/?page=N&order=update  (NOT /comics/page/N/)
 			const path =
 				p <= 1
 					? '/comics/?order=update'
-					: `/comics/?page=${p}&order=update`;
+					: `/comics/page/${p}/?order=update`;
 
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
 			let list = this.parseCards($);
 
-			// Fallback: homepage
 			if (list.length === 0 && p === 1) {
 				const home = await this.fetchHtml('/');
 				list = this.parseCards(cheerio.load(home));
@@ -226,7 +190,6 @@ export class ThunderScansSource extends BaseSource {
 		if (!q) return this.getLatestManga(page, opts);
 
 		try {
-			// Search pagination: /page/N/?s=  or /?s=&page=
 			const path =
 				page <= 1
 					? `/?s=${encodeURIComponent(q)}`
@@ -269,7 +232,6 @@ export class ThunderScansSource extends BaseSource {
 			'';
 		cover = this.absUrl(cover);
 
-		// Synopsis
 		let synopsis = '';
 		const $desc = $(
 			'.entry-content[itemprop="description"], .entry-content .wd-full p, .seriestucont p, .summary__content'
@@ -285,7 +247,6 @@ export class ThunderScansSource extends BaseSource {
 				.trim();
 		}
 
-		// Meta from .imptdt blocks
 		const metaMap: Record<string, string> = {};
 		$('.imptdt').each((_, el) => {
 			const $el = $(el);
@@ -295,7 +256,6 @@ export class ThunderScansSource extends BaseSource {
 			if (label && value) metaMap[label] = value;
 		});
 
-		// Also try structured rows
 		$('.fmed, .tsinfo .imptdt').each((_, el) => {
 			const text = $(el).text().replace(/\s+/g, ' ').trim();
 			const m = text.match(/^(Type|Status|Released|Author|Artist|Serialization|Posted On)\s+(.+)$/i);
@@ -325,7 +285,6 @@ export class ThunderScansSource extends BaseSource {
 			}
 		});
 
-		// Alt titles
 		const altRaw =
 			$('.alternative, .seriestualt, span.alternative').first().text() ||
 			$('meta[property="og:title"]').attr('content') ||
@@ -336,7 +295,6 @@ export class ThunderScansSource extends BaseSource {
 			.map((s) => s.trim())
 			.filter((s) => s && s.length > 1 && s !== title);
 
-		// Rating
 		let rating: string | null = null;
 		const ratingText =
 			$('.rating .num, .rating-prc, .numscore, [itemprop="ratingValue"]')
@@ -350,7 +308,6 @@ export class ThunderScansSource extends BaseSource {
 			rating = ratingN.toFixed(1);
 		}
 
-		// Chapters from #chapterlist
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -379,7 +336,6 @@ export class ThunderScansSource extends BaseSource {
 			} else if (href && href.startsWith('/')) {
 				chId = this.cleanId(href);
 			} else {
-				// locked without real href — still list with synthetic id for badge
 				chId = `${id}/chapter-${number}`;
 			}
 
@@ -387,7 +343,7 @@ export class ThunderScansSource extends BaseSource {
 			seen.add(chId);
 
 			const cleanTitle = isLocked
-				? `Chapter ${number} 🔒`
+				? `Chapter ${number} `
 				: `Chapter ${number}`;
 
 			chapters.push({
@@ -438,15 +394,12 @@ export class ThunderScansSource extends BaseSource {
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		const path = this.cleanId(chapterId);
 		if (!path || path.includes('/comics/') && path.split('/').length <= 3) {
-			// locked synthetic id without real page
 			console.warn('[thunderscans] no real chapter URL:', chapterId);
 			return [];
 		}
 
 		try {
 			const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-
-			// Primary: ts_reader.run({...})
 			const runMatch = html.match(/ts_reader\.run\((\{[\s\S]*?\})\);/);
 			if (runMatch?.[1]) {
 				try {
@@ -467,7 +420,6 @@ export class ThunderScansSource extends BaseSource {
 				}
 			}
 
-			// Fallback: #readerarea img
 			const $ = cheerio.load(html);
 			const urls: string[] = [];
 			const seen = new Set<string>();
