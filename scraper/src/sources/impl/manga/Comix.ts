@@ -67,22 +67,25 @@ export class ComixSource extends BaseSource {
 		return 'manhwa';
 	}
 
-	/**
-	 * Direct fetch with browser headers + retry.
-	 * Avoids ECONNRESET issues some Node/TLS stacks hit via fetchWithCf.
-	 * Falls back to comix.ws if comix.to fails.
-	 */
 	private async pageFetch(path: string): Promise<string> {
+		try {
+			const html = await this.fetchHtml(path);
+			if (html && html.length > 500 && !/just a moment|cf-browser-verification|challenge-platform/i.test(html.slice(0, 2000))) {
+				return html;
+			}
+			console.warn('[comix] fetchHtml returned challenge/short body, trying direct…');
+		} catch (e) {
+			console.warn('[comix] fetchHtml failed, trying direct…', e);
+		}
+
 		const bases = [this.baseUrl, 'https://comix.ws'];
 		const headers: Record<string, string> = {
 			'User-Agent':
 				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
 			Accept:
-				'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+				'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 			'Accept-Language': 'en-US,en;q=0.9',
-			'Cache-Control': 'no-cache',
-			Pragma: 'no-cache',
-			'Upgrade-Insecure-Requests': '1'
+			Referer: this.baseUrl + '/'
 		};
 
 		let lastErr: unknown;
@@ -90,27 +93,21 @@ export class ComixSource extends BaseSource {
 			const url = path.startsWith('http')
 				? path
 				: `${base}${path.startsWith('/') ? '' : '/'}${path}`;
-			for (let attempt = 1; attempt <= 3; attempt++) {
+			for (let attempt = 1; attempt <= 2; attempt++) {
 				try {
-					const res = await fetch(url, {
-						headers,
-						redirect: 'follow'
-					});
+					const res = await fetch(url, { headers, redirect: 'follow' });
+					const html = await res.text();
 					if (!res.ok) {
 						throw new Error(`HTTP ${res.status} ${url}`);
 					}
-					const html = await res.text();
 					if (html.length < 200) {
-						throw new Error(`Short body (${html.length}) ${url}`);
+						throw new Error(`Short body (${html.length})`);
 					}
 					return html;
 				} catch (e) {
 					lastErr = e;
-					console.warn(
-						`[comix] pageFetch attempt ${attempt} failed → ${url}`,
-						e
-					);
-					await new Promise((r) => setTimeout(r, 400 * attempt));
+					console.warn(`[comix] direct ${attempt} failed → ${url}`, e);
+					await new Promise((r) => setTimeout(r, 500 * attempt));
 				}
 			}
 		}
@@ -119,7 +116,6 @@ export class ComixSource extends BaseSource {
 			: new Error(String(lastErr || 'pageFetch failed'));
 	}
 
-	/** Extract JSON from <script id="initial-data"> */
 	private parseInitialData(html: string): any | null {
 		const m = html.match(
 			/<script[^>]*id=["']initial-data["'][^>]*>([\s\S]*?)<\/script>/i
@@ -167,7 +163,6 @@ export class ComixSource extends BaseSource {
 		};
 	}
 
-	/** Collect manga items from initial-data queries */
 	private collectFromQueries(data: any, limit = this.PER_PAGE): Manga[] {
 		const res: Manga[] = [];
 		const seen = new Set<string>();
@@ -181,7 +176,6 @@ export class ComixSource extends BaseSource {
 			res.push(m);
 		};
 
-		// Prefer list with chapter_updated_at order
 		const preferredKeys = Object.keys(queries).sort((a, b) => {
 			const score = (k: string) => {
 				let s = 0;
@@ -220,7 +214,7 @@ export class ComixSource extends BaseSource {
 				return val;
 			}
 		}
-		// fallback any object with hid+title+synopsis
+	
 		for (const val of Object.values(queries)) {
 			if (
 				val &&
@@ -252,7 +246,6 @@ export class ComixSource extends BaseSource {
 			const data = this.parseInitialData(html);
 			let list = data ? this.collectFromQueries(data, this.PER_PAGE) : [];
 
-			// Homepage may have >24; slice for page 1
 			if (p === 1 && list.length > this.PER_PAGE) {
 				list = list.slice(0, this.PER_PAGE);
 			}
@@ -295,7 +288,6 @@ export class ComixSource extends BaseSource {
 		_opts?: { lang?: string }
 	): Promise<MangaDetails> {
 		const id = this.cleanId(mangaId);
-		// id is /title/{slug}
 		const path = id.startsWith('/title/')
 			? id
 			: `/title/${id.replace(/^\//, '')}`;
@@ -375,7 +367,6 @@ export class ComixSource extends BaseSource {
 			pushChapterUrl(detail.latestChapterUrl, Number(detail.latestChapter));
 		}
 
-		// Note: full chapter list requires signed /api/v1 — only first+latest from SSR
 		chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
 
 		const finalId = this.cleanId(detail.url || path);
@@ -426,8 +417,6 @@ export class ComixSource extends BaseSource {
 			const data = this.parseInitialData(html);
 			const urls: string[] = [];
 			const seen = new Set<string>();
-
-			// Try find pages in initial-data
 			const queries = data?.queries || {};
 			for (const val of Object.values(queries) as any[]) {
 				if (!val || typeof val !== 'object') continue;
@@ -458,7 +447,6 @@ export class ComixSource extends BaseSource {
 			}
 
 			if (urls.length === 0) {
-				// Fallback: any large image URLs in HTML (usually cover only)
 				const $ = cheerio.load(html);
 				$('img').each((_, el) => {
 					const src =
