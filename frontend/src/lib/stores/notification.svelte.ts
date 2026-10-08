@@ -1,7 +1,3 @@
-/**
- * Notification store — track manga for new chapter alerts.
- * Data: IndexedDB + Firebase sync.
- */
 import { browser } from '$app/environment';
 import {
 	collection,
@@ -549,7 +545,7 @@ export async function checkForNewChapters(options?: {
 							newChapterTitle: latestTitle,
 							newChapterNumber: latestNum,
 							lastChecked: now,
-							timestamp: n.timestamp
+							timestamp: now
 						})
 					);
 				} else {
