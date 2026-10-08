@@ -97,6 +97,8 @@ if (browser) {
 		window.addEventListener('bookmarks-changed', async () => {
 			bookmarks = await idbGetBookmarks();
 		});
+
+		window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 	})();
 }
 
