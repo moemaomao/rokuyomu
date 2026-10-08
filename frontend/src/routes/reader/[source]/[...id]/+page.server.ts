@@ -22,7 +22,7 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	thunderscans: '/comics'
 };
 
-const NEEDS_REMOTE_MANGA_RESOLVE = new Set(['weloma', 'zonatmo']);
+const NEEDS_REMOTE_MANGA_RESOLVE = new Set(['weloma', 'zonatmo', 'artlapsa']);
 
 function parseChapterNum(input: string): number | null {
 	const m =

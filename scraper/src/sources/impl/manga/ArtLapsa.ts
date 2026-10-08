@@ -12,8 +12,12 @@
  * Locked chapters: .chapter-lock-badge (coin price) → isLocked
  *
  * ID format:
- *   manga   : /series/{uuid}
- *   chapter : /read/{uuid}
+ *   manga   : /series/{seriesUuid}
+ *   chapter : /series/{seriesUuid}/read/{chapterUuid}
+ *             (legacy /read/{chapterUuid} still accepted)
+ *
+ * Chapter next/prev in reader needs series uuid embedded so
+ * resolveMangaId / manga details can load the chapter list.
  */
 
 import { BaseSource } from '../../BaseSource';
@@ -73,8 +77,46 @@ export class ArtLapsaSource extends BaseSource {
 		return `/series/${uuid}`;
 	}
 
-	private toChapterId(uuid: string): string {
-		return `/read/${uuid}`;
+	private toChapterId(seriesUuid: string, chapterUuid: string): string {
+		return `/series/${seriesUuid}/read/${chapterUuid}`;
+	}
+
+	private parseChapterParts(chapterId: string): {
+		seriesUuid: string;
+		chapterUuid: string;
+	} {
+		const raw = String(chapterId || '');
+		const m = raw.match(
+			/\/series\/([0-9a-f-]{36})\/read\/([0-9a-f-]{36})/i
+		);
+		if (m) return { seriesUuid: m[1], chapterUuid: m[2] };
+
+		const m2 = raw.match(/\/read\/([0-9a-f-]{36})/i);
+		if (m2) return { seriesUuid: '', chapterUuid: m2[1] };
+
+		const only = this.extractUuid(raw);
+		return { seriesUuid: '', chapterUuid: only };
+	}
+
+	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+		const { seriesUuid, chapterUuid } = this.parseChapterParts(chapterId);
+		if (seriesUuid) return this.toMangaId(seriesUuid);
+
+		if (!chapterUuid) return null;
+		try {
+			const html = await this.fetchHtml(`/read/${chapterUuid}`);
+			const $ = cheerio.load(html);
+			const href =
+				$('a[href*="/series/"]').first().attr('href') ||
+				$('meta[property="og:url"]').attr('content') ||
+				'';
+			const seriesFromOg = (href.match(/\/series\/([0-9a-f-]{36})/i) ||
+				html.match(/\/series\/([0-9a-f-]{36})/i) ||
+				[])[1];
+			return seriesFromOg ? this.toMangaId(seriesFromOg) : null;
+		} catch {
+			return null;
+		}
 	}
 
 	private mapStatus(raw: string): string {
@@ -165,9 +207,7 @@ export class ArtLapsaSource extends BaseSource {
 		const res: Manga[] = [];
 		const seen = new Set<string>();
 
-		$('a[href*="/series/"]').each((_, el) => {
-			const $a = $(el);
-			const href = $a.attr('href') || '';
+		const pushCard = ($root: cheerio.Cheerio<any>, href: string) => {
 			const uuid = this.extractUuid(href);
 			if (!uuid) return;
 			if (!/\/series\/[0-9a-f-]{36}\/?$/i.test(href.split('?')[0])) return;
@@ -176,12 +216,12 @@ export class ArtLapsaSource extends BaseSource {
 			if (seen.has(id)) return;
 			seen.add(id);
 
-			const img = $a.find('img').first();
+			const img = $root.find('img').first();
 			let title =
-				($a.attr('title') || '').trim() ||
+				($root.attr('title') || '').trim() ||
 				(img.attr('alt') || '').replace(/\s*cover\s*$/i, '').trim() ||
-				$a.find('h2, h3, h4, p, span').first().text().replace(/\s+/g, ' ').trim() ||
-				$a.text().replace(/\s+/g, ' ').trim();
+				$root.find('h2, h3, h4, p, span').first().text().replace(/\s+/g, ' ').trim() ||
+				$root.text().replace(/\s+/g, ' ').trim();
 
 			title = title
 				.replace(/\s*Chapter\s*\d+(?:\.\d+)?.*$/i, '')
@@ -196,13 +236,9 @@ export class ArtLapsaSource extends BaseSource {
 				'';
 			const cover = this.normalizeCover(rawCover, uuid);
 
-			let latestChapter: string | undefined;
-			const $card = $a.closest('.latest-poster, article, li, .group').length
-				? $a.closest('.latest-poster, article, li, .group')
-				: $a.parent();
-			const cardText = ($card.text() || $a.parent().text() || '').replace(/\s+/g, ' ');
+			const cardText = $root.text().replace(/\s+/g, ' ');
 			const chMatch = cardText.match(/Chapter\s*(\d+(?:\.\d+)?)/i);
-			if (chMatch) latestChapter = chMatch[1];
+			const latestChapter = chMatch ? chMatch[1] : undefined;
 
 			res.push({
 				id,
@@ -214,7 +250,24 @@ export class ArtLapsaSource extends BaseSource {
 				status: 'Ongoing',
 				latestChapter
 			});
+		};
+
+		$('.latest-poster').each((_, el) => {
+			const $el = $(el);
+			const $a =
+				$el.is('a') && ($el.attr('href') || '').includes('/series/')
+					? $el
+					: $el.find('a[href*="/series/"]').first();
+			const href = $a.attr('href') || '';
+			if (href) pushCard($el, href);
 		});
+
+		if (res.length === 0) {
+			$('a[href*="/series/"]').each((_, el) => {
+				const $a = $(el);
+				pushCard($a, $a.attr('href') || '');
+			});
+		}
 
 		return res;
 	}
@@ -349,7 +402,7 @@ export class ArtLapsaSource extends BaseSource {
 			const chUuid = this.extractUuid(href);
 			if (!chUuid) return;
 
-			const id = this.toChapterId(chUuid);
+			const id = this.toChapterId(uuid, chUuid);
 			if (seen.has(id)) return;
 			seen.add(id);
 
@@ -357,9 +410,7 @@ export class ArtLapsaSource extends BaseSource {
 			const number = this.parseChapterNumber(rawText);
 			if (Number.isNaN(number)) return;
 
-			const $badge = $card.find('.chapter-lock-badge').first();
-			const locked = $badge.length > 0;
-
+			const locked = $card.find('.chapter-lock-badge').length > 0;
 			const date = this.parseDateFromText(rawText);
 
 			chapters.push({
@@ -377,7 +428,7 @@ export class ArtLapsaSource extends BaseSource {
 				const href = $a.attr('href') || '';
 				const chUuid = this.extractUuid(href);
 				if (!chUuid) return;
-				const id = this.toChapterId(chUuid);
+				const id = this.toChapterId(uuid, chUuid);
 				if (seen.has(id)) return;
 				seen.add(id);
 				const raw = $a.text().replace(/\s+/g, ' ').trim();
@@ -426,14 +477,15 @@ export class ArtLapsaSource extends BaseSource {
 	// ── Pages ────────────────────────────────────────────────────────────────
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
-		const uuid = this.extractUuid(chapterId);
-		if (!uuid) {
+		const { chapterUuid } = this.parseChapterParts(chapterId);
+		if (!chapterUuid) {
 			console.error('[artlapsa] getChapterPages → bad id:', chapterId);
 			return [];
 		}
 
 		try {
-			const html = await this.fetchHtml(this.toChapterId(uuid));
+		
+			const html = await this.fetchHtml(`/read/${chapterUuid}`);
 
 			if (
 				/"needsToUnlock"\s*:\s*true/.test(html) ||
@@ -467,7 +519,7 @@ export class ArtLapsaSource extends BaseSource {
 					const num = String(i).padStart(3, '0');
 					urls.push(`${base}/${num}.${ext}`);
 				}
-				console.log(`[artlapsa] ${urls.length} pages → ${uuid}`);
+				console.log(`[artlapsa] ${urls.length} pages → ${chapterUuid}`);
 				return urls;
 			}
 
@@ -488,7 +540,7 @@ export class ArtLapsaSource extends BaseSource {
 				found.push(abs);
 			});
 			found.sort();
-			console.log(`[artlapsa] fallback ${found.length} pages → ${uuid}`);
+			console.log(`[artlapsa] fallback ${found.length} pages → ${chapterUuid}`);
 			return found;
 		} catch (e) {
 			console.error('[artlapsa] getChapterPages failed', chapterId, e);
