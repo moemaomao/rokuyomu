@@ -6,7 +6,9 @@
 	import {
 		getHistory,
 		whenHistoryReady,
-		type ReadingEntry
+		getActivityLog,
+		type ReadingEntry,
+		type ActivityLogEntry
 	} from '$lib/stores/history';
 	import { isNovelSource } from '$lib/utils/novelSources';
 	import {
@@ -34,6 +36,7 @@
 	let ready = $state(false);
 	let isDark = $state(true);
 	let history = $state<ReadingEntry[]>([]);
+	let activityLog = $state<ActivityLogEntry[]>([]);
 	let bookmarkCount = $state(0);
 
 	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
@@ -80,7 +83,8 @@
 			days.push({ label, count: 0, key });
 		}
 		const map = new Map(days.map((x) => [x.key, x]));
-		for (const h of history) {
+		const source = activityLog.length > 0 ? activityLog : history;
+		for (const h of source) {
 			const ts = Number(h.timestamp);
 			if (!ts) continue;
 			const ms = ts < 1e12 ? ts * 1000 : ts;
@@ -192,9 +196,14 @@
 		return 'Just now';
 	}
 
-	function load() {
+	async function load() {
 		history = getHistory();
 		bookmarkCount = getBookmarks().length;
+		try {
+			activityLog = await getActivityLog(14);
+		} catch {
+			activityLog = [];
+		}
 	}
 
 	onMount(() => {
@@ -207,16 +216,20 @@
 
 		(async () => {
 			await whenHistoryReady();
-			load();
+			await load();
 			ready = true;
 		})();
-		const onChange = () => load();
+		const onChange = () => {
+			void load();
+		};
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('bookmarks-changed', onChange);
+		window.addEventListener('activity-changed', onChange);
 		return () => {
 			obs.disconnect();
 			window.removeEventListener('history-changed', onChange);
 			window.removeEventListener('bookmarks-changed', onChange);
+			window.removeEventListener('activity-changed', onChange);
 		};
 	});
 

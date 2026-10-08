@@ -14,10 +14,14 @@ import {
 	idbDeleteHistory,
 	idbSetAllHistory,
 	idbClearHistory,
-	type ReadingEntry
+	idbAddActivity,
+	idbGetActivityLog,
+	idbClearActivityLog,
+	type ReadingEntry,
+	type ActivityLogEntry
 } from '$lib/db';
 
-export type { ReadingEntry };
+export type { ReadingEntry, ActivityLogEntry };
 
 const MAX_HISTORY = 30;
 const TOMBSTONE_KEY = 'mikoroku_history_tombstones';
@@ -196,8 +200,20 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	const trimmed = list.slice(0, MAX_HISTORY);
 	await idbSetAllHistory(trimmed);
 
+	// Activity log (for 14–30 day graph — does not overwrite previous days)
+	try {
+		await idbAddActivity({
+			mangaId: full.mangaId,
+			sourceId: full.sourceId || '',
+			timestamp: full.timestamp
+		});
+	} catch (e) {
+		console.error('[history] failed to write activity log', e);
+	}
+
 	historyCache = trimmed;
 	window.dispatchEvent(new CustomEvent('history-changed'));
+	window.dispatchEvent(new CustomEvent('activity-changed'));
 
 	const user = getUser();
 	if (user && db) {
@@ -373,3 +389,21 @@ export async function syncHistoryOnLogin() {
 		
 	}
 }
+
+// ===== Activity log helpers (for stats graph) =====
+export async function getActivityLog(days = 14): Promise<ActivityLogEntry[]> {
+	const since = Date.now() - days * 24 * 60 * 60 * 1000;
+	try {
+		return await idbGetActivityLog(since);
+	} catch (e) {
+		console.error('[history] getActivityLog failed', e);
+		return [];
+	}
+}
+
+export async function clearActivityLog() {
+	if (!browser) return;
+	await idbClearActivityLog();
+	window.dispatchEvent(new CustomEvent('activity-changed'));
+}
+

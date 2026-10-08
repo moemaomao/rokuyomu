@@ -38,6 +38,14 @@ export interface NotificationEntry {
 	timestamp: number;
 }
 
+/** One reading session event for the activity graph (not limited to 30 titles). */
+export interface ActivityLogEntry {
+	id?: number;
+	mangaId: string;
+	sourceId: string;
+	timestamp: number;
+}
+
 interface MikorokuDB extends DBSchema {
 	bookmarks: {
 		key: string;
@@ -54,17 +62,26 @@ interface MikorokuDB extends DBSchema {
 		value: NotificationEntry & { key: string };
 		indexes: { 'by-timestamp': number };
 	};
+	activityLog: {
+		key: number;
+		value: ActivityLogEntry;
+		indexes: { 'by-timestamp': number };
+	};
 }
 
 const DB_NAME = 'mikoroku-db';
-const DB_VERSION = 2;
+/** v3: add activityLog store for 14–30 day reading activity graph */
+const DB_VERSION = 3;
+
+/** Keep activity events for 30 days */
+export const ACTIVITY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 let dbPromise: Promise<IDBPDatabase<MikorokuDB>> | null = null;
 
 export function getDB() {
 	if (!dbPromise) {
 		dbPromise = openDB<MikorokuDB>(DB_NAME, DB_VERSION, {
-			upgrade(db) {
+			upgrade(db, oldVersion) {
 				if (!db.objectStoreNames.contains('bookmarks')) {
 					const store = db.createObjectStore('bookmarks', { keyPath: 'mangaId' });
 					store.createIndex('by-timestamp', 'timestamp');
@@ -75,6 +92,13 @@ export function getDB() {
 				}
 				if (!db.objectStoreNames.contains('notifications')) {
 					const store = db.createObjectStore('notifications', { keyPath: 'key' });
+					store.createIndex('by-timestamp', 'timestamp');
+				}
+				if (oldVersion < 3 && !db.objectStoreNames.contains('activityLog')) {
+					const store = db.createObjectStore('activityLog', {
+						keyPath: 'id',
+						autoIncrement: true
+					});
 					store.createIndex('by-timestamp', 'timestamp');
 				}
 			}
@@ -141,6 +165,43 @@ export async function idbSetAllHistory(list: ReadingEntry[]) {
 	await tx.store.clear();
 	await Promise.all(list.map((h) => tx.store.put(h)));
 	await tx.done;
+}
+
+// ===== Activity log (for stats graph — keeps 30 days of events) =====
+export async function idbAddActivity(entry: Omit<ActivityLogEntry, 'id'>): Promise<void> {
+	const db = await getDB();
+	const ts = entry.timestamp || Date.now();
+	await db.add('activityLog', {
+		mangaId: entry.mangaId,
+		sourceId: entry.sourceId || '',
+		timestamp: ts
+	});
+	// Trim old entries outside retention window
+	const cutoff = Date.now() - ACTIVITY_RETENTION_MS;
+	const tx = db.transaction('activityLog', 'readwrite');
+	const idx = tx.store.index('by-timestamp');
+	let cursor = await idx.openCursor(IDBKeyRange.upperBound(cutoff));
+	while (cursor) {
+		await cursor.delete();
+		cursor = await cursor.continue();
+	}
+	await tx.done;
+}
+
+export async function idbGetActivityLog(sinceMs?: number): Promise<ActivityLogEntry[]> {
+	const db = await getDB();
+	const cutoff = sinceMs ?? Date.now() - ACTIVITY_RETENTION_MS;
+	const all = await db.getAllFromIndex(
+		'activityLog',
+		'by-timestamp',
+		IDBKeyRange.lowerBound(cutoff)
+	);
+	return all;
+}
+
+export async function idbClearActivityLog() {
+	const db = await getDB();
+	await db.clear('activityLog');
 }
 
 // ===== Notifications =====
