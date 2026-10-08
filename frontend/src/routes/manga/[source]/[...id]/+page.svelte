@@ -3,8 +3,14 @@
 	import { onMount } from 'svelte';
 	import { toggleBookmark, isBookmarked } from '$lib/stores/bookmark.svelte';
 	import { toggleNotification, isNotified } from '$lib/stores/notification.svelte';
+	import { saveReading } from '$lib/stores/history';
+	import {
+		markChapterRead,
+		getReadSets,
+		unmarkChapterRead
+	} from '$lib/utils/readChapters';
 	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
-	import { Bell, BellOff } from 'lucide-svelte';
+	import { Bell, BellOff, Check } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
 
@@ -23,6 +29,8 @@
 	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
 	let bookmarked = $state(false);
 	let notified = $state(false);
+	let readIds = $state<Set<string>>(new Set());
+	let readNums = $state<Set<number>>(new Set());
 	let loadMoreEl: HTMLElement | null = $state(null);
 
 	let loadingMore = $state(false);
@@ -85,6 +93,8 @@
 
 	$effect(() => {
 		const m = manga;
+		const src = source;
+		if (m?.id) refreshReadChapters();
 		const total = (data as any).chapterTotal as number | undefined;
 		const offset = (data as any).chapterOffset as number | undefined;
 		const more = (data as any).hasMoreChapters as boolean | undefined;
@@ -170,6 +180,53 @@
 		} finally {
 			loadingMore = false;
 		}
+	}
+
+
+
+	function refreshReadChapters() {
+		if (!manga?.id) {
+			readIds = new Set();
+			readNums = new Set();
+			return;
+		}
+		const sets = getReadSets(source, manga.id);
+		readIds = sets.ids;
+		readNums = sets.nums;
+	}
+
+	/** Only exact chapter id / number — NOT a <= range (jumping to last ch must not mark all). */
+	function isChapterRead(chapter: any): boolean {
+		if (!chapter) return false;
+		const cid = chapter.id != null ? String(chapter.id) : '';
+		if (cid && readIds.has(cid)) return true;
+		const num = Number(chapter.number);
+		if (Number.isFinite(num) && num > 0 && readNums.has(num)) return true;
+		return false;
+	}
+
+	async function markChapterAsRead(e: MouseEvent, chapter: any) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!manga || !chapter?.id) return;
+		const already = isChapterRead(chapter);
+		if (already) {
+			unmarkChapterRead(source, manga.id, chapter.id, chapter.number);
+		} else {
+			markChapterRead(source, manga.id, chapter.id, chapter.number);
+			// also update history "last read" pointer for continue-reading
+			await saveReading({
+				mangaId: manga.id,
+				mangaSlug: manga.id,
+				mangaTitle: manga.title,
+				cover: manga.cover || '',
+				chapterId: String(chapter.id),
+				chapterTitle: String(chapter.title || chapter.name || `Ch. ${chapter.number ?? ''}`),
+				chapterNumber: Number(chapter.number) || 0,
+				sourceId: source
+			});
+		}
+		refreshReadChapters();
 	}
 
 	function parseMeta(desc: string | undefined): Record<string, string> {
@@ -488,17 +545,24 @@
 			notified = isNotified(manga.id, source);
 		}
 
+		refreshReadChapters();
+
 		const onChange = () => {
 			if (manga?.id) {
 				bookmarked = isBookmarked(manga.id, source);
 				notified = isNotified(manga.id, source);
+				refreshReadChapters();
 			}
 		};
 		window.addEventListener('bookmarks-changed', onChange);
 		window.addEventListener('notifications-changed', onChange);
+		window.addEventListener('history-changed', onChange);
+		window.addEventListener('read-chapters-changed', onChange);
 		return () => {
 			window.removeEventListener('bookmarks-changed', onChange);
 			window.removeEventListener('notifications-changed', onChange);
+			window.removeEventListener('history-changed', onChange);
+			window.removeEventListener('read-chapters-changed', onChange);
 		};
 	});
 
@@ -997,7 +1061,7 @@
 							{#each displayedChapters as chapter}
 								<a
 									href={chapterHref(source, chapter.id)}
-									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105"
+									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105 {isChapterRead(chapter) ? 'chapter-read' : ''}"
 								>
 									{#if chapterCover(chapter)}
 										<img
@@ -1058,7 +1122,7 @@
 								<div class="relative">
 									<a
 										href="/reader/{source}{chapter.id}"
-										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''}"
+										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''} {isChapterRead(chapter) ? 'chapter-read' : ''}"
 									>
 										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
 {#if chapter.isLocked}
@@ -1107,7 +1171,7 @@
 							{#each displayedChapters as chapter}
 								<a
 									href="/reader/{source}{chapter.id}"
-									class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40"
+									class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40 {isChapterRead(chapter) ? 'chapter-read' : ''}"
 								>
 									<div class="h-full w-[90px] shrink-0 overflow-hidden bg-zinc-300 dark:bg-zinc-900">
 										{#if chapterCover(chapter)}
@@ -1441,5 +1505,35 @@
 		background: rgba(0, 0, 0, 0.08);
 		border-color: rgba(0, 0, 0, 0.22);
 		color: #000;
+	}
+
+	.chapter-read {
+		opacity: 0.42;
+		filter: saturate(0.65);
+	}
+	.chapter-read:hover {
+		opacity: 0.72;
+	}
+	.chapter-mark-read {
+		background: rgba(139, 92, 246, 0.15);
+		border-color: rgba(139, 92, 246, 0.4);
+		color: #c4b5fd;
+	}
+	.chapter-mark-read:hover {
+		background: rgba(139, 92, 246, 0.3);
+		color: #ede9fe;
+	}
+	.chapter-mark-read.is-read {
+		background: rgba(113, 113, 122, 0.2);
+		border-color: rgba(113, 113, 122, 0.35);
+		color: #a1a1aa;
+	}
+	:global(html.light) .chapter-read {
+		opacity: 0.45;
+	}
+	:global(html.light) .chapter-mark-read {
+		background: rgba(139, 92, 246, 0.12);
+		border-color: rgba(139, 92, 246, 0.35);
+		color: #6d28d9;
 	}
 </style>

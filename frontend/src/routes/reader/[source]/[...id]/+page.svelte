@@ -10,6 +10,7 @@
 		CloudDownload
 	} from 'lucide-svelte';
 	import { saveReading } from '$lib/stores/history';
+	import { markChapterRead } from '$lib/utils/readChapters';
 
 	const { data }: { data: PageData } = $props();
 let {
@@ -282,20 +283,29 @@ $effect(() => {
 		dataSaver = localStorage.getItem('dataSaver') === 'true';
 		imageQuality = parseInt(localStorage.getItem('imageQuality') || '600', 10);
 
-		if (mangaInfo?.id) {
-			saveReading({
-				mangaId: mangaInfo.id,
-				mangaSlug: mangaInfo.slug || '',
-				mangaTitle: mangaInfo.title || '',
-				cover: mangaInfo.cover || '',
-				chapterId: chapterId,
-				chapterTitle: currentChapter?.title || `Chapter ${currentChapter?.number || 0}`,
-				chapterNumber: currentChapter?.number || 0,
-				sourceId: source
-			});
-		}
-
 		return () => obs.disconnect();
+	});
+
+	// Track every chapter visit (including next/prev navigation — onMount does not re-run)
+	$effect(() => {
+		if (!browser) return;
+		const mid = mangaInfo?.id;
+		const cid = chapterId;
+		const src = source;
+		if (!mid || !cid) return;
+		const title = currentChapter?.title || `Chapter ${currentChapter?.number || 0}`;
+		const num = currentChapter?.number || 0;
+		markChapterRead(src, mid, cid, num);
+		saveReading({
+			mangaId: mid,
+			mangaSlug: mangaInfo?.slug || '',
+			mangaTitle: mangaInfo?.title || '',
+			cover: mangaInfo?.cover || '',
+			chapterId: cid,
+			chapterTitle: title,
+			chapterNumber: num,
+			sourceId: src
+		});
 	});
 	
 	// ── SEO / share card ─────────────────────────────────────────────────────

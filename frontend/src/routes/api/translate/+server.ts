@@ -3,7 +3,7 @@ import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
 const MODELS = [
-    'gemini-3.5-flash-lite',
+	'gemini-3.5-flash-lite',
 	'gemini-3.5-flash',
 	'gemini-3.8-flash'
 ];
@@ -12,6 +12,7 @@ interface TranslateBody {
 	text?: string;
 	targetLang?: string;
 	cacheKey?: string;
+	prompt?: string;
 }
 
 interface GeminiResponse {
@@ -38,6 +39,23 @@ const LANG_NAMES: Record<string, string> = {
 	vi: 'Vietnamese'
 };
 
+const DEFAULT_TRANSLATE_PROMPT = `Kamu adalah penerjemah profesional light novel.
+Terjemahkan teks berikut ke bahasa {{lang}} dengan gaya natural, enak dibaca, dan tetap menjaga nuansa cerita.
+Jangan tambahkan penjelasan, catatan, atau komentar apapun. Hanya kembalikan hasil terjemahan saja.
+
+Teks:
+{{text}}`;
+
+function buildPrompt(
+	template: string,
+	langName: string,
+	content: string
+): string {
+	return template
+		.replaceAll('{{lang}}', langName)
+		.replaceAll('{{text}}', content);
+}
+
 export const POST: RequestHandler = async ({ request, platform }) => {
 	let body: TranslateBody;
 	try {
@@ -46,7 +64,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		throw error(400, 'Invalid JSON body');
 	}
 
-	const { text, targetLang = 'id', cacheKey } = body;
+	const { text, targetLang = 'id', cacheKey, prompt: userPrompt } = body;
 
 	if (!text || typeof text !== 'string') {
 		throw error(400, 'Text is required');
@@ -62,8 +80,16 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	const kv = (platform?.env as { MIKOROKU_CACHE?: KVNamespace } | undefined)?.MIKOROKU_CACHE;
 
-	if (kv && cacheKey) {
-		const cached = await kv.get(`translate:${cacheKey}`);
+	let effectiveCacheKey = cacheKey;
+	if (kv && cacheKey && userPrompt && userPrompt !== DEFAULT_TRANSLATE_PROMPT) {
+		const h = Array.from(userPrompt)
+			.reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0)
+			.toString(36);
+		effectiveCacheKey = `${cacheKey}:p${h}`;
+	}
+
+	if (kv && effectiveCacheKey) {
+		const cached = await kv.get(`translate:${effectiveCacheKey}`);
 		if (cached) {
 			return json({ translated: cached, cached: true });
 		}
@@ -74,13 +100,15 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		text.length > maxChars ? text.slice(0, maxChars) + '\n\n[...terpotong]' : text;
 
 	const langName = LANG_NAMES[targetLang] || targetLang;
+	const template =
+		typeof userPrompt === 'string' && userPrompt.trim().length > 0
+			? userPrompt
+			: DEFAULT_TRANSLATE_PROMPT;
 
-	const prompt = `Kamu adalah penerjemah profesional light novel.
-Terjemahkan teks berikut ke bahasa ${langName} dengan gaya natural, enak dibaca, dan tetap menjaga nuansa cerita.
-Jangan tambahkan penjelasan, catatan, atau komentar apapun. Hanya kembalikan hasil terjemahan saja.
-
-Teks:
-${content}`;
+	let prompt = buildPrompt(template, langName, content);
+	if (!template.includes('{{text}}')) {
+		prompt = `${prompt}\n\nTeks:\n${content}`;
+	}
 
 	let lastError = 'Semua model gagal';
 
@@ -125,8 +153,8 @@ ${content}`;
 				continue;
 			}
 
-			if (kv && cacheKey) {
-				await kv.put(`translate:${cacheKey}`, translated, {
+			if (kv && effectiveCacheKey) {
+				await kv.put(`translate:${effectiveCacheKey}`, translated, {
 					expirationTtl: 60 * 60 * 24 * 7
 				});
 			}
