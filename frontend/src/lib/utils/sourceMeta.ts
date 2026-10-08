@@ -200,6 +200,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	thunderscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-purple-600' },
 	asmotoon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-600' },
 	orionscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
+	lhtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
