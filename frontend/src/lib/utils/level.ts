@@ -77,7 +77,12 @@ export function computeLevelInfo(totalXp: number): LevelInfo {
 }
 
 export function sumChapterMarkers(entries: { chapterNumber?: unknown }[]): number {
-	return entries.reduce((s, h) => s + (Number(h.chapterNumber) || 1), 0);
+	const sum = entries.reduce((s, h) => {
+		const n = Number(h.chapterNumber);
+		return s + (Number.isFinite(n) && n > 0 ? n : 1);
+	}, 0);
+
+	return Math.round(sum * 1000) / 1000;
 }
 
 export function sumChapterProgressXp(entries: { chapterNumber?: unknown }[]): number {
