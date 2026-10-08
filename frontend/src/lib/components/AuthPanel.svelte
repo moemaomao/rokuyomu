@@ -8,6 +8,11 @@
 	} from '$lib/stores/auth.svelte';
 	import { getBookmarks } from '$lib/stores/bookmark.svelte';
 	import { getHistory } from '$lib/stores/history';
+	import {
+		computeTotalXp,
+		computeLevelInfo,
+		sumChapterProgressXp
+	} from '$lib/utils/level';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
 		LogOut,
@@ -47,45 +52,25 @@
 		const bms = getBookmarks();
 		historyCount = hist.length;
 		bookmarkCount = bms.length;
+
 		chaptersRead = hist.reduce((sum, h) => sum + (Number(h.chapterNumber) || 1), 0);
 		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
 		uniqueSources = sources.size;
 
-		const totalXp = historyCount * 10 + bookmarkCount * 15 + chaptersRead * 2;
-		xp = totalXp;
+		const totalXp = computeTotalXp({
+			titleCount: historyCount,
+			bookmarkCount,
+			sourceCount: uniqueSources,
+			chapterProgressXpSum: sumChapterProgressXp(hist)
+		});
+		const info = computeLevelInfo(totalXp);
 
-		// Level curve: 100, 250, 450, 700, 1000...
-		let lv = 1;
-		let need = 100;
-		let remaining = totalXp;
-		while (remaining >= need && lv < 99) {
-			remaining -= need;
-			lv++;
-			need = 50 + lv * 50 + Math.floor(lv * lv * 2);
-		}
-		level = lv;
-		xpToNext = need;
-		xpProgress = Math.min(100, Math.round((remaining / need) * 100));
-
-		if (lv >= 40) {
-			rankTitle = 'Grand Master';
-			rankColor = 'from-amber-400 to-yellow-300';
-		} else if (lv >= 25) {
-			rankTitle = 'Elite Reader';
-			rankColor = 'from-violet-400 to-fuchsia-400';
-		} else if (lv >= 15) {
-			rankTitle = 'Veteran';
-			rankColor = 'from-sky-400 to-cyan-300';
-		} else if (lv >= 8) {
-			rankTitle = 'Book Hunter';
-			rankColor = 'from-emerald-400 to-teal-300';
-		} else if (lv >= 3) {
-			rankTitle = 'Page Turner';
-			rankColor = 'from-orange-400 to-amber-300';
-		} else {
-			rankTitle = 'Rookie Reader';
-			rankColor = 'from-zinc-400 to-zinc-300';
-		}
+		xp = info.totalXp;
+		level = info.lv;
+		xpToNext = info.need;
+		xpProgress = info.progress;
+		rankTitle = info.rank;
+		rankColor = info.rankCls;
 	}
 
 	onMount(() => {
@@ -126,7 +111,6 @@
 		{@const u = getUser()!}
 		<!-- ═══ PROFILE HEADER (game style) ═══ -->
 		<div class="relative overflow-hidden px-4 pt-4 pb-3">
-			<!-- glow bg -->
 			<div
 				class="pointer-events-none absolute inset-0 bg-gradient-to-br opacity-20 {rankColor}"
 			></div>
@@ -135,7 +119,6 @@
 			></div>
 
 			<div class="relative flex items-start gap-3">
-				<!-- Avatar + level ring -->
 				<div class="relative shrink-0">
 					{#if u.photoURL}
 						<img
@@ -150,7 +133,6 @@
 							{(u.displayName?.[0] || u.email?.[0] || 'U').toUpperCase()}
 						</div>
 					{/if}
-					<!-- Level badge -->
 					<span
 						class="absolute -right-1.5 -bottom-1.5 flex h-6 min-w-[1.5rem] items-center justify-center rounded-lg bg-gradient-to-r px-1 text-[10px] font-black text-zinc-900 shadow-md {rankColor}"
 					>
@@ -181,7 +163,7 @@
 						<Zap class="h-3 w-3" />
 						{xp} XP
 					</span>
-					<span class="text-zinc-500">Next: {xpToNext} XP</span>
+					<span class="text-zinc-500">{xpProgress}% · need {xpToNext}</span>
 				</div>
 				<div
 					class="h-2 overflow-hidden rounded-full {isDarkMode ? 'bg-zinc-800' : 'bg-zinc-200'}"
@@ -231,12 +213,12 @@
 			>
 				<div class="flex items-center gap-1.5 text-[10px] text-zinc-500">
 					<Flame class="h-3 w-3 text-orange-400" />
-					Chapters
+					Progress
 				</div>
 				<p class="mt-0.5 text-lg font-black tabular-nums {isDarkMode ? 'text-white' : 'text-zinc-900'}">
 					{chaptersRead}
 				</p>
-				<p class="text-[9px] text-zinc-500">approx. read</p>
+				<p class="text-[9px] text-zinc-500">chapter markers</p>
 			</div>
 			<div
 				class="rounded-xl border p-2.5 {isDarkMode
@@ -254,7 +236,6 @@
 			</div>
 		</div>
 
-		<!-- Stats link + Logout -->
 		<div class="border-t p-2 space-y-1 {isDarkMode ? 'border-zinc-800' : 'border-zinc-100'}">
 			<a
 				href="/stats"
@@ -278,7 +259,6 @@
 			</button>
 		</div>
 	{:else}
-		<!-- ═══ LOGIN / REGISTER ═══ -->
 		<div class="relative overflow-hidden px-4 pt-4 pb-2">
 			<div
 				class="pointer-events-none absolute -top-10 -right-6 h-28 w-28 rounded-full bg-violet-600/25 blur-3xl"

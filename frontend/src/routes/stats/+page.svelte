@@ -10,6 +10,12 @@
 	} from '$lib/stores/history';
 	import { isNovelSource } from '$lib/utils/novelSources';
 	import {
+		computeTotalXp,
+		computeLevelInfo,
+		sumChapterMarkers,
+		sumChapterProgressXp
+	} from '$lib/utils/level';
+	import {
 		Trophy,
 		Zap,
 		BookOpen,
@@ -37,12 +43,8 @@
 	let novelTitles = $derived(novelHistory.length);
 	let totalTitles = $derived(history.length);
 
-	let comicChapters = $derived(
-		comicHistory.reduce((s, h) => s + (Number(h.chapterNumber) || 1), 0)
-	);
-	let novelChapters = $derived(
-		novelHistory.reduce((s, h) => s + (Number(h.chapterNumber) || 1), 0)
-	);
+	let comicChapters = $derived(sumChapterMarkers(comicHistory));
+	let novelChapters = $derived(sumChapterMarkers(novelHistory));
 	let totalChapters = $derived(comicChapters + novelChapters);
 
 	let sourceMap = $derived.by(() => {
@@ -59,7 +61,7 @@
 	});
 
 	let topSources = $derived(sourceMap.slice(0, 8));
-	
+
 	function localDateKey(d: Date): string {
 		const y = d.getFullYear();
 		const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -81,7 +83,6 @@
 		for (const h of history) {
 			const ts = Number(h.timestamp);
 			if (!ts) continue;
-			// support both ms and seconds
 			const ms = ts < 1e12 ? ts * 1000 : ts;
 			const key = localDateKey(new Date(ms));
 			const row = map.get(key);
@@ -122,37 +123,15 @@
 		return { step, linePoints, areaPoints, bars, points };
 	});
 
-	let totalXp = $derived(totalTitles * 10 + bookmarkCount * 15 + totalChapters * 2);
-	let levelInfo = $derived.by(() => {
-		let lv = 1;
-		let need = 100;
-		let remaining = totalXp;
-		while (remaining >= need && lv < 99) {
-			remaining -= need;
-			lv++;
-			need = 50 + lv * 50 + Math.floor(lv * lv * 2);
-		}
-		const progress = Math.min(100, Math.round((remaining / need) * 100));
-		let rank = 'Rookie Reader';
-		let rankCls = 'from-zinc-400 to-zinc-300';
-		if (lv >= 40) {
-			rank = 'Grand Master';
-			rankCls = 'from-amber-400 to-yellow-300';
-		} else if (lv >= 25) {
-			rank = 'Elite Reader';
-			rankCls = 'from-violet-400 to-fuchsia-400';
-		} else if (lv >= 15) {
-			rank = 'Veteran';
-			rankCls = 'from-sky-400 to-cyan-300';
-		} else if (lv >= 8) {
-			rank = 'Book Hunter';
-			rankCls = 'from-emerald-400 to-teal-300';
-		} else if (lv >= 3) {
-			rank = 'Page Turner';
-			rankCls = 'from-orange-400 to-amber-300';
-		}
-		return { lv, need, remaining, progress, rank, rankCls };
-	});
+	let totalXp = $derived(
+		computeTotalXp({
+			titleCount: totalTitles,
+			bookmarkCount,
+			sourceCount: sourceMap.length,
+			chapterProgressXpSum: sumChapterProgressXp(history)
+		})
+	);
+	let levelInfo = $derived(computeLevelInfo(totalXp));
 
 	function polar(cx: number, cy: number, r: number, angleDeg: number) {
 		const a = ((angleDeg - 90) * Math.PI) / 180;
@@ -351,7 +330,7 @@
 					<div class="mt-2 flex items-center justify-between text-[11px]">
 						<span class="flex items-center gap-1 font-semibold text-violet-500">
 							<Zap class="h-3.5 w-3.5" />
-							{totalXp} XP
+							{levelInfo.totalXp} XP
 						</span>
 						<span class="{textMuted}"
 							>{levelInfo.remaining} / {levelInfo.need} to next</span
@@ -371,7 +350,7 @@
 			{#each [
 				{ icon: BookOpen, label: 'Titles', value: totalTitles, color: 'text-sky-500' },
 				{ icon: Bookmark, label: 'Bookmarks', value: bookmarkCount, color: 'text-rose-500' },
-				{ icon: Flame, label: 'Chapters', value: totalChapters, color: 'text-orange-500' },
+				{ icon: Flame, label: 'Progress', value: totalChapters, color: 'text-orange-500' },
 				{ icon: Library, label: 'Sources', value: sourceMap.length, color: 'text-emerald-500' },
 				{ icon: ScrollText, label: 'Comics', value: comicTitles, color: 'text-red-500' },
 				{ icon: BookOpen, label: 'Novels', value: novelTitles, color: 'text-violet-500' }
@@ -444,7 +423,7 @@
 			<div class="rounded-2xl border p-5 {cardSoft}">
 				<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
 					<PieChart class="h-4 w-4 text-amber-500" />
-					Chapters read: Comic vs Novel
+					Progress markers: Comic vs Novel
 				</h2>
 				<div class="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
 					<svg viewBox="0 0 200 200" class="h-44 w-44 shrink-0">
@@ -477,7 +456,7 @@
 					<div class="w-full max-w-[200px] space-y-2 text-sm">
 						<div class="flex items-center gap-2">
 							<span class="h-3 w-3 shrink-0 rounded-full bg-orange-400"></span>
-							<span class="{textMuted}">Comic chapters</span>
+							<span class="{textMuted}">Comic progress</span>
 							<span class="ml-auto font-bold tabular-nums {textMain}"
 								>{comicChapters}
 								<span class="{textMuted}">({chapterPie.comicPct}%)</span></span
@@ -485,7 +464,7 @@
 						</div>
 						<div class="flex items-center gap-2">
 							<span class="h-3 w-3 shrink-0 rounded-full bg-teal-400"></span>
-							<span class="{textMuted}">Novel chapters</span>
+							<span class="{textMuted}">Novel progress</span>
 							<span class="ml-auto font-bold tabular-nums {textMain}"
 								>{novelChapters}
 								<span class="{textMuted}">({chapterPie.novelPct}%)</span></span
@@ -559,7 +538,6 @@
 					</defs>
 				</svg>
 
-				<!-- count labels above peaks -->
 				<div class="pointer-events-none absolute inset-x-0 top-0 flex" style="height: {CHART_H}px">
 					{#each activityChart.points as p}
 						<div class="relative flex-1">
@@ -575,7 +553,6 @@
 					{/each}
 				</div>
 
-				<!-- day labels -->
 				<div class="absolute inset-x-0 bottom-0 flex">
 					{#each activityDays as day}
 						<span class="flex-1 text-center text-[9px] {textMuted} sm:text-[10px]">
