@@ -127,7 +127,7 @@
                 {@const readHref = chapterHref(entry.sourceId, entry.chapterId)}
 
                 <div
-                    class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
+                    class="history-card group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
                 >
                     <!-- Cover -->
                     <a
@@ -137,11 +137,13 @@
                     >
                         {#if entry.cover}
                       <img
-                              src={proxyImage(entry.cover, entry.sourceId, 200)}
+                              src={proxyImage(entry.cover, entry.sourceId, 160)}
                               onerror={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0'; }}
                               alt={entry.mangaTitle}
-                              class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                              class="history-card-cover h-full w-full object-cover"
                               loading="lazy"
+                              decoding="async"
+                              fetchpriority="low"
                           />
                        {:else}
                             <div class="flex h-full w-full items-center justify-center">
@@ -197,3 +199,20 @@
         </div>
     {/if}
 </div>
+
+<style>
+	.history-card {
+		content-visibility: auto;
+		contain-intrinsic-size: auto 280px;
+		contain: layout style paint;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.history-card-cover {
+			transition: transform 0.3s ease;
+		}
+		.group:hover .history-card-cover {
+			transform: scale(1.05);
+		}
+	}
+</style>
+

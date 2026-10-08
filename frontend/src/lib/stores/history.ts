@@ -23,7 +23,7 @@ import {
 
 export type { ReadingEntry, ActivityLogEntry };
 
-const MAX_HISTORY = 30;
+const MAX_HISTORY = 80;
 const TOMBSTONE_KEY = 'mikoroku_history_tombstones';
 const FIRESTORE_BATCH_LIMIT = 450;
 
@@ -200,7 +200,6 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	const trimmed = list.slice(0, MAX_HISTORY);
 	await idbSetAllHistory(trimmed);
 
-	// Activity log (for 14–30 day graph — does not overwrite previous days)
 	try {
 		await idbAddActivity({
 			mangaId: full.mangaId,
@@ -390,7 +389,6 @@ export async function syncHistoryOnLogin() {
 	}
 }
 
-// ===== Activity log helpers (for stats graph) =====
 export async function getActivityLog(days = 14): Promise<ActivityLogEntry[]> {
 	const since = Date.now() - days * 24 * 60 * 60 * 1000;
 	try {
