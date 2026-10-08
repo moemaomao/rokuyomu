@@ -140,10 +140,9 @@ export class KnoxTSource extends BaseSource {
 		});
 	}
 
-	private parseListCards($: cheerio.CheerioAPI, scope?: string): Manga[] {
+	private parseListCards($: cheerio.CheerioAPI): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();
-		const root = scope ? $(scope) : $.root();
 
 		const push = (href: string, title: string, cover: string, latest?: number) => {
 			const id = pathOnly(href, this.baseUrl);
@@ -157,8 +156,7 @@ export class KnoxTSource extends BaseSource {
 				cover: largerCover(absUrl(this.baseUrl, cover)),
 				sourceId: this.id,
 				type: 'novel',
-				lang: 'en',
-				status: 'Ongoing'
+				lang: 'en'
 			};
 			if (latest != null && !Number.isNaN(latest) && latest > 0) {
 				card.latestChapter = latest;
@@ -166,55 +164,43 @@ export class KnoxTSource extends BaseSource {
 			out.push(card);
 		};
 
-		root.find('.utao, .uta').each((_, el) => {
+		$('.listupd .bs, .listupd .bsx, .bsx, .utao, .uta').each((_, el) => {
 			const $el = $(el);
-			const a = $el.find('a.series').first().length
-				? $el.find('a.series').first()
-				: $el.find('.imgu a, a[href]').first();
+			const a =
+				$el.find('a[href*="knoxt.space"], a[href^="/"]').first().length
+					? $el.find('a[href*="knoxt.space"], a[href^="/"]').first()
+					: $el.find('a').first();
 			const href = a.attr('href') || '';
 			if (!href) return;
 			const title =
 				a.attr('title') ||
-				$el.find('.luf h3, h3, h4, .tt').first().text() ||
+				$el.find('.tt, .ntt, h2, h3, h4').first().text() ||
 				a.text();
 			const cover =
 				$el.find('img').attr('data-src') ||
 				$el.find('img').attr('data-lazy-src') ||
 				$el.find('img').attr('src') ||
 				'';
-	
 			let latest: number | undefined;
-			const chText =
-				$el.find('.luf ul li a').first().text() ||
-				$el.find('.epxs, .chapter, .nchapter a').first().text();
-			if (chText) {
-				const n = parseChapterNumber(chText, 0);
-				if (n > 0) latest = n;
-			}
+			const chText = $el.find('.epxs, .chapter, .nchapter, .luf a').first().text();
+			if (chText) latest = parseChapterNumber(chText, 0) || undefined;
 			push(href, title, cover, latest);
 		});
 
 		if (out.length < 5) {
-			root.find('.listupd .bs, .listupd .bsx, .bsx').each((_, el) => {
-				const $el = $(el);
-				const a = $el.find('a').first();
-				const href = a.attr('href') || '';
+			$('a.series').each((_, a) => {
+				const $a = $(a);
+				const href = $a.attr('href') || '';
 				if (!href) return;
-				const title =
-					a.attr('title') ||
-					$el.find('.tt, .ntt, h2, h3, h4').first().text() ||
-					a.text();
+				const title = $a.attr('title') || $a.text();
+				const $li = $a.closest('li');
 				const cover =
-					$el.find('img').attr('data-src') ||
-					$el.find('img').attr('data-lazy-src') ||
-					$el.find('img').attr('src') ||
+					$li.find('img').attr('data-src') ||
+					$li.find('img').attr('src') ||
 					'';
 				let latest: number | undefined;
-				const chText = $el.find('.epxs, .chapter').first().text();
-				if (chText) {
-					const n = parseChapterNumber(chText, 0);
-					if (n > 0) latest = n;
-				}
+				const chText = $li.find('.nchapter a, .nchapter').first().text();
+				if (chText) latest = parseChapterNumber(chText, 0) || undefined;
 				push(href, title, cover, latest);
 			});
 		}
@@ -227,58 +213,23 @@ export class KnoxTSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		const p = Math.max(1, page | 0);
-		const seen = new Set<string>();
-		const merge = (items: Manga[]) => {
-			const out: Manga[] = [];
-			for (const m of items) {
-				if (seen.has(m.id)) continue;
-				seen.add(m.id);
-				out.push(m);
-			}
-			return out;
-		};
+		const path =
+			p <= 1
+				? '/series/?status=&type=&order=update'
+				: `/series/page/${p}/?status=&type=&order=update`;
+		const html = await this.fetchHtml(path);
+		const $ = cheerio.load(html);
+		let list = this.parseListCards($);
 
-		let list: Manga[] = [];
-
-		if (p === 1) {
-			try {
-				const home = await this.fetchHtml('/');
-				const $h = cheerio.load(home);
-				const fromLatest = this.parseListCards(
-					$h,
-					'.releases.latesthome, .bixbox .listupd, .listupd'
-				);
-				list = merge(fromLatest);
-			} catch {
-			}
-		}
-
-		if (list.length < PAGE_SIZE) {
-			const path =
-				p <= 1
-					? '/series/?status=&type=&order=update'
-					: `/series/page/${p}/?status=&type=&order=update`;
-			try {
-				const html = await this.fetchHtml(path);
-				list = merge([...list, ...this.parseListCards(cheerio.load(html))]);
-			} catch {
-			}
-		}
-
-		if (p === 1 && list.length < PAGE_SIZE) {
-			try {
-				const html2 = await this.fetchHtml(
-					'/series/page/2/?status=&type=&order=update'
-				);
-				list = merge([...list, ...this.parseListCards(cheerio.load(html2))]);
-			} catch {
-			}
+		if (list.length < 1 && p === 1) {
+			const home = await this.fetchHtml('/');
+			list = this.parseListCards(cheerio.load(home));
 		}
 
 		if (list.length < 1) {
 			const allPath = p <= 1 ? '/all-novels/' : `/all-novels/page/${p}/`;
 			const allHtml = await this.fetchHtml(allPath);
-			list = merge(this.parseListCards(cheerio.load(allHtml)));
+			list = this.parseListCards(cheerio.load(allHtml));
 		}
 
 		return list.slice(0, PAGE_SIZE);
@@ -369,22 +320,10 @@ export class KnoxTSource extends BaseSource {
 		});
 
 		const genres: string[] = [];
-		const genreRoot = $(
-			'.infox .genxed, .infox .mgen, .bigcontent .genxed, .bigcontent .mgen, .info-content .genxed'
-		);
-		if (genreRoot.length) {
-			genreRoot.find('a[href*="/genre/"]').each((_, a) => {
-				const g = decodeEntities($(a).text());
-				if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
-			});
-		} else {
-			$('.infox a[href*="/genre/"], .info-content a[href*="/genre/"], .spe a[href*="/genre/"]').each(
-				(_, a) => {
-					const g = decodeEntities($(a).text());
-					if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
-				}
-			);
-		}
+		$('.mgen a, .spe a[href*="/genre/"], a[rel="tag"][href*="/genre/"]').each((_, a) => {
+			const g = decodeEntities($(a).text());
+			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
+		});
 
 		let description = '';
 		const descEl = $(

@@ -196,6 +196,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	littlepandatranslations: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 	mznovels: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-600' },
 	zirusmusings: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
+	hivetoons: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-yellow-500' },
 };
 
 export const DEFAULT_META: SourceMeta = {

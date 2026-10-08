@@ -96,8 +96,10 @@ import { GenzToonsSource } from '../impl/manga/GenzToons';
 import { SetsuScansSource } from '../impl/manga/SetsuScans';
 import { VioletMangaSource } from '../impl/manga/VioletManga';
 import { KappaBeastSource } from '../impl/manga/KappaBeast';
+import { HiveToonsSource } from '../impl/manga/HiveToons';
 
 const mangaSources: Record<string, IMangaSource> = {
+	hivetoons: new HiveToonsSource(),
 	kappabeast: new KappaBeastSource(),
 	violetmanga: new VioletMangaSource(),
 	silentquill: new SilentQuillSource(),
