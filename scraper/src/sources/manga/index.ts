@@ -105,8 +105,10 @@ import { EZMangaSource } from '../impl/manga/EZManga';
 import { ComixSource } from '../impl/manga/Comix';
 import { QiMangaSource } from '../impl/manga/QiManga';
 import { ArtLapsaSource } from '../impl/manga/ArtLapsa';
+import { LuaComicSource } from '../impl/manga/LuaComic';
 
 const mangaSources: Record<string, IMangaSource> = {
+	luacomic: new LuaComicSource(),
 	artlapsa: new ArtLapsaSource(),
 	qimanga: new QiMangaSource(),
 	comix: new ComixSource(),

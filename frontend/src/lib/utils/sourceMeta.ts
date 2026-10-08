@@ -205,6 +205,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	comix: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	qimanga: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	artlapsa: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-600' },
+	luacomic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
