@@ -11,7 +11,8 @@
 	import {
 		computeTotalXp,
 		computeLevelInfo,
-		sumChapterProgressXp
+		sumChapterProgressXp,
+		sumChapterMarkers
 	} from '$lib/utils/level';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
@@ -53,7 +54,7 @@
 		historyCount = hist.length;
 		bookmarkCount = bms.length;
 
-		chaptersRead = hist.reduce((sum, h) => sum + (Number(h.chapterNumber) || 1), 0);
+		chaptersRead = sumChapterMarkers(hist);
 		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
 		uniqueSources = sources.size;
 
