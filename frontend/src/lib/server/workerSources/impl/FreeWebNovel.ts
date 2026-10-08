@@ -3,12 +3,11 @@
  * Path: scraper/src/sources/impl/novel/FreeWebNovel.ts
  *
  * - Homepage Latest Release → max 24 judul
- * - Sort list: /sort/latest-release[/page]
+ * - Sort list: /sort/latest-release/{page}
  * - Novel: /novel/{slug}
  * - Chapter: /novel/{slug}/chapter-{n}
  * - Chapter list: #idData + ajax ?ajax=chapters&page=&pageSize=
- * - Search: POST /search/ { searchkey }
- * - Content: .m-read / #article / .txt
+ * - Search: /search?searchkey=
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -111,24 +110,66 @@ function isChapterPath(id: string): boolean {
 }
 
 function extractImg($el: any): string {
-	const img = $el.find('img').first();
-	const candidates = [
-		img.attr('data-src'),
-		img.attr('data-lazy-src'),
-		img.attr('data-original'),
-		img.attr('src'),
-		(img.attr('srcset') || '').split(',').pop()?.trim().split(/\s+/)[0]
-	];
+	if (!$el || !$el.find) return '';
+	const candidates: string[] = [];
+
+	$el.find('img').each((_: number, el: any) => {
+		const attribs = (el as any).attribs || {};
+		for (const key of [
+			'data-src',
+			'data-lazy-src',
+			'data-original',
+			'data-echo',
+			'src'
+		]) {
+			const v = attribs[key];
+			if (v) candidates.push(String(v));
+		}
+		if (attribs['srcset']) {
+			const last = String(attribs['srcset']).split(',').pop();
+			if (last) candidates.push(last.trim().split(/\s+/)[0]);
+		}
+	});
+
+	$el.find('[style*="background"]').each((_: number, el: any) => {
+		const style = ((el as any).attribs || {}).style || '';
+		const m = style.match(/url\(['"]?([^'")\s]+)/);
+		if (m) candidates.push(m[1]);
+	});
+
+	let best = '';
 	for (const c of candidates) {
 		if (
-			c &&
-			!c.startsWith('data:') &&
-			!/svg|sprite|icon|logo|placeholder|default/i.test(c)
+			!c ||
+			c.startsWith('data:') ||
+			/svg|sprite|icon|logo|placeholder|default|avatar/i.test(c)
 		) {
-			return absUrl(String(c).split('?')[0]);
+			continue;
 		}
+		const url = absUrl(c.split('?')[0]);
+		if (/\/files\/article\//i.test(url) || /\.(jpg|jpeg|png|webp)$/i.test(url)) {
+			return url;
+		}
+		if (!best) best = url;
 	}
-	return '';
+	return best;
+}
+
+function parseRelativeDate(text: string): string | undefined {
+	const t = cleanText(text);
+	if (/just\s*now/i.test(t)) return new Date().toISOString();
+	const m = t.match(
+		/(\d+)\s*(min|mins|minute|minutes|hour|hours|day|days|week|weeks)\s*ago/i
+	);
+	if (!m) return undefined;
+	const n = parseInt(m[1], 10);
+	const unit = m[2].toLowerCase();
+	const d = new Date();
+	if (/min/.test(unit)) d.setMinutes(d.getMinutes() - n);
+	else if (/hour/.test(unit)) d.setHours(d.getHours() - n);
+	else if (/day/.test(unit)) d.setDate(d.getDate() - n);
+	else if (/week/.test(unit)) d.setDate(d.getDate() - n * 7);
+	return d.toISOString();
 }
 
 export class FreeWebNovelSource extends BaseSource {
@@ -144,6 +185,8 @@ export class FreeWebNovelSource extends BaseSource {
 		Referer: `${BASE}/`
 	};
 
+	// ─── Latest ──────────────────────────────────────────────────────────
+
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
 		if (pageNum <= 1) {
@@ -158,23 +201,31 @@ export class FreeWebNovelSource extends BaseSource {
 		const html = await this.fetchHtml('/home');
 		const $ = cheerio.load(html);
 		$('script, style, noscript, iframe').remove();
+		$('.m-hot, .m-list-hot, aside, .right, #sidebar').remove();
 
 		const ordered: Manga[] = [];
 		const seen = new Set<string>();
 
-		$('a[href*="/novel/"]').each((_, el) => {
+		let $scope: any = null;
+		$('h2, h3, .tit, .section-title').each((_, el) => {
+			if (/latest\s*release/i.test(cleanText($(el).text()))) {
+				$scope = $(el).parent();
+				return false;
+			}
+		});
+		const $root = $scope && $scope.length ? $scope : $('body');
+
+		$root.find('a[href*="/novel/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			const id = pathOnly(href);
 			if (!isNovelPath(id) || seen.has(id)) return;
 
 			const title =
-				cleanText($(el).attr('title') || '') ||
-				cleanText($(el).text());
+				cleanText($(el).attr('title') || '') || cleanText($(el).text());
 			if (!title || title.length < 2) return;
-			if (/^(see more|genres?|home|latest)/i.test(title)) return;
+			if (/^(see more|genres?|home|latest|hot)/i.test(title)) return;
 
-			const $parent = $(el).closest('li, article, .item, .con, .txt, div');
-	
+			const $parent = $(el).closest('li, article, .item, .con, .txt, .ss-custom, div');
 			let latestChapter: number | undefined;
 			$parent.find('a[href*="/chapter-"]').each((__, a) => {
 				const n = parseChapterNumber(
@@ -184,13 +235,29 @@ export class FreeWebNovelSource extends BaseSource {
 					latestChapter = n;
 				}
 			});
-		
 			if (latestChapter == null) {
 				const cm = cleanText($parent.text()).match(/(\d+)\s*Chapters?/i);
 				if (cm) latestChapter = parseInt(cm[1], 10);
 			}
 
-			const cover = extractImg($parent) || extractImg($(el));
+			let cover =
+				extractImg($parent) ||
+				extractImg($(el).parent()) ||
+				extractImg($(el).parent().parent()) ||
+				extractImg($(el));
+
+			if (!cover) {
+				const prevImg = $(el).closest('div').find('img').first();
+				if (prevImg.length) {
+					const src =
+						prevImg.attr('data-src') ||
+						prevImg.attr('src') ||
+						'';
+					if (src && !/icon|logo|sprite/i.test(src)) {
+						cover = absUrl(src.split('?')[0]);
+					}
+				}
+			}
 
 			seen.add(id);
 			ordered.push({
@@ -212,45 +279,89 @@ export class FreeWebNovelSource extends BaseSource {
 			page <= 1 ? '/sort/latest-release' : `/sort/latest-release/${page}`;
 		try {
 			const html = await this.fetchHtml(path);
+			if (/just a moment|cf-browser-verification|challenge-platform/i.test(html)) {
+				console.error('[freewebnovel] CF challenge on', path);
+				return [];
+			}
 			const $ = cheerio.load(html);
 			$('script, style, noscript').remove();
+			$('.m-hot, .m-list-hot, aside, .right').remove();
 
 			const ordered: Manga[] = [];
 			const seen = new Set<string>();
+			const $cards = $(
+				'.col-content .ss-custom, .col-content .item, .col-content .con, .m-list li, .list-item'
+			);
+			if ($cards.length) {
+				$cards.each((_, el) => {
+					const $el = $(el);
+					const a = $el
+						.find('a[href*="/novel/"]')
+						.filter((__, link) =>
+							isNovelPath(pathOnly($(link).attr('href') || ''))
+						)
+						.first();
+					const id = pathOnly(a.attr('href') || '');
+					if (!isNovelPath(id) || seen.has(id)) return;
+					const title =
+						cleanText(a.attr('title') || '') ||
+						cleanText($el.find('h3, h2, .tit').first().text()) ||
+						cleanText(a.text());
+					if (!title || title.length < 2) return;
 
-			$('a[href*="/novel/"]').each((_, el) => {
-				const href = $(el).attr('href') || '';
-				const id = pathOnly(href);
-				if (!isNovelPath(id) || seen.has(id)) return;
+					let latestChapter: number | undefined;
+					const cm = cleanText($el.text()).match(/(\d+)\s*Chapters?/i);
+					if (cm) latestChapter = parseInt(cm[1], 10);
+					$el.find('a[href*="/chapter-"]').each((__, ch) => {
+						const n = parseChapterNumber($(ch).attr('href') || '');
+						if (n > 0 && (latestChapter == null || n > latestChapter)) {
+							latestChapter = n;
+						}
+					});
 
-				const title =
-					cleanText($(el).attr('title') || '') ||
-					cleanText($(el).text());
-				if (!title || title.length < 2) return;
-				if (/^(see more|genres?|hot|completed)/i.test(title)) return;
-
-				const $parent = $(el).closest('li, article, .item, .con, .txt, div');
-				let latestChapter: number | undefined;
-				const cm = cleanText($parent.text()).match(/(\d+)\s*Chapters?/i);
-				if (cm) latestChapter = parseInt(cm[1], 10);
-				$parent.find('a[href*="/chapter-"]').each((__, a) => {
-					const n = parseChapterNumber($(a).attr('href') || '');
-					if (n > 0 && (latestChapter == null || n > latestChapter)) {
-						latestChapter = n;
-					}
+					seen.add(id);
+					ordered.push({
+						id,
+						title: title.slice(0, 200),
+						cover: extractImg($el),
+						sourceId: this.id,
+						type: 'novel',
+						lang: 'en',
+						...(latestChapter != null ? { latestChapter } : {})
+					});
 				});
+			}
 
-				seen.add(id);
-				ordered.push({
-					id,
-					title: title.slice(0, 200),
-					cover: extractImg($parent) || extractImg($(el)),
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en',
-					...(latestChapter != null ? { latestChapter } : {})
+			if (ordered.length < 4) {
+				$('a[href*="/novel/"]').each((_, el) => {
+					const href = $(el).attr('href') || '';
+					const id = pathOnly(href);
+					if (!isNovelPath(id) || seen.has(id)) return;
+					const title =
+						cleanText($(el).attr('title') || '') ||
+						cleanText($(el).text());
+					if (!title || title.length < 2) return;
+					if (/^(see more|genres?|hot|completed)/i.test(title)) return;
+
+					const $parent = $(el).closest(
+						'li, article, .item, .con, .ss-custom, div'
+					);
+					let latestChapter: number | undefined;
+					const cm = cleanText($parent.text()).match(/(\d+)\s*Chapters?/i);
+					if (cm) latestChapter = parseInt(cm[1], 10);
+
+					seen.add(id);
+					ordered.push({
+						id,
+						title: title.slice(0, 200),
+						cover: extractImg($parent) || extractImg($(el).parent()),
+						sourceId: this.id,
+						type: 'novel',
+						lang: 'en',
+						...(latestChapter != null ? { latestChapter } : {})
+					});
 				});
-			});
+			}
 
 			return ordered.slice(0, PER_PAGE);
 		} catch (e) {
@@ -259,7 +370,7 @@ export class FreeWebNovelSource extends BaseSource {
 		}
 	}
 
-	// ─── Search (POST /search/) ──────────────────────────────────────────
+	// ─── Search ──────────────────────────────────────────────────────────
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
 		const q = (query || '').trim();
@@ -282,10 +393,9 @@ export class FreeWebNovelSource extends BaseSource {
 				const id = pathOnly(href);
 				if (!isNovelPath(id) || seen.has(id)) return;
 				const title =
-					cleanText($(el).attr('title') || '') ||
-					cleanText($(el).text());
+					cleanText($(el).attr('title') || '') || cleanText($(el).text());
 				if (!title || title.length < 2) return;
-				const $parent = $(el).closest('.con, .item, li, div');
+				const $parent = $(el).closest('.con, .item, li, .ss-custom, div');
 				seen.add(id);
 				ordered.push({
 					id,
@@ -329,15 +439,14 @@ export class FreeWebNovelSource extends BaseSource {
 
 		let cover =
 			$('meta[property="og:image"]').attr('content') ||
-			$('.m-imgtxt img, .m-desc img').first().attr('src') ||
 			$('.m-imgtxt img').first().attr('data-src') ||
+			$('.m-imgtxt img').first().attr('src') ||
+			$('.m-desc img').first().attr('src') ||
 			'';
 		cover = absUrl(String(cover).split('?')[0]);
 
 		let description = '';
-		const $sum = $(
-			'.m-desc .txt, .m-desc .inner, #sidexsinopsis, .summary, .m-desc p'
-		).first();
+		const $sum = $('.m-desc .txt, .m-desc .inner, .summary').first();
 		if ($sum.length) {
 			description = stripHtml($sum.html() || $sum.text()).slice(0, 4000);
 		}
@@ -348,27 +457,48 @@ export class FreeWebNovelSource extends BaseSource {
 					''
 			);
 		}
+	
+		description = description
+			.replace(/^Read .+? online for free\.?\s*/i, '')
+			.trim();
 
 		const authors: string[] = [];
-		$('.m-imgtxt a[href*="/authors/"], a[href*="/author/"], a.a1').each((_, a) => {
-			const n = cleanText($(a).text());
-			if (n && n.length < 80 && !authors.includes(n)) authors.push(n);
-		});
+		$('.m-imgtxt a[href*="/authors/"], .m-desc a[href*="/authors/"]').each(
+			(_, a) => {
+				const n = cleanText($(a).text());
+				if (n && n.length < 80 && !authors.includes(n)) authors.push(n);
+			}
+		);
 
 		const genres: string[] = [];
 		$(
-			'.m-imgtxt a[href*="/genres/"], .m-imgtxt a[href*="/genre/"], a[href*="/genre/"]'
+			'.m-imgtxt a[href*="/genres/"], .m-imgtxt a[href*="/genre/"], .m-desc a[href*="/genre/"]'
 		).each((_, a) => {
+			const href = $(a).attr('href') || '';
 			const n = cleanText($(a).text());
-			if (n && n.length < 40 && !genres.includes(n) && !/genre/i.test(n)) {
+			if (
+				n &&
+				n.length < 40 &&
+				!genres.includes(n) &&
+				!/^(genres?|all)$/i.test(n) &&
+				/\/genre/i.test(href)
+			) {
 				genres.push(n);
 			}
 		});
+	
+		if (genres.length > 12) {
+			genres.length = 0;
+		}
 
 		let status = 'Ongoing';
-		const bodyText = cleanText($('.m-imgtxt, .m-desc, body').text());
-		if (/\bCompleted\b|\bFULL\b/i.test(bodyText)) status = 'Completed';
-		else if (/\bHiatus\b/i.test(bodyText)) status = 'Hiatus';
+		const infoText = cleanText($('.m-imgtxt, .m-desc').first().text());
+		if (/\bCompleted\b|\bStatus\s*:\s*Completed\b/i.test(infoText)) {
+			status = 'Completed';
+		} else if (/\bHiatus\b/i.test(infoText)) {
+			status = 'Hiatus';
+		} else if (/\bFULL\b/.test(cleanText($('body').text()).slice(0, 500))) {
+		}
 
 		const chapters = await this.parseChapterList($, path);
 
@@ -395,33 +525,44 @@ export class FreeWebNovelSource extends BaseSource {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
 
-		const pushLink = (href: string, titleHint: string) => {
+		const pushLink = (href: string, titleHint: string, dateHint?: string) => {
 			const id = pathOnly(href);
 			if (!id || seen.has(id)) return;
 			if (!isChapterPath(id)) return;
 			const number = parseChapterNumber(id + ' ' + titleHint);
 			if (number <= 0 && !/prologue/i.test(titleHint)) return;
 			seen.add(id);
+			const date = dateHint ? parseRelativeDate(dateHint) || dateHint : undefined;
 			out.push({
 				id,
 				title: number > 0 ? `Chapter ${number}` : 'Prologue',
 				number: number || 0,
+				date: date || undefined,
 				isLocked: false
 			});
 		};
 
-		$('#idData li > a, #idData a, .m-newest2 ul li a, .chapter-list a').each(
-			(_, el) => {
+		$('#idData li').each((_: number, el: any) => {
+			const $li = $(el);
+			const a = $li.find('a').first();
+			const href = a.attr('href') || '';
+			const titleHint =
+				cleanText(a.attr('title') || '') || cleanText(a.text());
+			const dateHint = cleanText($li.find('.time, .date, span').last().text());
+			pushLink(href, titleHint, dateHint);
+		});
+		if (out.length < 2) {
+			$('#idData a, .m-newest2 ul li a').each((_: number, el: any) => {
 				const href = $(el).attr('href') || '';
 				const titleHint =
 					cleanText($(el).attr('title') || '') || cleanText($(el).text());
 				pushLink(href, titleHint);
-			}
-		);
+			});
+		}
 
 		let totalPage = 1;
 		let pageSize = 40;
-		$('script').each((_, el) => {
+		$('script').each((_: number, el: any) => {
 			const text = $(el).html() || '';
 			if (!/chapterPagination/i.test(text)) return;
 			const tp = text.match(/totalPage\s*:\s*(\d+)/i);
@@ -429,16 +570,12 @@ export class FreeWebNovelSource extends BaseSource {
 			if (tp) totalPage = parseInt(tp[1], 10);
 			if (ps) pageSize = parseInt(ps[1], 10);
 		});
-	
 		const optCount = $('.page #indexselect option, #indexselect option').length;
 		if (optCount > totalPage) totalPage = optCount;
 
 		if (totalPage > 1) {
 			const maxPages = Math.min(totalPage, 50);
-			const pages: number[] = [];
-			for (let p = 1; p <= maxPages; p++) pages.push(p);
-
-			for (const p of pages) {
+			for (let p = 1; p <= maxPages; p++) {
 				if (p === 1 && out.length >= pageSize * 0.8) continue;
 				try {
 					const url = `${novelPath}?ajax=chapters&page=${p}&pageSize=${pageSize}`;
@@ -450,7 +587,7 @@ export class FreeWebNovelSource extends BaseSource {
 					} catch {
 					}
 					const $c = cheerio.load(htmlChunk);
-					$c('a[href*="/chapter-"]').each((_, a) => {
+					$c('a[href*="/chapter-"]').each((__, a) => {
 						const href = $c(a).attr('href') || '';
 						const titleHint =
 							cleanText($c(a).attr('title') || '') ||
@@ -464,7 +601,7 @@ export class FreeWebNovelSource extends BaseSource {
 		}
 
 		if (out.length < 2) {
-			$('a[href*="/chapter-"]').each((_, el) => {
+			$('a[href*="/chapter-"]').each((_: number, el: any) => {
 				pushLink(
 					$(el).attr('href') || '',
 					cleanText($(el).attr('title') || $(el).text())
@@ -497,29 +634,19 @@ export class FreeWebNovelSource extends BaseSource {
 		const $ = cheerio.load(html);
 
 		const number = parseChapterNumber(path);
-		const hTitle = cleanText(
-			$('.top span.chapter, h1, .chapter-title').first().text()
-		);
-		const title =
-			number > 0
-				? `Chapter ${number}`
-				: hTitle.replace(/\s*[|\-–]\s*Free Web Novel.*$/i, '').trim() ||
-					'Chapter';
+		const title = number > 0 ? `Chapter ${number}` : 'Chapter';
 
-		let $body = $('.m-read, #article, .txt, .m-read .txt').first();
+		let $body = $('.m-read, #article, .txt').first();
 		if (!$body.length) $body = $('article, .content').first();
 
 		$body.find('script, style, noscript, iframe, nav, .ads, .ad').remove();
 
-		$('style').each((_, el) => {
+		$('style').each((_: number, el: any) => {
 			const styleText = $(el).html() || '';
 			const rules = styleText.match(/p:nth-last-child\(\d+\)/gi) || [];
 			for (const rule of rules) {
 				const m = rule.match(/nth-last-child\((\d+)\)/i);
-				if (m) {
-					const n = parseInt(m[1], 10);
-					$body.find(`p:nth-last-child(${n})`).remove();
-				}
+				if (m) $body.find(`p:nth-last-child(${m[1]})`).remove();
 			}
 		});
 
@@ -544,7 +671,7 @@ export class FreeWebNovelSource extends BaseSource {
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
 
-		$('a').each((_, el) => {
+		$('a').each((_: number, el: any) => {
 			const href = $(el).attr('href') || '';
 			const id = pathOnly(href);
 			if (!isChapterPath(id)) return;

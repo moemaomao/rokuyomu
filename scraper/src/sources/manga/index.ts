@@ -98,8 +98,10 @@ import { VioletMangaSource } from '../impl/manga/VioletManga';
 import { KappaBeastSource } from '../impl/manga/KappaBeast';
 import { HiveToonsSource } from '../impl/manga/HiveToons';
 import { ThunderScansSource } from '../impl/manga/ThunderScans';
+import { AsmoToonSource } from '../impl/manga/AsmoToon';
 
 const mangaSources: Record<string, IMangaSource> = {
+	asmotoon: new AsmoToonSource(),
 	thunderscans: new ThunderScansSource(),
 	hivetoons: new HiveToonsSource(),
 	kappabeast: new KappaBeastSource(),
