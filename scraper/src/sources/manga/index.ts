@@ -104,8 +104,10 @@ import { LHTranslationSource } from '../impl/manga/LHTranslation';
 import { EZMangaSource } from '../impl/manga/EZManga';
 import { ComixSource } from '../impl/manga/Comix';
 import { QiMangaSource } from '../impl/manga/QiManga';
+import { ArtLapsaSource } from '../impl/manga/ArtLapsa';
 
 const mangaSources: Record<string, IMangaSource> = {
+	artlapsa: new ArtLapsaSource(),
 	qimanga: new QiMangaSource(),
 	comix: new ComixSource(),
 	ezmanga: new EZMangaSource(),
