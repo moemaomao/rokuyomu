@@ -26,9 +26,33 @@ let {
 
 let pages = $state<string[]>([]);
 
+function normChapterId(id: unknown): string {
+	return String(id ?? '').replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
+function chapterIdMatches(a: string, b: string): boolean {
+	if (!a || !b) return false;
+	if (a === b) return true;
+	return a.endsWith(b) || b.endsWith(a);
+}
+
 $effect(() => {
 	if (!browser) return;
-	pages = rawPages ?? [];
+	const incoming = rawPages ?? [];
+	const cid = normChapterId(chapterId);
+
+	if (pendingChapterId) {
+		if (!chapterIdMatches(cid, pendingChapterId)) return;
+		pages = incoming;
+		chapterLoading = false;
+		pendingChapterId = null;
+		currentPageIndex = 0;
+		imgEpoch += 1;
+		return;
+	}
+
+	pages = incoming;
+	chapterLoading = false;
 });
 
 	// ── Reader state ─────────────────────────────────────────────────────────
@@ -42,8 +66,10 @@ $effect(() => {
 	let dataSaver = $state(false);
 	let imageQuality = $state(600);
 	let imgEpoch = $state(0);
+	let chapterLoading = $state(false);
+	let pendingChapterId = $state<string | null>(null);
 
-	// ── Theme (ikut layout) ──────────────────────────────────────────────────
+	// ── Theme ──────────────────────────────────────────────────
 	let isDarkMode = $state(true);
 
 	function syncTheme() {
@@ -182,12 +208,36 @@ $effect(() => {
 					(target as { slug?: string }).slug
 				: target;
 		if (!rawId) return;
-		const cleanId = String(rawId).replace(/^\/+/, '');
+		const cleanId = normChapterId(rawId);
+		if (!cleanId) return;
+		if (chapterIdMatches(cleanId, normChapterId(chapterId)) && pages.length > 0) return;
+
+		pendingChapterId = cleanId;
+		chapterLoading = true;
+		pages = [];
 		currentPageIndex = 0;
-		// Force reload data chapter baru
-		await goto(`/reader/${source}/${cleanId}`, { replaceState: true, invalidateAll: true });
-		await invalidateAll();
-		window.scrollTo(0, 0);
+		imgEpoch += 1;
+		try { window.scrollTo(0, 0); } catch {}
+
+		try {
+			await goto(`/reader/${source}/${cleanId}`, {
+				replaceState: true,
+				invalidateAll: true
+			});
+		} catch (e) {
+			console.error('[reader] goToChapter failed', e);
+			pendingChapterId = null;
+			chapterLoading = false;
+		}
+
+		const asked = cleanId;
+		setTimeout(() => {
+			if (pendingChapterId === asked) {
+				pendingChapterId = null;
+				chapterLoading = false;
+				pages = rawPages ?? [];
+			}
+		}, 12000);
 	}
 
 	// ── Download ZIP ─────────────────────────────────────────────────────────
@@ -286,7 +336,6 @@ $effect(() => {
 		return () => obs.disconnect();
 	});
 
-	// Track every chapter visit (including next/prev navigation — onMount does not re-run)
 	$effect(() => {
 		if (!browser) return;
 		const mid = mangaInfo?.id;
@@ -410,7 +459,17 @@ $effect(() => {
 
 	<!-- Reader -->
 	<main id="reader" class="mx-auto w-full max-w-[900px] flex-1 pb-20">
-		{#if !pages?.length}
+		{#if chapterLoading}
+			<div
+				class="flex min-h-[50vh] flex-col items-center justify-center gap-3 py-16 text-center
+					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
+			>
+				<div
+					class="h-9 w-9 animate-spin rounded-full border-2 border-violet-500 border-t-transparent"
+				></div>
+				<p class="text-sm">Loading chapter…</p>
+			</div>
+		{:else if !pages?.length}
 			<div
 				class="py-16 text-center
 					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
@@ -473,8 +532,8 @@ $effect(() => {
 			{isDarkMode ? 'border-white/5' : 'border-zinc-300/60 bg-white/70 backdrop-blur-md'}"
 	>
 		<button
-			onclick={() => prevChapter && goToChapter(prevChapter)}
-			disabled={!prevChapter}
+			onclick={() => prevChapter && !chapterLoading && goToChapter(prevChapter)}
+			disabled={!prevChapter || chapterLoading}
 			aria-label="Previous chapter"
 			title="Previous chapter"
 			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
@@ -497,8 +556,8 @@ $effect(() => {
 		</button>
 
 		<button
-			onclick={() => nextChapter && goToChapter(nextChapter)}
-			disabled={!nextChapter}
+			onclick={() => nextChapter && !chapterLoading && goToChapter(nextChapter)}
+			disabled={!nextChapter || chapterLoading}
 			aria-label="Next chapter"
 			title="Next chapter"
 			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
