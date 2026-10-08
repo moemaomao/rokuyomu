@@ -93,6 +93,20 @@ export class ThunderScansSource extends BaseSource {
 		return n ? parseFloat(n[1]) : 0;
 	}
 
+	private extractLatestChapter(cardHtml: string, $card: cheerio.Cheerio<any>): string | undefined {
+		const live = $card.find('.epxs').first().text().replace(/\s+/g, ' ').trim();
+		let m = live.match(/(?:chapter|chap|ch\.?)?\s*(\d+(?:\.\d+)?)/i);
+		if (m) return m[1];
+
+		m = cardHtml.match(/class=["']epxs["'][^>]*>\s*(?:Chapter\s*)?(\d+(?:\.\d+)?)/i);
+		if (m) return m[1];
+
+		m = cardHtml.match(/Chapter\s+(\d+(?:\.\d+)?)/i);
+		if (m) return m[1];
+
+		return undefined;
+	}
+
 	private parseCards($: cheerio.CheerioAPI): Manga[] {
 		const res: Manga[] = [];
 		const seen = new Set<string>();
@@ -123,10 +137,8 @@ export class ThunderScansSource extends BaseSource {
 				'';
 			cover = this.absUrl(cover);
 
-			const epxs = $card.find('.epxs').first().text().replace(/\s+/g, ' ').trim();
-			let latestChapter: string | undefined;
-			const chM = epxs.match(/(\d+(?:\.\d+)?)/);
-			if (chM) latestChapter = chM[1];
+			const cardHtml = $.html($card) || '';
+			const latestChapter = this.extractLatestChapter(cardHtml, $card);
 
 			const cardText = $card.text().toLowerCase();
 			const type = this.mapType(cardText);
@@ -161,7 +173,7 @@ export class ThunderScansSource extends BaseSource {
 			const path =
 				p <= 1
 					? '/comics/?order=update'
-					: `/comics/page/${p}/?order=update`;
+					: `/comics/?page=${p}&order=update`;
 
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
@@ -295,6 +307,7 @@ export class ThunderScansSource extends BaseSource {
 			.map((s) => s.trim())
 			.filter((s) => s && s.length > 1 && s !== title);
 
+		// Rating
 		let rating: string | null = null;
 		const ratingText =
 			$('.rating .num, .rating-prc, .numscore, [itemprop="ratingValue"]')
@@ -400,6 +413,7 @@ export class ThunderScansSource extends BaseSource {
 
 		try {
 			const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+
 			const runMatch = html.match(/ts_reader\.run\((\{[\s\S]*?\})\);/);
 			if (runMatch?.[1]) {
 				try {
