@@ -199,6 +199,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	hivetoons: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-yellow-500' },
 	thunderscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-purple-600' },
 	asmotoon: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-rose-600' },
+	orionscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
