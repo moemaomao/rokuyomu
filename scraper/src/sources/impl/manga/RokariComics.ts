@@ -28,11 +28,6 @@ export class RokariComicsSource extends BaseSource {
 	private readonly PER_PAGE = 24;
 	private readonly DEFAULT_LANG = 'en';
 
-	/**
-	 * Plain fetch — site is not behind hard CF.
-	 * BaseSource uses fetchWithCf which can return empty/challenge HTML
-	 * when Byparr is missing → "Chapter not found or has no pages".
-	 */
 	protected override async fetchHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
 		const res = await fetch(url, {
@@ -73,10 +68,12 @@ export class RokariComicsSource extends BaseSource {
 	}
 
 	private extractSlug(mangaId: string): string {
-		const p = this.cleanId(mangaId);
+		let p = this.cleanId(mangaId);
+		p = p.replace(/-chapter-[\d.]+$/i, '');
 		const m = p.match(/^\/manga\/([^/]+)/i);
 		if (m?.[1]) return m[1];
-		return p.replace(/^\//, '').split('/')[0] || '';
+		const bare = p.replace(/^\//, '').split('/')[0] || '';
+		return bare.replace(/-chapter-[\d.]+$/i, '');
 	}
 
 	private parseChapterNumber(text: string): number {
@@ -104,7 +101,6 @@ export class RokariComicsSource extends BaseSource {
 		return 'manhwa';
 	}
 
-	/** Parse .bsx list cards (Latest Update / search) */
 	private parseListCards(html: string): Manga[] {
 		const $ = cheerio.load(html);
 		const res: Manga[] = [];
@@ -165,7 +161,6 @@ export class RokariComicsSource extends BaseSource {
 	): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			// Homepage "Latest Update" → /manga/?order=update
 			const path =
 				p <= 1
 					? '/manga/?order=update'
@@ -229,7 +224,6 @@ export class RokariComicsSource extends BaseSource {
 				''
 		);
 
-		// Meta from .infotable / info rows
 		let status = 'Ongoing';
 		let type = 'manhwa';
 		let altTitle = '';
@@ -257,7 +251,6 @@ export class RokariComicsSource extends BaseSource {
 			}
 		});
 
-		// Fallback status/type from text blocks
 		$('.fmed, .wd-full, .imptdt').each((_, el) => {
 			const t = $(el).text().replace(/\s+/g, ' ').trim();
 			if (/^status\s/i.test(t) || /status/i.test(t)) {
@@ -287,7 +280,6 @@ export class RokariComicsSource extends BaseSource {
 			.replace(/\s+/g, ' ')
 			.trim();
 
-		// Chapters — clean titles only "Chapter N"
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -305,7 +297,6 @@ export class RokariComicsSource extends BaseSource {
 			const number = this.parseChapterNumber(raw) || this.parseChapterNumber(id);
 			if (!number) return;
 
-			// date: look for month name or yyyy
 			let date: string | undefined;
 			const dateMatch = raw.match(
 				/(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i
@@ -358,24 +349,34 @@ export class RokariComicsSource extends BaseSource {
 	// ── Pages ────────────────────────────────────────────────────────────────
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
-		const id = this.cleanId(chapterId);
+		let id = this.cleanId(chapterId);
 		if (!id || id === '/') {
 			console.error('[rokaricomics] getChapterPages → bad id:', chapterId);
 			return [];
 		}
 
-		try {
-			// Site chapter URLs always use trailing slash
-			const path = id.endsWith('/') ? id : `${id}/`;
-			const html = await this.fetchHtml(path);
+		if (id.startsWith('/manga/') && /-chapter-[\d.]+$/i.test(id)) {
+			id = id.replace(/^\/manga/, '');
+		}
 
-			// Soft 404 / empty reader
-			if (
-				!html ||
-				(/not\s*found|error\s*404/i.test(html.slice(0, 3000)) &&
-					!/readerarea/i.test(html))
-			) {
-				console.error('[rokaricomics] chapter 404 html:', path);
+		try {
+			const path = id.endsWith('/') ? id : `${id}/`;
+			const url = `${this.baseUrl}${path}`;
+			const res = await fetch(url, {
+				headers: {
+					...this.headers,
+					Referer: `${this.baseUrl}/`
+				},
+				redirect: 'follow'
+			});
+			if (!res.ok) {
+				console.error(`[rokaricomics] chapter HTTP ${res.status} → ${url}`);
+				return [];
+			}
+			const html = await res.text();
+
+			if (!html || html.length < 500) {
+				console.error('[rokaricomics] empty chapter html:', path);
 				return [];
 			}
 
@@ -384,23 +385,22 @@ export class RokariComicsSource extends BaseSource {
 			const seen = new Set<string>();
 
 			const push = (src: string) => {
-				let url = (src || '').trim().replace(/&amp;/g, '&');
-				if (!url) return;
-				url = this.absUrl(url);
-				if (!/^https?:\/\//i.test(url)) return;
+				let u = (src || '').trim().replace(/&amp;/g, '&');
+				if (!u) return;
+				u = this.absUrl(u);
+				if (!/^https?:\/\//i.test(u)) return;
 				if (
-					/logo|avatar|icon\.|emoji|ads?[-_/]|banner|wp-includes|favicon/i.test(
-						url
+					/logo|avatar|icon\.|emoji|\/ads?[-_/]|banner|wp-includes|favicon|image\.png$/i.test(
+						u
 					)
 				) {
 					return;
 				}
-				if (seen.has(url)) return;
-				seen.add(url);
-				pages.push(url);
+				if (seen.has(u)) return;
+				seen.add(u);
+				pages.push(u);
 			};
 
-			// 1) #readerarea (MangaNova)
 			$('#readerarea img, .readerarea img, .reading-content img').each(
 				(_, img) => {
 					const $img = $(img);
@@ -414,17 +414,15 @@ export class RokariComicsSource extends BaseSource {
 				}
 			);
 
-			// 2) Regex: all /uploads/manga/ image URLs (order preserved)
 			if (pages.length === 0) {
 				const re =
-					/https?:\/\/[^"'\\s>]+\/uploads\/manga\/[^"'\\s>]+\.(?:jpg|jpeg|png|webp|gif)/gi;
+					/https?:\/\/[^"'\\\s>]+\/uploads\/manga\/[^"'\\\s>]+\.(?:jpg|jpeg|png|webp|gif)/gi;
 				let m: RegExpExecArray | null;
 				while ((m = re.exec(html)) !== null) {
 					push(m[0]);
 				}
 			}
 
-			// 3) Any img with page-N alt or uploads/manga src
 			if (pages.length === 0) {
 				$('img').each((_, img) => {
 					const $img = $(img);
@@ -452,14 +450,12 @@ export class RokariComicsSource extends BaseSource {
 		}
 	}
 
-	/** Reader: /{slug}-chapter-N → /manga/{slug} */
 	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
 		const id = this.cleanId(chapterId);
-		const m = id.match(/^\/(.+)-chapter-[\d.]+$/i);
+		const m = id.match(/^\/(?:manga\/)?(.+)-chapter-[\d.]+$/i);
 		if (m?.[1]) return `/manga/${m[1]}`;
-		// already hierarchical /manga/slug/...
 		const m2 = id.match(/^(\/manga\/[^/]+)/i);
-		if (m2) return m2[1];
+		if (m2) return m2[1].replace(/-chapter-[\d.]+$/i, '');
 		return null;
 	}
 }
