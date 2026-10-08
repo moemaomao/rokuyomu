@@ -201,6 +201,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'lhtranslation', name: 'LHTranslation' },
 	{ id: 'ezmanga', name: 'EZManga' },
 	{ id: 'comix', name: 'Comix' },
+	{ id: 'qimanga', name: 'QiManga' },
 ];
 
 export function getSourceList(): SourceMeta[] {

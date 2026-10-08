@@ -203,6 +203,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	lhtranslation: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-600' },
 	ezmanga: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-pink-600' },
 	comix: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
+	qimanga: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
