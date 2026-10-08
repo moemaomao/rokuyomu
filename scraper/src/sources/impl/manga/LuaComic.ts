@@ -1,13 +1,17 @@
 /**
  * Lua Comic adapter (luacomic.org)
  *
- * Theme     : HeanCMS
+ * Theme     : HeanCMS (+ HTML homepage for "Latest Updates")
  * API base  : https://api.luacomic.org
- * Latest    : GET /query?page=&perPage=24&orderBy=latest&order=asc&series_type=Comic
- * Search    : GET /query?query_string=&page=&perPage=24&orderBy=total_views&series_type=Comic
+ *
+ * Latest    : scrape homepage section ".latest-poster" / "Latest Updates"
+ *             fallback API:
+ *             GET /query?query_string=&status=All&order=asc&orderBy=latest
+ *                 &series_type=Comic&page=&perPage=24&tags_ids=[]&adult=true
+ * Search    : GET /query?...&orderBy=total_views&query_string=
  * Detail    : GET /series/{slug}
  * Chapters  : GET /chapter/query?series_id=&page=&perPage=100
- * Pages     : GET /chapter/query path → /chapter/{slug-path}  → chapter.chapter_data.images[]
+ * Pages     : GET /chapter/{seriesSlug}/{chapterSlug} → chapter.chapter_data.images[]
  *
  * ID format:
  *   manga   : /series/{slug}#{seriesId}
@@ -17,6 +21,7 @@
 import { BaseSource } from '../../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 import { fetchWithCf } from '../../../lib/fetchWithCf';
+import * as cheerio from 'cheerio';
 
 export class LuaComicSource extends BaseSource {
 	id = 'luacomic';
@@ -27,6 +32,7 @@ export class LuaComicSource extends BaseSource {
 	private readonly DEFAULT_LANG = 'en';
 
 	// ── HTTP ─────────────────────────────────────────────────────────────────
+
 	private async apiGet<T = any>(path: string): Promise<T> {
 		const url = path.startsWith('http') ? path : `${this.apiBase}${path}`;
 		const html = await fetchWithCf(url, {
@@ -180,7 +186,7 @@ export class LuaComicSource extends BaseSource {
 			if (!Array.isArray(arr) || arr.length === 0) continue;
 			const first = tryParse(arr[0]);
 			const last = tryParse(arr[arr.length - 1]);
-			// prefer higher chapter number
+	
 			if (first && last) {
 				return parseFloat(last) >= parseFloat(first) ? last : first;
 			}
@@ -219,9 +225,24 @@ export class LuaComicSource extends BaseSource {
 
 	private async attachLatestChapter(manga: Manga): Promise<Manga> {
 		if (manga.latestChapter) return manga;
-		const seriesId = this.extractSeriesId(manga.id);
-		if (!seriesId) return manga;
 		try {
+			let seriesId = this.extractSeriesId(manga.id);
+			if (!seriesId) {
+				const slug = this.extractSlug(manga.id);
+				if (!slug) return manga;
+				const series = await this.apiGet<any>(`/series/${encodeURIComponent(slug)}`);
+				seriesId = series?.id != null ? String(series.id) : '';
+				if (seriesId) {
+					manga.id = this.toMangaId(slug, seriesId);
+					const fromSeries = this.extractLatestChapter(series);
+					if (fromSeries) {
+						manga.latestChapter = fromSeries;
+						return manga;
+					}
+				}
+			}
+			if (!seriesId) return manga;
+
 			const meta = await this.apiGet<{
 				data?: any[];
 				meta?: { last_page?: number; current_page?: number };
@@ -241,7 +262,6 @@ export class LuaComicSource extends BaseSource {
 			);
 			if (n > 0) manga.latestChapter = String(n);
 		} catch {
-			/* ignore */
 		}
 		return manga;
 	}
@@ -268,14 +288,143 @@ export class LuaComicSource extends BaseSource {
 
 	// ── Catalog ──────────────────────────────────────────────────────────────
 
+	private buildQueryUrl(opts: {
+		page: number;
+		query?: string;
+		orderBy?: string;
+		order?: string;
+	}): string {
+		const page = Math.max(1, opts.page || 1);
+		const params = new URLSearchParams({
+			query_string: opts.query || '',
+			status: 'All',
+			order: opts.order || 'asc',
+			orderBy: opts.orderBy || 'latest',
+			series_type: 'Comic',
+			page: String(page),
+			perPage: String(this.PER_PAGE),
+			tags_ids: '[]',
+			adult: 'true'
+		});
+		return `/query?${params.toString()}`;
+	}
+
+	private parseLatestFromHtml(html: string): Manga[] {
+		const $ = cheerio.load(html);
+		const res: Manga[] = [];
+		const seen = new Set<string>();
+
+		let $cards = $();
+		$('h1, h2, h3, h4, h5').each((_, el) => {
+			if (/latest\s*updates?/i.test($(el).text())) {
+				const $section = $(el).closest('section, div').parent();
+				const found = $section.find('.latest-poster');
+				if (found.length) $cards = found;
+				else {
+					const sib = $(el).parent().nextAll().find('.latest-poster');
+					if (sib.length) $cards = sib;
+				}
+			}
+		});
+		if (!$cards.length) $cards = $('.latest-poster');
+
+		$cards.each((_, el) => {
+			if (res.length >= this.PER_PAGE) return false;
+			const $card = $(el);
+			const $a =
+				$card.find('a[href*="/series/"]').first().length
+					? $card.find('a[href*="/series/"]').first()
+					: $card.is('a')
+						? $card
+						: $card.find('a').first();
+			const href = ($a.attr('href') || '').trim();
+			const m = href.match(/\/series\/([^/#?]+)/i);
+			if (!m?.[1]) return;
+			const slug = decodeURIComponent(m[1].replace(/\/+$/, ''));
+			if (!slug || seen.has(slug)) return;
+			seen.add(slug);
+
+			const title =
+				($a.attr('title') || '').trim() ||
+				($a.attr('alt') || '').trim() ||
+				$card.find('h2, h3, h4').first().text().replace(/\s+/g, ' ').trim() ||
+				$a.text().replace(/\s+/g, ' ').trim();
+			if (!title || title.length < 2) return;
+
+			let cover = '';
+			const style = $a.attr('style') || $card.find('[style*="background"]').attr('style') || '';
+			const bg = style.match(/url\(\s*['"]?([^)'"]+)['"]?\s*\)/i);
+			if (bg?.[1]) cover = bg[1].replace(/&amp;/g, '&').trim();
+			if (!cover) {
+				const img = $card.find('img').first();
+				cover =
+					img.attr('src') ||
+					img.attr('data-src') ||
+					(img.attr('srcset') || '').split(/[,\s]/)[0] ||
+					'';
+			}
+
+			const wsrv = cover.match(/[?&]url=([^&]+)/i);
+			if (wsrv) {
+				try {
+					cover = decodeURIComponent(wsrv[1]);
+				} catch {
+				}
+			}
+			if (cover && !/^https?:\/\//i.test(cover)) {
+				cover = cover.startsWith('//')
+					? `https:${cover}`
+					: `${this.baseUrl}${cover.startsWith('/') ? '' : '/'}${cover}`;
+			}
+
+			let latestChapter: string | undefined;
+			const cardText = $card.text().replace(/\s+/g, ' ');
+			const chMatch =
+				cardText.match(/Chapter\s*(\d+(?:\.\d+)?)/i) ||
+				cardText.match(/\bCh\.?\s*(\d+(?:\.\d+)?)/i);
+			if (chMatch) latestChapter = chMatch[1];
+
+			res.push({
+				id: this.toMangaId(slug),
+				sourceId: this.id,
+				title: title.replace(/\s*Chapter\s*\d+.*$/i, '').trim(),
+				cover,
+				type: 'manhwa',
+				status: 'Ongoing',
+				lang: this.DEFAULT_LANG,
+				latestChapter
+			});
+		});
+
+		return res;
+	}
+
 	async getLatestManga(
 		page: number,
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
+		const p = Math.max(1, Number(page) || 1);
+
+		if (p === 1) {
+			try {
+				const html = await this.fetchHtml('/');
+				const fromHtml = this.parseLatestFromHtml(html);
+				if (fromHtml.length > 0) {
+					const needBadge = fromHtml.filter((m) => !m.latestChapter);
+					if (needBadge.length > 0) {
+						await Promise.all(needBadge.map((m) => this.attachLatestChapter(m)));
+					}
+					console.log(`[luacomic] latest HTML section → ${fromHtml.length}`);
+					return fromHtml.slice(0, this.PER_PAGE);
+				}
+			} catch (e) {
+				console.warn('[luacomic] HTML latest failed, fallback API', e);
+			}
+		}
+
 		try {
-			const p = Math.max(1, Number(page) || 1);
 			const data = await this.apiGet<{ data?: any[] }>(
-				`/query?page=${p}&perPage=${this.PER_PAGE}&orderBy=latest&order=desc&series_type=Comic&query_string=`
+				this.buildQueryUrl({ page: p, orderBy: 'latest', order: 'asc' })
 			);
 			let list = (data?.data || [])
 				.map((it) => this.mapListItem(it))
@@ -287,7 +436,7 @@ export class LuaComicSource extends BaseSource {
 			}
 
 			list = list.slice(0, this.PER_PAGE);
-			console.log(`[luacomic] latest page=${p} → ${list.length}`);
+			console.log(`[luacomic] latest API page=${p} → ${list.length}`);
 			return list;
 		} catch (e) {
 			console.error('[luacomic] getLatestManga', e);
@@ -305,7 +454,12 @@ export class LuaComicSource extends BaseSource {
 
 		try {
 			const data = await this.apiGet<{ data?: any[] }>(
-				`/query?page=${page}&perPage=${this.PER_PAGE}&orderBy=total_views&order=desc&series_type=Comic&query_string=${encodeURIComponent(q)}`
+				this.buildQueryUrl({
+					page,
+					query: q,
+					orderBy: 'total_views',
+					order: 'desc'
+				})
 			);
 			let list = (data?.data || [])
 				.map((it) => this.mapListItem(it))
