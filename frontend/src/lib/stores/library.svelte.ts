@@ -24,10 +24,34 @@ function libKey(mangaId: string, sourceId: string): string {
 	return `${sourceId}::${normalizeMangaId(mangaId)}`;
 }
 
+function plainChapter(c: LibraryChapterRef | Record<string, unknown>): LibraryChapterRef {
+	const o = c as LibraryChapterRef;
+	return {
+		chapterId: String(o.chapterId ?? ''),
+		chapterTitle: String(o.chapterTitle ?? ''),
+		savedAt: Number(o.savedAt) || Date.now(),
+		pageCount: typeof o.pageCount === 'number' ? o.pageCount : undefined
+	};
+}
+
+function plainEntry(e: LibraryEntry): LibraryEntry {
+	return {
+		key: String(e.key),
+		mangaId: String(e.mangaId ?? ''),
+		mangaTitle: String(e.mangaTitle ?? '').slice(0, 160),
+		cover: String(e.cover ?? ''),
+		sourceId: String(e.sourceId ?? ''),
+		isNovel: !!e.isNovel,
+		localPath: String(e.localPath ?? ''),
+		chapters: (e.chapters || []).map(plainChapter),
+		timestamp: Number(e.timestamp) || Date.now()
+	};
+}
+
 async function reloadFromIdb() {
 	const list = await idbGetLibrary();
-	entries = list;
-	return list;
+	entries = list.map(plainEntry);
+	return entries;
 }
 
 if (browser) {
@@ -109,10 +133,10 @@ export async function removeChapterFromLibrary(
 	if (!existing) return;
 	const n = String(chapterId || '');
 	const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
-	const chapters = (existing.chapters || []).filter(
-		(c) => c.chapterId !== n && c.chapterId !== alt
-	);
-	const next = { ...existing, chapters, timestamp: Date.now() };
+	const chapters = (existing.chapters || [])
+		.filter((c) => c.chapterId !== n && c.chapterId !== alt)
+		.map(plainChapter);
+	const next = plainEntry({ ...existing, chapters, timestamp: Date.now() });
 	await idbPutLibraryEntry(next);
 	await reloadFromIdb();
 	window.dispatchEvent(new CustomEvent('library-changed'));
@@ -155,12 +179,14 @@ export async function upsertLibraryEntry(partial: {
 	const existing = entries.find((e) => e.key === key);
 	const chapterMap = new Map<string, LibraryChapterRef>();
 	for (const c of existing?.chapters || []) {
-		chapterMap.set(c.chapterId, c);
+		const pc = plainChapter(c);
+		if (pc.chapterId) chapterMap.set(pc.chapterId, pc);
 	}
 	for (const c of partial.chapters || []) {
-		chapterMap.set(c.chapterId, c);
+		const pc = plainChapter(c);
+		if (pc.chapterId) chapterMap.set(pc.chapterId, pc);
 	}
-	const next: LibraryEntry = {
+	const next = plainEntry({
 		key,
 		mangaId: normalizeMangaId(partial.mangaId) || partial.mangaId,
 		mangaTitle: (partial.mangaTitle || '').slice(0, 160),
@@ -170,7 +196,7 @@ export async function upsertLibraryEntry(partial: {
 		localPath: partial.localPath || existing?.localPath || '',
 		chapters: Array.from(chapterMap.values()).sort((a, b) => b.savedAt - a.savedAt),
 		timestamp: Date.now()
-	};
+	});
 	await idbPutLibraryEntry(next);
 	await reloadFromIdb();
 	window.dispatchEvent(new CustomEvent('library-changed'));
@@ -195,11 +221,11 @@ export async function syncLibraryFromBookmarks(): Promise<number> {
 	if (!browser) return 0;
 	const bms = getBookmarks();
 	let added = 0;
-	const map = new Map(entries.map((e) => [e.key, e]));
+	const map = new Map(entries.map((e) => [e.key, plainEntry(e)]));
 	for (const b of bms) {
 		const key = libKey(b.mangaId, b.sourceId);
 		if (!map.has(key)) {
-			const entry: LibraryEntry = {
+			const entry = plainEntry({
 				key,
 				mangaId: normalizeMangaId(b.mangaId) || b.mangaId,
 				mangaTitle: b.mangaTitle,
@@ -209,12 +235,14 @@ export async function syncLibraryFromBookmarks(): Promise<number> {
 				localPath: '',
 				chapters: [],
 				timestamp: Date.now()
-			};
+			});
 			map.set(key, entry);
 			added++;
 		}
 	}
-	const list = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+	const list = Array.from(map.values())
+		.map(plainEntry)
+		.sort((a, b) => b.timestamp - a.timestamp);
 	await idbSetAllLibrary(list);
 	entries = list;
 	window.dispatchEvent(new CustomEvent('library-changed'));

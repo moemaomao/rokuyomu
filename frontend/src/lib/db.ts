@@ -71,7 +71,7 @@ export interface LibraryChapterRef {
 }
 
 export interface LibraryEntry {
-	key: string; // sourceId::mangaId
+	key: string;
 	mangaId: string;
 	mangaTitle: string;
 	cover: string;
@@ -346,7 +346,23 @@ export async function idbGetLibrary(): Promise<LibraryEntry[]> {
 
 export async function idbPutLibraryEntry(entry: LibraryEntry) {
 	const db = await getDB();
-	await db.put('library', entry);
+	const plain: LibraryEntry = {
+		key: String(entry.key),
+		mangaId: String(entry.mangaId ?? ''),
+		mangaTitle: String(entry.mangaTitle ?? ''),
+		cover: String(entry.cover ?? ''),
+		sourceId: String(entry.sourceId ?? ''),
+		isNovel: !!entry.isNovel,
+		localPath: String(entry.localPath ?? ''),
+		chapters: (entry.chapters || []).map((c) => ({
+			chapterId: String(c.chapterId ?? ''),
+			chapterTitle: String(c.chapterTitle ?? ''),
+			savedAt: Number(c.savedAt) || Date.now(),
+			pageCount: typeof c.pageCount === 'number' ? c.pageCount : undefined
+		})),
+		timestamp: Number(entry.timestamp) || Date.now()
+	};
+	await db.put('library', plain);
 }
 
 export async function idbDeleteLibraryEntry(key: string) {
@@ -363,6 +379,25 @@ export async function idbSetAllLibrary(list: LibraryEntry[]) {
 	const db = await getDB();
 	const tx = db.transaction('library', 'readwrite');
 	await tx.store.clear();
-	await Promise.all(list.map((e) => tx.store.put(e)));
+	await Promise.all(
+		list.map((entry) =>
+			tx.store.put({
+				key: String(entry.key),
+				mangaId: String(entry.mangaId ?? ''),
+				mangaTitle: String(entry.mangaTitle ?? ''),
+				cover: String(entry.cover ?? ''),
+				sourceId: String(entry.sourceId ?? ''),
+				isNovel: !!entry.isNovel,
+				localPath: String(entry.localPath ?? ''),
+				chapters: (entry.chapters || []).map((c) => ({
+					chapterId: String(c.chapterId ?? ''),
+					chapterTitle: String(c.chapterTitle ?? ''),
+					savedAt: Number(c.savedAt) || Date.now(),
+					pageCount: typeof c.pageCount === 'number' ? c.pageCount : undefined
+				})),
+				timestamp: Number(entry.timestamp) || Date.now()
+			} satisfies LibraryEntry)
+		)
+	);
 	await tx.done;
 }
