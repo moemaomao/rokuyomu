@@ -1,404 +1,221 @@
 # Rokuyomu (Mikoroku v2)
 
-Multi-source **manga, comics & novel** reader — **SvelteKit** on **Cloudflare Workers**, scraping via **Node microservice** (+ hybrid untuk source yang diblokir Vercel) + **Byparr** untuk bypass Cloudflare.
+Multi-source **manga, comics & light novel** reader built with **SvelteKit** on **Cloudflare Workers**, with a **Node scraper microservice** and optional **Byparr** Cloudflare bypass.
 
-Aggregates latest updates and search from many sources (manga, manhwa, manhua, doujin, hentai, light novel, dll.) in one place.
+Browse latest updates and search across many sources (manga, manhwa, manhua, doujin, adult titles, light novels, and more) in one UI.
 
-**Live:** [rokuyomu](https://rokuyomu.mikoroku.workers.dev) · Repo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu)
+**Live:** [rokuyomu.mikoroku.workers.dev](https://rokuyomu.mikoroku.workers.dev) · **Repo:** [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu)
 
 ---
 
 ## Features
 
-- Multi-source browsing & search (manga **dan** novel)
-- Manga / novel detail (cover, description, genres, chapter list)
-- Chapter reader (image) + **novel reader** (teks)
-- Bookmark & reading history (local / Firebase sync)
-- Language / type filters
-- Preferred sources (homepage multi-source)
-- **Deep search** lintas source
-- **Community** (forum / thread)
-- Notifications
-- Chapter download (ZIP)
-- Cloudflare Workers KV cache (`MIKOROKU_CACHE`)
-- Cron warm/sync cache (setiap 20 menit)
-- Dark / light theme
+### Browse & read
+- Multi-source homepage (preferred sources) with language / type filters
+- Search and **Deep Search** across sources
+- Manga / novel detail pages (cover, synopsis, genres, chapter list)
+- **Image reader** for manga chapters
+- **Novel reader** for text chapters
+- Dark / light theme, mobile-friendly layout
+
+### Library, bookmarks & progress
+- **Bookmarks** (local IndexedDB + optional Firebase sync when logged in)
+- **Reading history** and chapter read markers
+- **Notifications** for new chapters on tracked titles
+- **Offline Library** (client-side):
+  - Metadata in IndexedDB (survives reload)
+  - Files on disk via **File System Access API** (Chrome / Edge)
+  - Structure: `RokuyomuLibrary/Manga|Novel/<Title>/…`
+  - Manga chapters as image folders (no ZIP required)
+  - Novel chapters as **PDF** files
+  - Cover images cached offline (disk + IndexedDB blob)
+  - Sync Bookmarks → import titles into Library
+  - **Sync Updates** → refresh latest chapter badges, sort by newest activity
+  - Per-title **batch download**, single-chapter download, offline checkmarks on chapter list
+
+### Community & ops
+- Community forum (categories, threads)
 - Report broken source / chapter
 - Admin panel (health, sources, backup snapshot)
-- **Hybrid scrape:** source yang diblokir outbound IP Vercel dijalankan langsung di Cloudflare Worker (Cheerio)
-- **Byparr:** bypass Cloudflare challenge di scraper (cookie jar + auto-retry)
+- Stats / lifetime progress helpers
+- Image proxy (`/api/proxy`) for hotlink-safe covers & pages
+
+### Backend
+- Cloudflare Workers **KV** cache (`MIKOROKU_CACHE`)
+- Cron warm / sync cache (~every 20 minutes)
+- **Hybrid scrape:** blocked Vercel outbound sources parse **on the Worker** (Cheerio); others call the Node scraper over HTTP JSON
+- **Byparr** integration on the scraper for Cloudflare challenges (optional)
 
 ---
 
 ## Architecture
 
 ```
-UI
- └─ Cloudflare Worker (SvelteKit)
-      ├─ KV cache (browse / manga / pages / novel)
-      └─ scraperClient (hybrid)
-           ├─ source ∈ WORKER_SOURCE_IDS  → parse lokal di Worker (Cheerio)
-           └─ source lainnya              → HTTP JSON ke scraper Node (Vercel/Render)
-                └─ fetchWithCf → Byparr (jika CF challenge)
+Browser
+  └─ Cloudflare Worker (SvelteKit)
+       ├─ KV cache (browse / detail / pages / novel)
+       ├─ Client: IndexedDB + optional File System Access (Library)
+       └─ scraperClient (hybrid)
+            ├─ source ∈ WORKER_SOURCE_IDS  → Cheerio adapters on Worker
+            └─ other sources               → HTTP JSON → Node scraper
+                 └─ fetchWithCf → Byparr (if CF challenge)
 ```
 
 | Layer | Role | Deploy |
 |-------|------|--------|
-| **frontend/** | UI + thin proxy + KV + hybrid Worker sources | Cloudflare Workers |
-| **scraper/** | Express + Cheerio, **~118** source adapters (manga + novel) + Byparr client | Vercel (atau Render/Koyeb/Fly) |
-| **Byparr** | Anti-bot solver (Camoufox) — opsional, self-hosted | Docker / lokal (port 8191) |
+| **`frontend/`** | UI, KV, hybrid Worker sources, cron | Cloudflare Workers |
+| **`scraper/`** | Express + Cheerio, ~190+ adapters (manga + novel), Byparr client | Vercel (or Render / Koyeb / Fly) |
+| **Byparr** (optional) | Camoufox-based CF solver | Docker / local `:8191` |
 
-Worker free tier tetap aman selama mayoritas request hanya `fetch()` JSON. Cheerio di Worker **hanya** untuk source yang gagal dari IP Vercel.
-
-> **Catatan:** Saat ini ada **~44 source** di `WORKER_SOURCE_IDS` (banyak Indo + beberapa internasional + novel yang diblokir). Bundle Worker membesar — pantau CPU time di dashboard Cloudflare.
+Worker free tier stays viable when most traffic is `fetch()` of JSON. Cheerio on the Worker is reserved for sources that fail from the scraper’s hosting IP.
 
 ---
 
-## Tech Stack
-
-- **SvelteKit** 2 + Svelte 5 + TypeScript
-- **Tailwind CSS** v4
-- **Cloudflare Workers** + Workers KV + Cron Triggers
-- **Express** + **Cheerio** (scraper microservice)
-- **Byparr** (FlareSolverr-compatible anti-bot bypass)
-- **Firebase** (auth / sync opsional)
-- **jszip** (download chapter)
-- **pnpm** (frontend) · **npm** (scraper)
-
----
-
-## Project Structure
+## Repository layout
 
 ```
 rokuyomu/
-├── frontend/                         # SvelteKit → Cloudflare Worker
+├── README.md                 # this file
+├── frontend/                 # SvelteKit → Cloudflare Worker
+│   ├── README.md
 │   ├── src/
 │   │   ├── lib/
-│   │   │   ├── components/
+│   │   │   ├── db.ts                 # IndexedDB schema (bookmarks, history, library, covers, …)
 │   │   │   ├── server/
-│   │   │   │   ├── sources/          # Metadata source saja (light registry, ~118)
-│   │   │   │   ├── workerSources/    # Adapter hybrid (source diblokir Vercel)
-│   │   │   │   │   ├── index.ts      # GENERATED — jangan edit manual
-│   │   │   │   │   ├── BaseSource.ts
-│   │   │   │   │   ├── types.ts
-│   │   │   │   │   └── impl/         # GENERATED dari scraper (via sync script)
-│   │   │   │   ├── scraperClient.ts  # Hybrid routing
+│   │   │   │   ├── workerSources/    # hybrid adapters (generated)
+│   │   │   │   ├── scraperClient.ts
 │   │   │   │   ├── cache.ts
-│   │   │   │   ├── warmCache.ts
-│   │   │   │   ├── syncSources.ts
-│   │   │   │   └── ...
-│   │   │   ├── stores/               # auth, bookmark, history, preferredSources, ...
-│   │   │   └── utils/                # novelSources, nsfw, downloadChapter, ...
+│   │   │   │   └── …
+│   │   │   ├── stores/               # bookmark, history, library, auth, …
+│   │   │   └── utils/                # downloadChapter, downloadNovelPdf, localFs, cacheCover, …
 │   │   └── routes/
-│   │       ├── +page.*               # Homepage / browse
+│   │       ├── +page.*               # homepage / browse
+│   │       ├── library/              # Offline Library UI
 │   │       ├── manga/[source]/[...id]/
-│   │       ├── reader/[source]/[...id]/       # Image chapter reader
-│   │       ├── novel-reader/[source]/[...id]/ # Novel (teks) reader
-│   │       ├── deep-search/
-│   │       ├── community/            # Forum: category, thread, new
-│   │       ├── bookmark/ history/ settings/ report/ notification/
-│   │       ├── admin/                # Health, sources, backup
-│   │       ├── about/ privacy/
-│   │       └── api/                  # pages, proxy, warm, cron, novel-chapter, ...
+│   │       ├── reader/ · novel-reader/
+│   │       ├── deep-search/ · community/ · bookmark/ · history/
+│   │       ├── notification/ · settings/ · report/ · admin/ · stats/
+│   │       └── api/                  # chapters, pages, proxy, novel-chapter, warm, cron, …
 │   ├── scripts/
-│   │   ├── worker-sources.json       # Daftar ID source yang dijalankan di Worker
-│   │   ├── sync-worker-sources.mjs   # Script auto-copy + generate index.ts
+│   │   ├── worker-sources.json
+│   │   ├── sync-worker-sources.mjs
 │   │   └── append-cron.js
-│   ├── wrangler.jsonc                # SCRAPER_BASE_URL, KV, cron
-│   └── package.json
+│   └── wrangler.jsonc
 │
-└── scraper/                          # Node microservice
+└── scraper/                  # Node microservice
+    ├── README.md
     ├── src/
-    │   ├── index.ts                  # Express API (+ novel-chapter + Byparr health)
-    │   ├── lib/
-    │   │   ├── byparr.ts             # Client ke Byparr /v1
-    │   │   ├── cfCookieJar.ts        # Cookie jar per-domain (TTL)
-    │   │   └── fetchWithCf.ts        # Fetch + deteksi CF challenge → Byparr
-    │   └── sources/
-    │       ├── index.ts              # Full registry (~118 adapters)
-    │       ├── BaseSource.ts         # fetchHtml → fetchWithCf
-    │       ├── types.ts              # Manga types
-    │       ├── types-novel.ts        # Novel types (INovelSource, ...)
-    │       └── impl/                 # Semua adapter manga + novel
-    ├── api/index.js                  # Bundle esbuild (Vercel) — jangan edit manual
-    ├── vercel.json
-    ├── render.yaml
+    │   ├── index.ts          # Express API
+    │   ├── lib/              # byparr, cfCookieJar, fetchWithCf
+    │   └── sources/          # registry + impl/manga · impl/novel
+    ├── api/index.js          # esbuild bundle for Vercel (generated)
     └── package.json
 ```
+
+Rough adapter counts (evolve over time): **~100+ manga**, **~80+ novel** in the scraper registry; a subset is mirrored to Worker hybrid sources via `sync-worker-sources`.
 
 ---
 
 ## Prerequisites
 
-- Node.js 20+
-- pnpm 9+ (frontend)
-- npm (scraper)
-- Cloudflare account (Workers + KV)
-- Akun Vercel / Render (scraper)
-- **(Opsional)** Docker — untuk Byparr (bypass Cloudflare)
+- **Node.js 20+**
+- **pnpm 9+** (frontend)
+- **npm** (scraper)
+- Cloudflare account + Wrangler (frontend deploy)
+- Optional: Docker for Byparr
 
 ---
 
-## Development
+## Quick start (local)
 
-### 0. Byparr (opsional, terminal 0) — bypass Cloudflare
-
-Byparr = self-hosted anti-bot solver (drop-in FlareSolverr). Scraper memanggil `BYPARR_URL` kalau ketemu Cloudflare challenge.
-
-**Docker (paling gampang):**
-
-```bash
-docker run -d --name byparr -p 8191:8191 ghcr.io/thephaseless/byparr:latest
-```
-
-Docs API: `http://localhost:8191/docs`
-
-**Lokal (tanpa Docker):**
-
-```bash
-# install uv dulu: https://docs.astral.sh/uv/
-git clone https://github.com/ThePhaseless/Byparr
-cd Byparr
-uv run main.py
-# → http://localhost:8191
-```
-
-Setelah Byparr hidup, set env di scraper:
-
-```bash
-export BYPARR_URL=http://localhost:8191
-# opsional: CF_COOKIE_TTL_MS=900000   # default 15 menit
-```
-
-Health scraper akan menampilkan `byparr: true` kalau env ter-set:
-
-```bash
-curl http://localhost:3000/health
-# { "ok": true, "byparr": true, "byparrUrl": "(set)", "cfJar": { "size": 0, "alive": 0 }, ... }
-```
-
-> Tanpa `BYPARR_URL`, source yang kena CF challenge akan error: `Cloudflare challenge ... (Byparr disabled; set BYPARR_URL)`.
-
-### 1. Scraper (terminal 1)
+### 1. Scraper
 
 ```bash
 cd scraper
 npm install
+npx tsx src/index.ts
+# → http://localhost:3000
+curl http://localhost:3000/health
 ```
 
-**Linux / macOS / Git Bash:**
+Optional Byparr:
 
 ```bash
-# dengan Byparr:
+docker run -d --name byparr -p 8191:8191 --restart unless-stopped \
+  ghcr.io/thephaseless/byparr:latest
+
+# Linux/macOS
 BYPARR_URL=http://localhost:8191 npx tsx src/index.ts
-# tanpa Byparr:
-npx tsx src/index.ts
-# → http://localhost:3000
 ```
 
-**Windows PowerShell:**
-
-```powershell
-# dengan Byparr:
-$env:BYPARR_URL="http://localhost:8191"
-npx tsx src/index.ts
-
-# tanpa Byparr:
-npx tsx src/index.ts
-# → http://localhost:3000
-```
-
-Disarankan script di `scraper/package.json`:
-
-```json
-"scripts": {
-  "dev": "tsx src/index.ts",
-  "start": "tsx src/index.ts",
-  "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.js",
-  "vercel-build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=api/index.js"
-}
-```
-
-Health check: `curl http://localhost:3000/health`
-
-### 2. Frontend (terminal 2)
+### 2. Frontend
 
 ```bash
 cd frontend
 pnpm install
-```
-
-Buat `frontend/.env`:
-
-```env
-SCRAPER_BASE_URL=http://localhost:3000
-# SCRAPER_API_KEY=optional
-```
-
-```bash
+# Point at local scraper (see frontend/README.md / wrangler.jsonc vars)
 pnpm dev
-# → http://localhost:5173 (atau port Vite)
+# → http://localhost:5173
 ```
-
-### Scripts frontend
-
-| Command | Keterangan |
-|---------|------------|
-| `pnpm dev` | Dev server |
-| `pnpm build` | Build + append cron |
-| `pnpm preview` | Build + `wrangler dev` |
-| `pnpm check` | svelte-check |
-| `pnpm lint` / `pnpm format` | ESLint / Prettier |
-| `pnpm sync-worker-sources` | Sync adapter blocked sources dari scraper |
-| `pnpm deploy` | Sync + build + deploy ke Cloudflare Workers |
-| `pnpm cf-typegen` | Generate Worker types |
 
 ---
 
-## Production deploy
+## Environment (overview)
 
-### Byparr (self-hosted)
+| Variable | Where | Purpose |
+|----------|--------|---------|
+| `SCRAPER_BASE_URL` | frontend / Wrangler | Base URL of the Node scraper |
+| `MIKOROKU_CACHE` | Cloudflare KV binding | Cache namespace |
+| `BYPARR_URL` | scraper | e.g. `http://localhost:8191` — empty = off |
+| `CF_COOKIE_TTL_MS` | scraper | CF cookie TTL (default 15 min) |
+| Firebase config | frontend | Optional auth / cloud sync for bookmarks & history |
 
-Jalankan Byparr di VPS / home server (Docker), lalu set `BYPARR_URL` di env scraper (Render/Koyeb/Fly — **bukan** Vercel serverless, karena Byparr butuh long-running browser).
-
-```bash
-docker run -d --name byparr -p 8191:8191 --restart unless-stopped ghcr.io/thephaseless/byparr:latest
-```
-
-Contoh env scraper (Render):
-
-```
-BYPARR_URL=http://IP-VPS-KAMU:8191
-# atau internal network: http://byparr:8191
-CF_COOKIE_TTL_MS=900000
-```
-
-> Vercel serverless **tidak cocok** untuk Byparr (cold start + no persistent cookie jar). Kalau banyak source kena CF, deploy scraper ke Render/Koyeb/Fly + Byparr di sampingnya.
-
-### Scraper → Vercel (tanpa Byparr) / Render (dengan Byparr)
-
-- Root directory: `scraper`
-- Build: `npm run vercel-build` (esbuild → `api/index.js`) — Vercel
-- Atau Render: start `npx tsx src/index.ts`, env `BYPARR_URL=...`
-- Catat URL, contoh: `https://rokuyomu.vercel.app`
-
-### Frontend → Cloudflare
-
-`frontend/wrangler.jsonc` (vars):
-
-```jsonc
-"vars": {
-  "SCRAPER_BASE_URL": "https://rokuyomu.vercel.app"
-}
-```
-
-```bash
-cd frontend
-pnpm deploy
-```
-
-Opsional: `SCRAPER_API_KEY` (sama di scraper & frontend).
+See **`frontend/README.md`** and **`scraper/README.md`** for full tables and deploy steps.
 
 ---
 
-## Hybrid sources (diblokir Vercel)
+## Offline Library (client)
 
-Beberapa situs memblokir outbound IP Vercel. Source tersebut dijalankan langsung di Cloudflare Worker (Cheerio).
+Chrome / Edge recommended (File System Access API).
 
-### Alur
+1. Open **Library** in the sidebar → **Folder** → pick a parent directory once.  
+2. App creates `RokuyomuLibrary/Manga/…` and `RokuyomuLibrary/Novel/…`.  
+3. **Sync Bookmarks** copies title metadata into Library.  
+4. Download chapters from the title page or use **Download** (batch) on a Library card.  
+5. **Sync Updates** refreshes latest chapter labels and sorts titles by recent activity.  
+6. Covers are stored as `cover.*` under each title folder and as blobs in IndexedDB for offline UI.
 
-```
-source ∈ WORKER_SOURCE_IDS  → Cheerio di CF Worker
-source lainnya              → scraper Vercel/Render (+ Byparr jika CF)
-```
-
-Daftar ID disimpan di:
-
-```
-frontend/scripts/worker-sources.json
-```
-
-### Menambah source blocked (otomatis)
-
-1. Pastikan adapter sudah ada di `scraper/src/sources/impl/` dan punya `id = 'namasource'`.
-2. Tambah ID ke `frontend/scripts/worker-sources.json`.
-3. Jalankan:
-
-```bash
-cd frontend
-pnpm sync-worker-sources
-```
-
-Script akan:
-- Copy file adapter dari scraper → `workerSources/impl/`
-- Generate ulang `workerSources/index.ts` (WORKER_SOURCE_IDS + loaders)
-- Hapus file orphan yang sudah tidak ada di daftar
-
-4. (Opsional) tambah id ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
-5. `pnpm deploy` (sudah otomatis menjalankan sync dulu).
-
-> **Jangan edit manual** `workerSources/index.ts` atau file di `impl/`. Semua digenerate oleh script.
-
-Jaga jumlah Worker source tetap wajar. Bundle membesar + cold start CPU naik jika terlalu banyak.
-
-### Warm / sync cache
-
-`warmCache.ts` & `syncSources.ts` memanggil `remoteLatest` (hybrid-aware).  
-Masukkan id source blocked ke `WARM_SOURCES` / `PRIORITY_SOURCES` agar cron mengisi KV.
-
-Cron: `*/20 * * * *` (lihat `wrangler.jsonc`).
+Firefox / Safari: Library metadata still works; downloads fall back to ZIP / single-file browser downloads.
 
 ---
 
-## Novel support
+## Deploy
 
-Source novel punya `kind: 'novel'` dan implement `getChapterContent` (bukan `getChapterPages`).
+| Package | Typical target | Notes |
+|---------|----------------|-------|
+| `frontend/` | Cloudflare Workers | `pnpm deploy` (sync worker sources → build → wrangler) |
+| `scraper/` | Vercel | `vercel-build` bundles to `api/index.js` |
 
-- Frontend: `utils/novelSources.ts` (`NOVEL_SOURCE_IDS`, `chapterHref` → `/novel-reader/...`)
-- Route: `/novel-reader/[source]/[...id]`
-- Scraper API: `GET /:sourceId/novel-chapter/*`
-- Types: `scraper/src/sources/types-novel.ts`
-
----
-
-## Scraper API
-
-| Endpoint | Keterangan |
-|----------|------------|
-| `GET /health` | Health check (+ status Byparr & CF cookie jar) |
-| `GET /sources` | Daftar source |
-| `GET /:sourceId/latest?page&lang&type&q` | Latest / search |
-| `GET /:sourceId/manga/*` | Detail manga/novel |
-| `GET /:sourceId/chapter/*` | Halaman gambar chapter |
-| `GET /:sourceId/novel-chapter/*` | Konten teks chapter novel |
-| `GET /:sourceId/manga-from-chapter?chapter=...` | Resolve mangaId dari chapter (opsional) |
-
-Header opsional: `x-api-key` jika `SCRAPER_API_KEY` di-set.
-
-### Env scraper (Byparr)
-
-| Variable | Default | Keterangan |
-|----------|---------|------------|
-| `BYPARR_URL` | (kosong) | URL Byparr, contoh `http://localhost:8191`. Kosong = Byparr off |
-| `CF_COOKIE_TTL_MS` | `900000` (15 mnt) | TTL cookie CF di jar per-domain |
-| `PORT` | `3000` | Port lokal / Render |
-| `SCRAPER_API_KEY` | (kosong) | Opsional; wajib match frontend |
-| `VERCEL` | (platform) | Skip `app.listen` di Vercel |
+Keep `SCRAPER_BASE_URL` on the Worker pointed at the live scraper. Register hybrid sources in `frontend/scripts/worker-sources.json` and run `pnpm sync-worker-sources` before deploy.
 
 ---
 
-## Catatan
+## Scripts (root-level mental model)
 
-- **KV** menyimpan hasil browse/detail/pages — setelah ganti hybrid, tunggu TTL atau hapus key lama di dashboard Cloudflare.
-- Bundle `scraper/api/index.js` untuk Vercel; jangan diedit manual; exclude dari `tsconfig` (`"exclude": ["api"]`).
-- Free tier Render/Koyeb bisa sleep — ping `/health` berkala jika scraper dipindah ke sana.
-- Frontend source registry = metadata only; scraping penuh di scraper atau `workerSources`.
-- Source baru ditambahkan di scraper; register juga di frontend light registry (`src/lib/server/sources/index.ts`).
-- Beberapa source berisi konten R18 — gunakan secara bertanggung jawab sesuai hukum setempat.
-- **Byparr** tidak menjamin 100% bypass; success rate naik kalau egress IP “bersih”. Cookie di-cache per domain biar tidak solve ulang tiap request.
+| Area | Common commands |
+|------|-----------------|
+| Frontend | `pnpm dev` · `pnpm build` · `pnpm deploy` · `pnpm sync-worker-sources` · `pnpm check` |
+| Scraper | `npx tsx src/index.ts` · `npm run build` / `vercel-build` |
 
 ---
 
 ## License
 
-Lihat `frontend/LICENSE.txt`.
+See [LICENSE.txt](./LICENSE.txt).
+
+---
+
+## Related docs
+
+- [frontend/README.md](./frontend/README.md) — UI, hybrid sources, KV, Library, deploy  
+- [scraper/README.md](./scraper/README.md) — HTTP API, adapters, Byparr, deploy  
