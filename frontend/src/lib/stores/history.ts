@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '$lib/firebase';
 import { getUser } from '$lib/stores/auth.svelte';
+import { grantReadingXp } from '$lib/stores/lifetimeXp';
 import {
 	idbGetHistory,
 	idbDeleteHistory,
@@ -224,6 +225,17 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 		} catch (e) {
 			console.error('Failed to sync history to cloud', e);
 		}
+	}
+
+	// Lifetime XP (permanent) — only increases
+	try {
+		await grantReadingXp({
+			mangaId: full.mangaId,
+			sourceId: full.sourceId,
+			chapterNumber: full.chapterNumber
+		});
+	} catch (e) {
+		console.error('Failed to grant reading XP', e);
 	}
 }
 

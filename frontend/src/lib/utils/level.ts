@@ -5,6 +5,9 @@
  * - Optional soft progress bonus from chapter number (capped + diminishing)
  * - Level is derived purely from total XP (monotonic as long as counts don't shrink)
  * - Rank thresholds unchanged in spirit
+ *
+ * Lifetime XP patch: totalXp can also come from Firestore lifetime doc
+ * (users/{uid}/stats/lifetime) so deleting history does not lower level.
  */
 
 export type LevelInfo = {
@@ -77,11 +80,7 @@ export function computeLevelInfo(totalXp: number): LevelInfo {
 }
 
 export function sumChapterMarkers(entries: { chapterNumber?: unknown }[]): number {
-	const sum = entries.reduce((s, h) => {
-		const n = Number(h.chapterNumber);
-		return s + (Number.isFinite(n) && n > 0 ? n : 1);
-	}, 0);
-	return Math.round(sum * 1000) / 1000;
+	return entries.reduce((s, h) => s + (Number(h.chapterNumber) || 1), 0);
 }
 
 export function sumChapterProgressXp(entries: { chapterNumber?: unknown }[]): number {

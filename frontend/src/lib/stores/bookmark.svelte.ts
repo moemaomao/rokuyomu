@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '$lib/firebase';
 import { getUser } from '$lib/stores/auth.svelte';
+import { grantBookmarkXp } from '$lib/stores/lifetimeXp';
 import {
 	idbGetBookmarks,
 	idbDeleteBookmark,
@@ -186,6 +187,13 @@ export async function addBookmark(entry: Omit<BookmarkEntry, 'timestamp'>) {
 		} catch (e) {
 			console.error('Failed to sync bookmark to cloud', e);
 		}
+	}
+
+	// Lifetime XP (permanent) — only increases
+	try {
+		await grantBookmarkXp(full.mangaId);
+	} catch (e) {
+		console.error('Failed to grant bookmark XP', e);
 	}
 }
 

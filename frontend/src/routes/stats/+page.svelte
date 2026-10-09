@@ -18,6 +18,12 @@
 		sumChapterProgressXp
 	} from '$lib/utils/level';
 	import {
+		loadLifetimeStats,
+		bootstrapLifetimeFromLocal,
+		getCachedLifetimeStats,
+		type LifetimeStats
+	} from '$lib/stores/lifetimeXp';
+	import {
 		Trophy,
 		Zap,
 		BookOpen,
@@ -38,6 +44,8 @@
 	let history = $state<ReadingEntry[]>([]);
 	let activityLog = $state<ActivityLogEntry[]>([]);
 	let bookmarkCount = $state(0);
+	let lifetime = $state<LifetimeStats | null>(null);
+	let useLifetime = $state(false);
 
 	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
 	let novelHistory = $derived(history.filter((h) => isNovelSource(h.sourceId)));
@@ -127,13 +135,17 @@
 		return { step, linePoints, areaPoints, bars, points };
 	});
 
-	let totalXp = $derived(
+	let localXp = $derived(
 		computeTotalXp({
 			titleCount: totalTitles,
 			bookmarkCount,
 			sourceCount: sourceMap.length,
 			chapterProgressXpSum: sumChapterProgressXp(history)
 		})
+	);
+	
+	let totalXp = $derived(
+		useLifetime && lifetime ? Math.max(lifetime.totalXp, localXp) : localXp
 	);
 	let levelInfo = $derived(computeLevelInfo(totalXp));
 
@@ -206,6 +218,34 @@
 		}
 	}
 
+	async function loadLifetime() {
+		const user = getUser();
+		if (!user) {
+			useLifetime = false;
+			lifetime = null;
+			return;
+		}
+		try {
+			const titleIds = history.map((h) => h.mangaId);
+			const sourceIds = [...new Set(history.map((h) => h.sourceId).filter(Boolean))];
+			const stats = await bootstrapLifetimeFromLocal({
+				titleCount: history.length,
+				bookmarkCount,
+				sourceCount: sourceIds.length,
+				chapterProgressXpSum: sumChapterProgressXp(history),
+				titleIds,
+				sourceIds
+			});
+			lifetime = stats;
+			useLifetime = true;
+		} catch (e) {
+			console.error('lifetime load failed', e);
+			const s = await loadLifetimeStats();
+			lifetime = s;
+			useLifetime = true;
+		}
+	}
+
 	onMount(() => {
 		const updateTheme = () => {
 			isDark = document.documentElement.classList.contains('dark');
@@ -217,19 +257,26 @@
 		(async () => {
 			await whenHistoryReady();
 			await load();
+			await loadLifetime();
 			ready = true;
 		})();
 		const onChange = () => {
 			void load();
 		};
+		const onXp = () => {
+			lifetime = getCachedLifetimeStats();
+			useLifetime = !!getUser();
+		};
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('bookmarks-changed', onChange);
 		window.addEventListener('activity-changed', onChange);
+		window.addEventListener('lifetime-xp-changed', onXp);
 		return () => {
 			obs.disconnect();
 			window.removeEventListener('history-changed', onChange);
 			window.removeEventListener('bookmarks-changed', onChange);
 			window.removeEventListener('activity-changed', onChange);
+			window.removeEventListener('lifetime-xp-changed', onXp);
 		};
 	});
 
