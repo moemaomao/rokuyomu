@@ -16,6 +16,7 @@ const EMPTY: PermanentStatsDoc = {
 	comicTitles: 0,
 	novelTitles: 0,
 	totalProgress: 0,
+	chaptersReadEver: 0,
 	updatedAt: 0
 };
 
@@ -63,6 +64,7 @@ function recompute(doc: PermanentStatsDoc): PermanentStatsDoc {
 		comicTitles: comic,
 		novelTitles: novel,
 		totalProgress: Math.round(progress * 10) / 10,
+		chaptersReadEver: Math.max(0, Number(doc.chaptersReadEver) || 0),
 		sources,
 		updatedAt: Date.now()
 	};
@@ -100,6 +102,7 @@ function readDoc(data: any): PermanentStatsDoc {
 		comicTitles: 0,
 		novelTitles: 0,
 		totalProgress: 0,
+		chaptersReadEver: Math.max(0, Number(raw.chaptersReadEver) || 0),
 		updatedAt: Number(raw.updatedAt) || 0
 	};
 	return recompute(base);
@@ -121,7 +124,6 @@ function lsWrite(uid: string, doc: PermanentStatsDoc) {
 	try {
 		localStorage.setItem(LS_KEY + ':' + uid, JSON.stringify(doc));
 	} catch {
-		/* quota */
 	}
 }
 
@@ -161,6 +163,7 @@ export function hydratePermanentStats(): PermanentStatsDoc {
 export async function loadPermanentStats(): Promise<PermanentStatsDoc> {
 	if (!browser) return { ...EMPTY, titles: {}, sources: {} };
 
+	// IDB first
 	try {
 		const idb = await idbGetPermanentStats();
 		if (idb && Object.keys(idb.titles || {}).length > 0) {
@@ -193,7 +196,6 @@ export async function loadPermanentStats(): Promise<PermanentStatsDoc> {
 				}
 				const merged = recompute({ ...local, titles: mergedTitles });
 				await persistLocal(merged);
-				
 				if (Object.keys(merged.titles).length > Object.keys(remote.titles).length) {
 					await syncToCloud(merged);
 				}
@@ -258,7 +260,9 @@ export async function recordPermanentReading(opts: RecordReadingOpts): Promise<P
 	let docData = cache ?? (await loadPermanentStats());
 	const titles = { ...docData.titles };
 	const prev = titles[mangaKey];
-	const maxChapter = Math.max(prev?.maxChapter || 0, ch);
+	const prevMax = prev?.maxChapter || 0;
+	const maxChapter = Math.max(prevMax, ch);
+	const advanced = maxChapter > prevMax ? Math.ceil(maxChapter - prevMax) : 0;
 	titles[mangaKey] = {
 		maxChapter,
 		isNovel: prev?.isNovel ?? isNovel,
@@ -269,9 +273,57 @@ export async function recordPermanentReading(opts: RecordReadingOpts): Promise<P
 
 	docData = recompute({
 		...docData,
-		titles: clampTitles(titles)
+		titles: clampTitles(titles),
+		chaptersReadEver: (docData.chaptersReadEver || 0) + advanced
 	});
 
+	await persistLocal(docData);
+	void syncToCloud(docData);
+	return docData;
+}
+
+export async function bootstrapPermanentFromHistory(
+	entries: {
+		mangaId: string;
+		sourceId?: string;
+		chapterNumber?: unknown;
+		mangaTitle?: string;
+	}[]
+): Promise<PermanentStatsDoc> {
+	if (!browser || !entries?.length) return getCachedPermanentStats();
+
+	let docData = cache ?? (await loadPermanentStats());
+	const titles = { ...docData.titles };
+	let changed = false;
+
+	for (const e of entries) {
+		const mangaKey = normalizeId(e.mangaId);
+		if (!mangaKey) continue;
+		const ch = parseChapter(e.chapterNumber);
+		const isNovel = isNovelSource(e.sourceId);
+		const sourceId = String(e.sourceId || '').trim() || 'unknown';
+		const prev = titles[mangaKey];
+		const maxChapter = Math.max(prev?.maxChapter || 0, ch);
+		if (!prev || maxChapter > (prev.maxChapter || 0) || !prev.sourceId) {
+			changed = true;
+		}
+		titles[mangaKey] = {
+			maxChapter,
+			isNovel: prev?.isNovel ?? isNovel,
+			sourceId: sourceId || prev?.sourceId || 'unknown',
+			title: (e.mangaTitle || prev?.title || '').slice(0, 120),
+			lastRead: Math.max(prev?.lastRead || 0, Date.now())
+		};
+	}
+
+	if (!changed && Object.keys(docData.titles).length > 0) {
+		return docData;
+	}
+
+	docData = recompute({
+		...docData,
+		titles: clampTitles(titles)
+	});
 	await persistLocal(docData);
 	void syncToCloud(docData);
 	return docData;
@@ -281,16 +333,19 @@ export function permanentStatsView(docData: PermanentStatsDoc) {
 	const comicTitles = docData.comicTitles || 0;
 	const novelTitles = docData.novelTitles || 0;
 	const totalTitles = comicTitles + novelTitles;
-	const totalProgress = docData.totalProgress || 0;
+	const totalProgress = docData.chaptersReadEver || 0;
 
 	let comicProgress = 0;
 	let novelProgress = 0;
+	let comicWeight = 0;
+	let novelWeight = 0;
 	for (const m of Object.values(docData.titles || {})) {
-		if (m.isNovel) novelProgress += m.maxChapter || 0;
-		else comicProgress += m.maxChapter || 0;
+		if (m.isNovel) novelWeight += m.maxChapter || 0;
+		else comicWeight += m.maxChapter || 0;
 	}
-	comicProgress = Math.round(comicProgress * 10) / 10;
-	novelProgress = Math.round(novelProgress * 10) / 10;
+	const w = comicWeight + novelWeight || 1;
+	comicProgress = Math.round((totalProgress * comicWeight) / w);
+	novelProgress = Math.max(0, totalProgress - comicProgress);
 
 	const topSources = Object.entries(docData.sources || {})
 		.map(([id, v]) => ({

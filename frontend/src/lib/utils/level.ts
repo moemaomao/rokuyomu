@@ -1,13 +1,8 @@
 /**
- * Shared level / XP helpers for Rokuyomu stats.
- * New rules:
- * - XP only from stable counts (titles, bookmarks, sources)
- * - Optional soft progress bonus from chapter number (capped + diminishing)
- * - Level is derived purely from total XP (monotonic as long as counts don't shrink)
- * - Rank thresholds unchanged in spirit
- *
- * Lifetime XP patch: totalXp can also come from Firestore lifetime doc
- * (users/{uid}/stats/lifetime) so deleting history does not lower level.
+ * Level / XP helpers for Rokuyomu.
+ * - Level curve: need grows with lv (harder each level)
+ * - Chapter XP: base 5 per advanced chapter, scaled down by level (diminishing)
+ * - Progress markers: prefer counting chapter advances, not raw chapter numbers
  */
 
 export type LevelInfo = {
@@ -22,37 +17,21 @@ export type LevelInfo = {
 
 const CHAPTER_SOFT_CAP = 80;
 
-export function chapterProgressXp(chapterNumber: unknown): number {
-	const n = Number(chapterNumber);
-	if (!Number.isFinite(n) || n <= 0) return 1;
-	const capped = Math.min(n, CHAPTER_SOFT_CAP);
-	return Math.max(1, Math.round(Math.sqrt(capped) * 3.2));
-}
-
-export function computeTotalXp(opts: {
-	titleCount: number;
-	bookmarkCount: number;
-	sourceCount: number;
-	chapterProgressXpSum?: number;
-}): number {
-	const titles = Math.max(0, opts.titleCount | 0);
-	const bookmarks = Math.max(0, opts.bookmarkCount | 0);
-	const sources = Math.max(0, opts.sourceCount | 0);
-	const chapterXp = Math.max(0, opts.chapterProgressXpSum ?? 0);
-	const base = titles * 25 + bookmarks * 20 + sources * 8;
-	return base + chapterXp;
+export function xpNeedForLevel(lv: number): number {
+	if (lv <= 1) return 100;
+	return 50 + lv * 50 + Math.floor(lv * lv * 2);
 }
 
 export function computeLevelInfo(totalXp: number): LevelInfo {
 	const xp = Math.max(0, Math.floor(totalXp));
 	let lv = 1;
-	let need = 100;
+	let need = xpNeedForLevel(1);
 	let remaining = xp;
 
 	while (remaining >= need && lv < 99) {
 		remaining -= need;
 		lv++;
-		need = 50 + lv * 50 + Math.floor(lv * lv * 2);
+		need = xpNeedForLevel(lv);
 	}
 
 	const progress = Math.min(100, Math.round((remaining / need) * 100));
@@ -79,8 +58,45 @@ export function computeLevelInfo(totalXp: number): LevelInfo {
 	return { lv, need, remaining, progress, rank, rankCls, totalXp: xp };
 }
 
+export function xpScaleForLevel(level: number): number {
+	const lv = Math.max(1, Math.floor(level));
+	return 1 / Math.sqrt(lv);
+}
+
+export function chapterProgressXp(chapterNumber: unknown): number {
+	const n = Number(chapterNumber);
+	if (!Number.isFinite(n) || n <= 0) return 1;
+	const capped = Math.min(n, CHAPTER_SOFT_CAP);
+	return Math.max(1, Math.round(Math.sqrt(capped) * 3.2));
+}
+
+export function chapterAdvanceXp(advanced: number, level: number): number {
+	const adv = Math.max(0, Math.floor(advanced));
+	if (adv <= 0) return 0;
+	const raw = adv * 5;
+	const scaled = Math.round(raw * xpScaleForLevel(level));
+	return Math.max(1, scaled);
+}
+
+export function computeTotalXp(opts: {
+	titleCount: number;
+	bookmarkCount: number;
+	sourceCount: number;
+	chapterProgressXpSum?: number;
+}): number {
+	const titles = Math.max(0, opts.titleCount | 0);
+	const bookmarks = Math.max(0, opts.bookmarkCount | 0);
+	const sources = Math.max(0, opts.sourceCount | 0);
+	const chapterXp = Math.max(0, opts.chapterProgressXpSum ?? 0);
+	return titles * 25 + bookmarks * 20 + sources * 8 + chapterXp;
+}
+
 export function sumChapterMarkers(entries: { chapterNumber?: unknown }[]): number {
-	return entries.reduce((s, h) => s + (Number(h.chapterNumber) || 1), 0);
+	const sum = entries.reduce((s, h) => {
+		const n = Number(h.chapterNumber);
+		return s + (Number.isFinite(n) && n > 0 ? n : 1);
+	}, 0);
+	return Math.round(sum * 10) / 10;
 }
 
 export function sumChapterProgressXp(entries: { chapterNumber?: unknown }[]): number {

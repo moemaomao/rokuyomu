@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '$lib/firebase';
 import { getUser } from '$lib/stores/auth.svelte';
-import { computeTotalXp } from '$lib/utils/level';
+import { computeTotalXp, chapterAdvanceXp, computeLevelInfo } from '$lib/utils/level';
 
 export type LifetimeStats = {
 	totalXp: number;
@@ -114,7 +114,6 @@ function lsWrite(uid: string, stats: LifetimeStats) {
 	try {
 		localStorage.setItem(LS_KEY + ':' + uid, JSON.stringify(stats));
 	} catch {
-		// quota
 	}
 }
 
@@ -126,7 +125,6 @@ function setCache(stats: LifetimeStats, uid?: string) {
 	}
 }
 
-/** Instant: localStorage → memory (no network). Call as early as possible. */
 export function hydrateLifetimeFromLocalStorage(): LifetimeStats | null {
 	if (!browser) return null;
 	const user = getUser();
@@ -147,7 +145,6 @@ export async function loadLifetimeStats(): Promise<LifetimeStats> {
 		return cache;
 	}
 
-	// Instant hydrate from LS while waiting for network
 	if (!cache) {
 		const fromLs = lsRead(user.uid);
 		if (fromLs) cache = fromLs;
@@ -160,12 +157,10 @@ export async function loadLifetimeStats(): Promise<LifetimeStats> {
 			const snap = await getDoc(statsRef(user.uid, db!));
 			if (snap.exists()) {
 				const remote = readStats(snap.data());
-				// Never take a lower XP than what we already have locally
 				const localXp = cache?.totalXp ?? 0;
 				if (remote.totalXp >= localXp) {
 					setCache(remote, user.uid);
 				} else {
-					// Keep higher local, still merge maps
 					const merged = {
 						...remote,
 						totalXp: localXp,
@@ -195,7 +190,6 @@ export function getCachedLifetimeStats(): LifetimeStats {
 	return cache ?? { ...EMPTY, maxChapterByTitle: {} };
 }
 
-/** Effective XP for UI: max(lifetime, local derived) */
 export function effectiveXp(localXp: number): number {
 	const life = cache?.totalXp ?? 0;
 	return Math.max(life, localXp);
@@ -322,7 +316,8 @@ export async function grantReadingXp(opts: GrantReadingOpts): Promise<number> {
 				const prevMax = maxMap[mangaKey] || 0;
 				if (newChapter > prevMax) {
 					const advanced = newChapter - prevMax;
-					const chapterGain = advanced * XP_PER_CHAPTER;
+					const levelNow = computeLevelInfo(cur.totalXp).lv;
+					const chapterGain = chapterAdvanceXp(advanced, levelNow);
 					delta += chapterGain;
 					cur.chapterXpEver += chapterGain;
 					maxMap[mangaKey] = newChapter;
@@ -386,4 +381,10 @@ export async function grantBookmarkXp(mangaId: string): Promise<number> {
 	}
 
 	return granted;
+}
+
+export function getInstantLifetimeXp(): number {
+	if (cache && cache.totalXp > 0) return cache.totalXp;
+	const hydrated = hydrateLifetimeFromLocalStorage();
+	return hydrated?.totalXp ?? cache?.totalXp ?? 0;
 }

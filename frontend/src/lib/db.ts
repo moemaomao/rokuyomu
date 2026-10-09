@@ -59,6 +59,7 @@ export interface PermanentStatsDoc {
 	comicTitles: number;
 	novelTitles: number;
 	totalProgress: number;
+	chaptersReadEver: number;
 	updatedAt: number;
 }
 
@@ -286,6 +287,7 @@ export async function idbSetAllNotifications(list: NotificationEntry[]) {
 }
 
 
+// ===== Permanent stats (survives history clear) =====
 const PERM_KEY = 'main';
 
 export async function idbGetPermanentStats(): Promise<PermanentStatsDoc | null> {

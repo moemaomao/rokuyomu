@@ -18,6 +18,7 @@
 		loadLifetimeStats,
 		hydrateLifetimeFromLocalStorage,
 		getCachedLifetimeStats,
+		getInstantLifetimeXp,
 		effectiveXp
 	} from '$lib/stores/lifetimeXp';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
@@ -80,11 +81,11 @@
 		});
 	}
 
-	function paintFromCache() {
+	function paintInstant() {
 		const localXp = calcLocalXp();
 		if (getUser()) {
-			hydrateLifetimeFromLocalStorage();
-			applyLevel(effectiveXp(localXp));
+			const instant = getInstantLifetimeXp();
+			applyLevel(Math.max(instant, localXp));
 		} else {
 			applyLevel(localXp);
 		}
@@ -93,11 +94,10 @@
 	async function calcStats() {
 		const localXp = calcLocalXp();
 		if (getUser()) {
-			hydrateLifetimeFromLocalStorage();
-			applyLevel(effectiveXp(localXp));
+			paintInstant();
 			try {
 				await loadLifetimeStats();
-				applyLevel(effectiveXp(localXp));
+				applyLevel(Math.max(getInstantLifetimeXp(), localXp));
 			} catch (e) {
 				console.error('[AuthPanel] lifetime load failed', e);
 			}
@@ -107,7 +107,7 @@
 	}
 
 	onMount(() => {
-		paintFromCache();
+		paintInstant();
 		void calcStats();
 		const refresh = () => void calcStats();
 		window.addEventListener('history-changed', refresh);
@@ -138,6 +138,7 @@
 		onSuccess();
 	}
 </script>
+
 
 <div
 	class="w-[min(20rem,calc(100vw-1.25rem))] overflow-hidden rounded-2xl border shadow-2xl
