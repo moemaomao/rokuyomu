@@ -11,9 +11,12 @@
 	import {
 		computeTotalXp,
 		computeLevelInfo,
-		sumChapterProgressXp,
-		sumChapterMarkers
+		sumChapterProgressXp
 	} from '$lib/utils/level';
+	import {
+		loadLifetimeStats,
+		getCachedLifetimeStats
+	} from '$lib/stores/lifetimeXp';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
 		LogOut,
@@ -48,24 +51,8 @@
 	let rankTitle = $state('Rookie Reader');
 	let rankColor = $state('from-zinc-500 to-zinc-400');
 
-	function calcStats() {
-		const hist = getHistory();
-		const bms = getBookmarks();
-		historyCount = hist.length;
-		bookmarkCount = bms.length;
-
-		chaptersRead = sumChapterMarkers(hist);
-		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
-		uniqueSources = sources.size;
-
-		const totalXp = computeTotalXp({
-			titleCount: historyCount,
-			bookmarkCount,
-			sourceCount: uniqueSources,
-			chapterProgressXpSum: sumChapterProgressXp(hist)
-		});
+	function applyLevelFromXp(totalXp: number) {
 		const info = computeLevelInfo(totalXp);
-
 		xp = info.totalXp;
 		level = info.lv;
 		xpToNext = info.need;
@@ -74,14 +61,50 @@
 		rankColor = info.rankCls;
 	}
 
+	function calcLocalXp(): number {
+		const hist = getHistory();
+		const bms = getBookmarks();
+		historyCount = hist.length;
+		bookmarkCount = bms.length;
+		chaptersRead = hist.reduce((sum, h) => sum + (Number(h.chapterNumber) || 1), 0);
+		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
+		uniqueSources = sources.size;
+		return computeTotalXp({
+			titleCount: historyCount,
+			bookmarkCount,
+			sourceCount: uniqueSources,
+			chapterProgressXpSum: sumChapterProgressXp(hist)
+		});
+	}
+
+	async function calcStats() {
+		const localXp = calcLocalXp();
+		const user = getUser();
+
+		if (user) {
+			try {
+				const life = await loadLifetimeStats();
+				const totalXp = Math.max(life.totalXp, localXp);
+				applyLevelFromXp(totalXp);
+				return;
+			} catch (e) {
+				console.error('[AuthPanel] lifetime load failed', e);
+			}
+		}
+
+		applyLevelFromXp(localXp);
+	}
+
 	onMount(() => {
-		calcStats();
-		const refresh = () => calcStats();
+		void calcStats();
+		const refresh = () => void calcStats();
 		window.addEventListener('history-changed', refresh);
 		window.addEventListener('bookmarks-changed', refresh);
+		window.addEventListener('lifetime-xp-changed', refresh);
 		return () => {
 			window.removeEventListener('history-changed', refresh);
 			window.removeEventListener('bookmarks-changed', refresh);
+			window.removeEventListener('lifetime-xp-changed', refresh);
 		};
 	});
 
