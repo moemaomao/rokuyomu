@@ -10,6 +10,7 @@
 		ensureLibraryLoaded,
 		isLibraryReady,
 		getOfflineChapterIds,
+		upsertLibraryEntry,
 		type LibraryEntry
 	} from '$lib/stores/library.svelte';
 	import { downloadChapter } from '$lib/utils/downloadChapter';
@@ -58,9 +59,9 @@
 	async function load() {
 		diskOk = librarySupportsDisk();
 		if (!isLibraryReady()) {
-			items = await ensureLibraryLoaded();
+			items = sortedItems(await ensureLibraryLoaded());
 		} else {
-			items = getLibrary();
+			items = sortedItems(getLibrary());
 		}
 		void loadCovers(items);
 	}
@@ -99,6 +100,139 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	async function syncTitleMeta(e: LibraryEntry): Promise<{
+		latest: string;
+		total: number;
+		newCount: number;
+		lang: string;
+	}> {
+		const chapters = await fetchAllChapters(e.sourceId, e.mangaId);
+		const offline = getOfflineChapterIds(e.sourceId, e.mangaId);
+		let latest = e.latestChapter || '';
+		let maxN = -1;
+		let lang = e.lang || defaultLangForSource(e.sourceId, e.isNovel);
+		let newCount = 0;
+		for (const c of chapters) {
+			const m = String(c.title || c.number || '').match(/(\d+(?:\.\d+)?)/);
+			const n = m ? parseFloat(m[1]) : Number(c.number) || -1;
+			if (n >= maxN) {
+				maxN = n;
+				latest = m ? m[1] : String(c.number ?? c.title ?? '');
+			}
+			if (c.lang) lang = String(c.lang);
+			const id = c.id;
+			const alt = id.startsWith('/') ? id.slice(1) : `/${id}`;
+			if (!offline.has(id) && !offline.has(alt)) newCount++;
+		}
+		await upsertLibraryEntry({
+			mangaId: e.mangaId,
+			mangaTitle: e.mangaTitle,
+			cover: e.cover || '',
+			sourceId: e.sourceId,
+			isNovel: e.isNovel,
+			latestChapter: latest || undefined,
+			lang: lang || undefined
+		});
+	
+		if (e.cover) {
+			try {
+				const { cacheLibraryCover } = await import('$lib/utils/cacheCover');
+				void cacheLibraryCover({
+					mangaId: e.mangaId,
+					sourceId: e.sourceId,
+					coverUrl: e.cover,
+					title: e.mangaTitle,
+					isNovel: e.isNovel
+				});
+			} catch {
+			}
+		}
+		return { latest, total: chapters.length, newCount, lang };
+	}
+
+	async function handleSyncOne(e: LibraryEntry) {
+		if (busy || batch.active) return;
+		busy = true;
+		msg = '';
+		try {
+			const r = await syncTitleMeta(e);
+			await load();
+			msg =
+				r.newCount > 0
+					? `"${e.mangaTitle}": latest Ch. ${r.latest} · ${r.newCount} chapter(s) not offline yet.`
+					: `"${e.mangaTitle}": up to date (Ch. ${r.latest}, ${r.total} total).`;
+		} catch (err: any) {
+			msg = err?.message || 'Sync failed';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function handleSyncUpdates() {
+		if (busy || batch.active) return;
+		const list = items.slice();
+		if (!list.length) {
+			msg = 'Library is empty — nothing to sync.';
+			return;
+		}
+		busy = true;
+		msg = '';
+		batch = {
+			active: true,
+			title: 'Sync updates',
+			current: 0,
+			total: list.length,
+			chapterLabel: 'Checking titles…',
+			phase: 'sync',
+			errors: 0,
+			cancelled: false
+		};
+		let updated = 0;
+		let withNew = 0;
+		let errors = 0;
+		try {
+			for (let i = 0; i < list.length; i++) {
+				if (batch.cancelled) break;
+				const e = list[i];
+				batch = {
+					...batch,
+					current: i,
+					chapterLabel: `${i + 1} / ${list.length} — ${e.mangaTitle}`,
+					phase: 'sync'
+				};
+				try {
+					const r = await syncTitleMeta(e);
+					updated++;
+					if (r.newCount > 0) withNew++;
+				} catch (err) {
+					console.warn('[sync updates]', e.key, err);
+					errors++;
+					batch = { ...batch, errors };
+				}
+			}
+			await load();
+			msg = batch.cancelled
+				? 'Sync updates cancelled.'
+				: `Checked ${updated} title(s)${withNew ? ` · ${withNew} have chapters not offline` : ' · all up to date'}${errors ? ` · ${errors} error(s)` : ''}.`;
+		} finally {
+			busy = false;
+			batch = {
+				active: false,
+				title: '',
+				current: 0,
+				total: 0,
+				chapterLabel: '',
+				phase: '',
+				errors: 0,
+				cancelled: false
+			};
+		}
+	}
+
+	function sortedItems(list: LibraryEntry[]): LibraryEntry[] {
+		return [...list].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 	}
 
 	async function handlePickFolder() {
@@ -505,11 +639,22 @@
 			{/if}
 			<button
 				type="button"
+				onclick={handleSyncUpdates}
+				disabled={busy || batch.active || !items.length}
+				class="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-sm text-sky-700 transition hover:bg-sky-500/20 disabled:opacity-50 dark:border-sky-600/50 dark:bg-sky-600/15 dark:text-sky-200 dark:hover:bg-sky-600/30"
+				title="Check all titles for newer chapters and sort by latest update"
+			>
+				<RefreshCw class="h-4 w-4 {busy && batch.phase === 'sync' ? 'animate-spin' : ''}" />
+				Sync Updates
+			</button>
+			<button
+				type="button"
 				onclick={handleSync}
 				disabled={busy || batch.active}
 				class="flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-sm text-violet-700 transition hover:bg-violet-500/20 disabled:opacity-50 dark:border-violet-600/50 dark:bg-violet-600/15 dark:text-violet-200 dark:hover:bg-violet-600/30"
+				title="Import bookmark titles into library (metadata only)"
 			>
-				<RefreshCw class="h-4 w-4 {busy ? 'animate-spin' : ''}" />
+				<RefreshCw class="h-4 w-4 {busy && !batch.active ? 'animate-spin' : ''}" />
 				Sync Bookmarks
 			</button>
 			{#if items.length}
@@ -590,8 +735,9 @@
 				</li>
 				<li>Manga chapters save as image folders; novels convert each chapter to PDF.</li>
 				<li>
-					<strong>Download</strong> on a card batch-downloads remaining chapters (warning before
-					start).
+					<strong>Download</strong> batch-downloads remaining chapters;
+					<strong>Sync</strong> (per card or Sync Updates) refreshes latest chapter and sorts by
+					newest update.
 				</li>
 				<li>Firefox/Safari: metadata only; downloads fall back to ZIP / single file.</li>
 			</ul>
@@ -686,7 +832,7 @@
 							<button
 								type="button"
 								onclick={() => openBatchWarn(e)}
-								disabled={batch.active}
+								disabled={batch.active || busy}
 								class="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 transition hover:bg-emerald-500 hover:text-white disabled:opacity-50 dark:text-emerald-400"
 								title="Download all remaining chapters"
 								aria-label="Download all"
@@ -695,8 +841,18 @@
 							</button>
 							<button
 								type="button"
+								onclick={() => handleSyncOne(e)}
+								disabled={batch.active || busy}
+								class="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 transition hover:bg-sky-500 hover:text-white disabled:opacity-50 dark:text-sky-400"
+								title="Check for new chapters (this title only)"
+								aria-label="Sync updates"
+							>
+								<RefreshCw class="h-4 w-4" />
+							</button>
+							<button
+								type="button"
 								onclick={() => handleRemove(e)}
-								disabled={batch.active}
+								disabled={batch.active || busy}
 								class="flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/40 bg-red-50 text-red-600 transition hover:bg-red-500 hover:text-white disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
 								title="Remove from library"
 								aria-label="Remove"
