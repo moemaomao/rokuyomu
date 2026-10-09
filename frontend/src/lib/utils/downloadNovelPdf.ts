@@ -5,6 +5,7 @@ import {
 	sanitizePathSegment
 } from '$lib/utils/localFs';
 import { upsertLibraryEntry } from '$lib/stores/library.svelte';
+import { cacheLibraryCover } from '$lib/utils/cacheCover';
 
 export type NovelDownloadProgress = {
 	phase: 'fetch' | 'pdf' | 'disk' | 'done' | 'error';
@@ -79,7 +80,7 @@ function buildSimplePdf(title: string, body: string): Blob {
 	};
 
 	addObj('<< /Type /Catalog /Pages 2 0 R >>');
-	addObj('');
+	addObj(''); 
 
 	const pageObjIds: number[] = [];
 	const contentObjIds: number[] = [];
@@ -141,7 +142,6 @@ function buildSimplePdf(title: string, body: string): Blob {
 	return new Blob([pdf], { type: 'application/pdf' });
 }
 
-
 function htmlToPlainText(raw: string): string {
 	let s = String(raw || '');
 	s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
@@ -165,7 +165,6 @@ function htmlToPlainText(raw: string): string {
 		.replace(/&apos;/gi, "'")
 		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
 		.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
-	// collapse whitespace
 	s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 	return s;
 }
@@ -251,6 +250,13 @@ export async function downloadNovelChapterPdf(opts: {
 	}
 
 	try {
+		void cacheLibraryCover({
+			mangaId: mangaId || chapterId,
+			sourceId: source,
+			coverUrl: cover || '',
+			title: novelTitle || title,
+			isNovel: true
+		});
 		await upsertLibraryEntry({
 			mangaId: mangaId || chapterId,
 			mangaTitle: novelTitle || title,

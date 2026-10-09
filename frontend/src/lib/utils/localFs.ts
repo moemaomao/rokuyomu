@@ -201,3 +201,45 @@ export async function saveNovelPdfToDisk(opts: {
 	await writeBlobFile(titleDir, fname, opts.pdfBlob);
 	return `${LIBRARY_FOLDER_NAME}/Novel/${sanitizePathSegment(opts.novelTitle)}/${fname}`;
 }
+
+export async function saveCoverToDisk(opts: {
+	root: FileSystemDirectoryHandle;
+	kind: 'Manga' | 'Novel';
+	title: string;
+	coverBlob: Blob;
+	ext?: string;
+}): Promise<string> {
+	const kindRoot = await getOrCreateDir(opts.root, opts.kind);
+	const titleDir = await getOrCreateDir(kindRoot, sanitizePathSegment(opts.title));
+	let ext = opts.ext || 'jpg';
+	const ct = (opts.coverBlob.type || '').toLowerCase();
+	if (ct.includes('png')) ext = 'png';
+	else if (ct.includes('webp')) ext = 'webp';
+	else if (ct.includes('gif')) ext = 'gif';
+	else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
+	const name = `cover.${ext}`;
+	await writeBlobFile(titleDir, name, opts.coverBlob);
+	return `${LIBRARY_FOLDER_NAME}/${opts.kind}/${sanitizePathSegment(opts.title)}/${name}`;
+}
+
+export async function readCoverFromDisk(opts: {
+	root: FileSystemDirectoryHandle;
+	kind: 'Manga' | 'Novel';
+	title: string;
+}): Promise<Blob | null> {
+	try {
+		const kindRoot = await opts.root.getDirectoryHandle(opts.kind);
+		const titleDir = await kindRoot.getDirectoryHandle(sanitizePathSegment(opts.title));
+		for (const name of ['cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp', 'cover.gif']) {
+			try {
+				const fh = await titleDir.getFileHandle(name);
+				return await fh.getFile();
+			} catch {
+				/* try next */
+			}
+		}
+	} catch {
+		/* missing */
+	}
+	return null;
+}

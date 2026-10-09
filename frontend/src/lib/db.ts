@@ -71,7 +71,7 @@ export interface LibraryChapterRef {
 }
 
 export interface LibraryEntry {
-	key: string; // sourceId::mangaId
+	key: string;
 	mangaId: string;
 	mangaTitle: string;
 	cover: string;
@@ -79,9 +79,7 @@ export interface LibraryEntry {
 	isNovel: boolean;
 	localPath: string;
 	chapters: LibraryChapterRef[];
-	/** Latest known chapter number/label for the series (homepage-style badge) */
 	latestChapter?: string;
-	/** Primary chapter language (for flag badge, e.g. en, ja, id) */
 	lang?: string;
 	timestamp: number;
 }
@@ -116,10 +114,14 @@ interface MikorokuDB extends DBSchema {
 		value: LibraryEntry;
 		indexes: { 'by-timestamp': number };
 	};
+	libraryCovers: {
+		key: string;
+		value: { key: string; blob: Blob; mime: string; updatedAt: number };
+	};
 }
 
 const DB_NAME = 'mikoroku-db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export const ACTIVITY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -154,6 +156,9 @@ export function getDB() {
 				if (!db.objectStoreNames.contains('library')) {
 					const store = db.createObjectStore('library', { keyPath: 'key' });
 					store.createIndex('by-timestamp', 'timestamp');
+				}
+				if (!db.objectStoreNames.contains('libraryCovers')) {
+					db.createObjectStore('libraryCovers', { keyPath: 'key' });
 				}
 			}
 		});
@@ -230,7 +235,6 @@ export async function idbAddActivity(entry: Omit<ActivityLogEntry, 'id'>): Promi
 		sourceId: entry.sourceId || '',
 		timestamp: ts
 	});
-	// Trim old entries outside retention window
 	const cutoff = Date.now() - ACTIVITY_RETENTION_MS;
 	const tx = db.transaction('activityLog', 'readwrite');
 	const idx = tx.store.index('by-timestamp');
@@ -350,7 +354,6 @@ export async function idbGetLibrary(): Promise<LibraryEntry[]> {
 
 export async function idbPutLibraryEntry(entry: LibraryEntry) {
 	const db = await getDB();
-	// Plain clone — Svelte proxies / non-cloneable fields cause DataCloneError
 	const plain: LibraryEntry = {
 		key: String(entry.key),
 		mangaId: String(entry.mangaId ?? ''),
@@ -413,4 +416,26 @@ export async function idbSetAllLibrary(list: LibraryEntry[]) {
 		)
 	);
 	await tx.done;
+}
+
+
+export async function idbPutLibraryCover(key: string, blob: Blob) {
+	const db = await getDB();
+	await db.put('libraryCovers', {
+		key: String(key),
+		blob,
+		mime: blob.type || 'image/jpeg',
+		updatedAt: Date.now()
+	});
+}
+
+export async function idbGetLibraryCover(key: string): Promise<Blob | null> {
+	const db = await getDB();
+	const row = await db.get('libraryCovers', String(key));
+	return row?.blob || null;
+}
+
+export async function idbDeleteLibraryCover(key: string) {
+	const db = await getDB();
+	await db.delete('libraryCovers', String(key));
 }

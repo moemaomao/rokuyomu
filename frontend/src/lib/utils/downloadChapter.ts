@@ -5,6 +5,7 @@ import {
 	sanitizePathSegment
 } from '$lib/utils/localFs';
 import { upsertLibraryEntry } from '$lib/stores/library.svelte';
+import { cacheLibraryCover } from '$lib/utils/cacheCover';
 
 export type DownloadProgress = {
 	phase: 'pages' | 'images' | 'zip' | 'disk' | 'fetch' | 'pdf' | 'done' | 'error';
@@ -146,7 +147,6 @@ export async function downloadChapter(opts: {
 	const titleSafe = sanitizePathSegment(mangaTitle || 'Manga');
 	const chapterSafe = sanitizePathSegment(chapterTitle || 'Chapter');
 
-	// ── Prefer local disk folders ──────────────────────────────────────────
 	if (!forceZip && supportsFileSystemAccess()) {
 		const root = await ensureLibraryRoot();
 		if (root) {
@@ -189,6 +189,13 @@ export async function downloadChapter(opts: {
 			});
 
 			try {
+				void cacheLibraryCover({
+				mangaId: mangaId || chapterId,
+				sourceId: source,
+				coverUrl: cover || '',
+				title: mangaTitle || titleSafe,
+				isNovel: false
+			});
 				await upsertLibraryEntry({
 					mangaId: mangaId || chapterId,
 					mangaTitle: mangaTitle || titleSafe,
@@ -214,7 +221,6 @@ export async function downloadChapter(opts: {
 		}
 	}
 
-	// ── ZIP fallback ───────────────────────────────────────────────────────
 	const JSZip = await tryLoadJSZip();
 	if (JSZip) {
 		const zip = new JSZip();
@@ -243,7 +249,14 @@ export async function downloadChapter(opts: {
 		});
 		triggerDownload(out, `${baseName}.zip`);
 		try {
-			await upsertLibraryEntry({
+			void cacheLibraryCover({
+				mangaId: mangaId || chapterId,
+				sourceId: source,
+				coverUrl: cover || '',
+				title: mangaTitle || titleSafe,
+				isNovel: false
+			});
+				await upsertLibraryEntry({
 				mangaId: mangaId || chapterId,
 				mangaTitle: mangaTitle || titleSafe,
 				cover: cover || '',
@@ -265,7 +278,6 @@ export async function downloadChapter(opts: {
 		return;
 	}
 
-	// ── Sequential single-file fallback ────────────────────────────────────
 	for (let i = 0; i < urls.length; i++) {
 		report({
 			phase: 'images',
@@ -282,7 +294,14 @@ export async function downloadChapter(opts: {
 		}
 	}
 	try {
-		await upsertLibraryEntry({
+		void cacheLibraryCover({
+				mangaId: mangaId || chapterId,
+				sourceId: source,
+				coverUrl: cover || '',
+				title: mangaTitle || titleSafe,
+				isNovel: false
+			});
+				await upsertLibraryEntry({
 			mangaId: mangaId || chapterId,
 			mangaTitle: mangaTitle || titleSafe,
 			cover: cover || '',

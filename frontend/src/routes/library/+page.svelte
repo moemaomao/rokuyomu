@@ -24,11 +24,13 @@
 		Download
 	} from 'lucide-svelte';
 	import { proxyImage } from '$lib/utils/image';
+	import { getOfflineCoverObjectUrl } from '$lib/utils/cacheCover';
 
 	let items = $state<LibraryEntry[]>([]);
 	let busy = $state(false);
 	let msg = $state('');
 	let diskOk = $state(false);
+	let coverUrls = $state<Record<string, string>>({});
 
 	let batch = $state<{
 		active: boolean;
@@ -50,7 +52,6 @@
 		cancelled: false
 	});
 
-	/** Custom warning modal (not native confirm) */
 	let warnOpen = $state(false);
 	let warnTarget = $state<LibraryEntry | null>(null);
 
@@ -61,6 +62,26 @@
 		} else {
 			items = getLibrary();
 		}
+		void loadCovers(items);
+	}
+
+	async function loadCovers(list: LibraryEntry[]) {
+		const next: Record<string, string> = { ...coverUrls };
+		for (const e of list) {
+			if (next[e.key]) continue;
+			try {
+				const url = await getOfflineCoverObjectUrl(e.mangaId, e.sourceId);
+				if (url) next[e.key] = url;
+			} catch {
+			}
+		}
+		coverUrls = next;
+	}
+
+	function coverSrc(e: LibraryEntry): string {
+		if (coverUrls[e.key]) return coverUrls[e.key];
+		if (e.cover) return proxyImage(e.cover, e.sourceId, 200);
+		return '';
 	}
 
 	async function handleSync() {
@@ -141,7 +162,6 @@
 		return map[l] || '';
 	}
 
-	/** When API does not send lang, pick a sensible default per source (homepage flags need this). */
 	function defaultLangForSource(sourceId: string, isNovel?: boolean): string {
 		const s = String(sourceId || '').toLowerCase();
 		const idLang = new Set([
@@ -158,7 +178,6 @@
 		if (koLang.has(s)) return 'ko';
 		const zhLang = new Set(['manhuaplus', 'mangadex']);
 		if (zhLang.has(s)) return 'zh';
-		// Most novel aggregators on this site are English
 		if (isNovel) return 'en';
 		return 'en';
 	}
@@ -167,7 +186,6 @@
 		return (e.lang && String(e.lang).trim()) || defaultLangForSource(e.sourceId, e.isNovel);
 	}
 
-	/** Homepage-style latest chapter label */
 	function latestChapterLabel(e: LibraryEntry): string {
 		if (e.latestChapter) return String(e.latestChapter);
 		let max = 0;
@@ -271,7 +289,6 @@
 
 		try {
 			const chapters = await fetchAllChapters(e.sourceId, e.mangaId);
-			// Remember series latest (highest number / last in oldest-sorted list)
 			try {
 				let latest = '';
 				let maxN = -1;
@@ -602,9 +619,9 @@
 						href={href(e)}
 						class="relative aspect-[3/4] w-full overflow-hidden bg-zinc-100 dark:bg-zinc-800"
 					>
-						{#if e.cover}
+						{#if coverSrc(e)}
 							<img
-								src={proxyImage(e.cover, e.sourceId, 200)}
+								src={coverSrc(e)}
 								data-original={e.cover}
 								data-source={e.sourceId}
 								alt={e.mangaTitle}
