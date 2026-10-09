@@ -11,11 +11,14 @@
 	import {
 		computeTotalXp,
 		computeLevelInfo,
-		sumChapterProgressXp
+		sumChapterProgressXp,
+		sumChapterMarkers
 	} from '$lib/utils/level';
 	import {
 		loadLifetimeStats,
-		getCachedLifetimeStats
+		hydrateLifetimeFromLocalStorage,
+		getCachedLifetimeStats,
+		effectiveXp
 	} from '$lib/stores/lifetimeXp';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
@@ -51,7 +54,7 @@
 	let rankTitle = $state('Rookie Reader');
 	let rankColor = $state('from-zinc-500 to-zinc-400');
 
-	function applyLevelFromXp(totalXp: number) {
+	function applyLevel(totalXp: number) {
 		const info = computeLevelInfo(totalXp);
 		xp = info.totalXp;
 		level = info.lv;
@@ -66,7 +69,7 @@
 		const bms = getBookmarks();
 		historyCount = hist.length;
 		bookmarkCount = bms.length;
-		chaptersRead = hist.reduce((sum, h) => sum + (Number(h.chapterNumber) || 1), 0);
+		chaptersRead = sumChapterMarkers(hist);
 		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
 		uniqueSources = sources.size;
 		return computeTotalXp({
@@ -77,25 +80,34 @@
 		});
 	}
 
+	function paintFromCache() {
+		const localXp = calcLocalXp();
+		if (getUser()) {
+			hydrateLifetimeFromLocalStorage();
+			applyLevel(effectiveXp(localXp));
+		} else {
+			applyLevel(localXp);
+		}
+	}
+
 	async function calcStats() {
 		const localXp = calcLocalXp();
-		const user = getUser();
-
-		if (user) {
+		if (getUser()) {
+			hydrateLifetimeFromLocalStorage();
+			applyLevel(effectiveXp(localXp));
 			try {
-				const life = await loadLifetimeStats();
-				const totalXp = Math.max(life.totalXp, localXp);
-				applyLevelFromXp(totalXp);
-				return;
+				await loadLifetimeStats();
+				applyLevel(effectiveXp(localXp));
 			} catch (e) {
 				console.error('[AuthPanel] lifetime load failed', e);
 			}
+		} else {
+			applyLevel(localXp);
 		}
-
-		applyLevelFromXp(localXp);
 	}
 
 	onMount(() => {
+		paintFromCache();
 		void calcStats();
 		const refresh = () => void calcStats();
 		window.addEventListener('history-changed', refresh);

@@ -1,14 +1,3 @@
-/**
- * Lifetime XP store — permanent, monotonic XP in Firestore.
- * Path: users/{uid}/stats/lifetime
- *
- * XP sources:
- * - New title (mangaId first time)  → +25
- * - New source                      → +8
- * - New bookmark                    → +20
- * - Chapter progress (same series)  → +XP per chapter advanced past max seen
- *   (cannot re-farm old chapters; only highest chapter per title counts)
- */
 import { browser } from '$app/environment';
 import {
 	doc,
@@ -26,14 +15,8 @@ export type LifetimeStats = {
 	bookmarksEver: number;
 	sourcesEver: number;
 	chapterXpEver: number;
-	/** mangaId keys already counted toward titlesEver (+ bm: keys for bookmarks) */
 	seenTitles: string[];
-	/** sourceId keys already counted toward sourcesEver */
 	seenSources: string[];
-	/**
-	 * Highest chapter number already granted per mangaId.
-	 * Key = normalized mangaId, value = max chapter number.
-	 */
 	maxChapterByTitle: Record<string, number>;
 	updatedAt: number;
 };
@@ -50,30 +33,13 @@ const EMPTY: LifetimeStats = {
 	updatedAt: 0
 };
 
-/** Cap arrays so the doc stays small */
 const MAX_SEEN = 500;
-/** Max keys kept in maxChapterByTitle map */
 const MAX_CHAPTER_MAP = 400;
+const LS_KEY = 'rokuyomu_lifetime_xp_v1';
 
-/**
- * XP granted per chapter number advanced on the same title.
- * Example: was at ch.5, now read ch.12 → (12-5)*5 = 35 XP
- */
 export const XP_PER_CHAPTER = 5;
-
-/**
- * Bonus on first time a title is seen (in addition to chapter XP).
- */
 export const XP_NEW_TITLE = 25;
-
-/**
- * Bonus on first time a source is used.
- */
 export const XP_NEW_SOURCE = 8;
-
-/**
- * Bonus on first bookmark of a title.
- */
 export const XP_NEW_BOOKMARK = 20;
 
 let cache: LifetimeStats | null = null;
@@ -105,15 +71,14 @@ function parseChapter(n: unknown): number {
 function clampChapterMap(map: Record<string, number>): Record<string, number> {
 	const keys = Object.keys(map);
 	if (keys.length <= MAX_CHAPTER_MAP) return map;
-	// Keep most recent keys by insertion order (object key order)
 	const keep = keys.slice(-MAX_CHAPTER_MAP);
 	const out: Record<string, number> = {};
 	for (const k of keep) out[k] = map[k];
 	return out;
 }
 
-function readStats(data: Partial<LifetimeStats> | Record<string, unknown> | undefined): LifetimeStats {
-	const d = (data || {}) as any;
+function readStats(data: any): LifetimeStats {
+	const d = data || {};
 	const rawMap = d.maxChapterByTitle && typeof d.maxChapterByTitle === 'object' ? d.maxChapterByTitle : {};
 	const maxChapterByTitle: Record<string, number> = {};
 	for (const [k, v] of Object.entries(rawMap)) {
@@ -133,9 +98,47 @@ function readStats(data: Partial<LifetimeStats> | Record<string, unknown> | unde
 	};
 }
 
-/**
- * Load lifetime stats for current user (or return empty if guest).
- */
+function lsRead(uid: string): LifetimeStats | null {
+	if (!browser) return null;
+	try {
+		const raw = localStorage.getItem(LS_KEY + ':' + uid);
+		if (!raw) return null;
+		return readStats(JSON.parse(raw));
+	} catch {
+		return null;
+	}
+}
+
+function lsWrite(uid: string, stats: LifetimeStats) {
+	if (!browser) return;
+	try {
+		localStorage.setItem(LS_KEY + ':' + uid, JSON.stringify(stats));
+	} catch {
+		// quota
+	}
+}
+
+function setCache(stats: LifetimeStats, uid?: string) {
+	cache = stats;
+	if (uid) lsWrite(uid, stats);
+	if (browser) {
+		window.dispatchEvent(new CustomEvent('lifetime-xp-changed', { detail: { totalXp: stats.totalXp } }));
+	}
+}
+
+/** Instant: localStorage → memory (no network). Call as early as possible. */
+export function hydrateLifetimeFromLocalStorage(): LifetimeStats | null {
+	if (!browser) return null;
+	const user = getUser();
+	if (!user) return null;
+	const fromLs = lsRead(user.uid);
+	if (fromLs && fromLs.totalXp > 0) {
+		cache = fromLs;
+		return fromLs;
+	}
+	return cache;
+}
+
 export async function loadLifetimeStats(): Promise<LifetimeStats> {
 	if (!browser || !db) return { ...EMPTY, maxChapterByTitle: {} };
 	const user = getUser();
@@ -144,12 +147,38 @@ export async function loadLifetimeStats(): Promise<LifetimeStats> {
 		return cache;
 	}
 
+	// Instant hydrate from LS while waiting for network
+	if (!cache) {
+		const fromLs = lsRead(user.uid);
+		if (fromLs) cache = fromLs;
+	}
+
 	if (loading) return loading;
 
 	loading = (async () => {
 		try {
 			const snap = await getDoc(statsRef(user.uid, db!));
-			cache = snap.exists() ? readStats(snap.data() as any) : { ...EMPTY, maxChapterByTitle: {} };
+			if (snap.exists()) {
+				const remote = readStats(snap.data());
+				// Never take a lower XP than what we already have locally
+				const localXp = cache?.totalXp ?? 0;
+				if (remote.totalXp >= localXp) {
+					setCache(remote, user.uid);
+				} else {
+					// Keep higher local, still merge maps
+					const merged = {
+						...remote,
+						totalXp: localXp,
+						titlesEver: Math.max(remote.titlesEver, cache?.titlesEver ?? 0),
+						bookmarksEver: Math.max(remote.bookmarksEver, cache?.bookmarksEver ?? 0),
+						sourcesEver: Math.max(remote.sourcesEver, cache?.sourcesEver ?? 0),
+						chapterXpEver: Math.max(remote.chapterXpEver, cache?.chapterXpEver ?? 0)
+					};
+					setCache(merged, user.uid);
+				}
+			} else if (!cache) {
+				setCache({ ...EMPTY, maxChapterByTitle: {} }, user.uid);
+			}
 		} catch (e) {
 			console.error('[lifetimeXp] load failed', e);
 			cache = cache ?? { ...EMPTY, maxChapterByTitle: {} };
@@ -166,10 +195,12 @@ export function getCachedLifetimeStats(): LifetimeStats {
 	return cache ?? { ...EMPTY, maxChapterByTitle: {} };
 }
 
-/**
- * Bootstrap: seed lifetime from current local counts if doc is empty / lower.
- * Also seeds maxChapterByTitle from history entries when provided.
- */
+/** Effective XP for UI: max(lifetime, local derived) */
+export function effectiveXp(localXp: number): number {
+	const life = cache?.totalXp ?? 0;
+	return Math.max(life, localXp);
+}
+
 export async function bootstrapLifetimeFromLocal(opts: {
 	titleCount: number;
 	bookmarkCount: number;
@@ -177,7 +208,6 @@ export async function bootstrapLifetimeFromLocal(opts: {
 	chapterProgressXpSum: number;
 	titleIds?: string[];
 	sourceIds?: string[];
-	/** optional: { mangaId, chapterNumber }[] from history to seed max chapters */
 	chapterProgress?: { mangaId: string; chapterNumber?: unknown }[];
 }): Promise<LifetimeStats> {
 	if (!browser || !db) return { ...EMPTY, maxChapterByTitle: {} };
@@ -195,11 +225,9 @@ export async function bootstrapLifetimeFromLocal(opts: {
 		const ref = statsRef(user.uid, db);
 		await runTransaction(db, async (tx) => {
 			const snap = await tx.get(ref);
-			const cur = snap.exists() ? readStats(snap.data() as any) : { ...EMPTY, maxChapterByTitle: {} };
-
+			const cur = snap.exists() ? readStats(snap.data()) : { ...EMPTY, maxChapterByTitle: {} };
 			const curXp = cur.totalXp;
 
-			// Merge max chapters from local history (never lower existing)
 			const maxMap = { ...cur.maxChapterByTitle };
 			if (opts.chapterProgress) {
 				for (const e of opts.chapterProgress) {
@@ -210,52 +238,37 @@ export async function bootstrapLifetimeFromLocal(opts: {
 				}
 			}
 
-			// Only raise totalXp / counters, never lower
 			if (localXp <= curXp && snap.exists()) {
 				const next: LifetimeStats = {
 					...cur,
 					maxChapterByTitle: clampChapterMap(maxMap),
 					updatedAt: Date.now()
 				};
-				// Still persist maxChapter map if it grew
-				const mapGrew =
-					Object.keys(maxMap).length > Object.keys(cur.maxChapterByTitle).length ||
-					Object.keys(maxMap).some((k) => (maxMap[k] || 0) > (cur.maxChapterByTitle[k] || 0));
-				if (mapGrew) {
-					tx.set(ref, next, { merge: true });
-				}
-				cache = next;
+				tx.set(ref, next, { merge: true });
+				setCache(next, user.uid);
 				return;
 			}
 
-			const titles = Math.max(cur.titlesEver, opts.titleCount | 0);
-			const bookmarks = Math.max(cur.bookmarksEver, opts.bookmarkCount | 0);
-			const sources = Math.max(cur.sourcesEver, opts.sourceCount | 0);
-			const chapterXp = Math.max(cur.chapterXpEver, opts.chapterProgressXpSum | 0);
-
-			const seenTitles = clampSeen([
-				...new Set([
-					...cur.seenTitles,
-					...(opts.titleIds || []).map(normalizeId).filter(Boolean)
-				])
-			]);
-			const seenSources = clampSeen([
-				...new Set([...cur.seenSources, ...(opts.sourceIds || []).map(String).filter(Boolean)])
-			]);
-
 			const next: LifetimeStats = {
 				totalXp: Math.max(curXp, localXp),
-				titlesEver: titles,
-				bookmarksEver: bookmarks,
-				sourcesEver: sources,
-				chapterXpEver: chapterXp,
-				seenTitles,
-				seenSources,
+				titlesEver: Math.max(cur.titlesEver, opts.titleCount | 0),
+				bookmarksEver: Math.max(cur.bookmarksEver, opts.bookmarkCount | 0),
+				sourcesEver: Math.max(cur.sourcesEver, opts.sourceCount | 0),
+				chapterXpEver: Math.max(cur.chapterXpEver, opts.chapterProgressXpSum | 0),
+				seenTitles: clampSeen([
+					...new Set([
+						...cur.seenTitles,
+						...(opts.titleIds || []).map(normalizeId).filter(Boolean)
+					])
+				]),
+				seenSources: clampSeen([
+					...new Set([...cur.seenSources, ...(opts.sourceIds || []).map(String).filter(Boolean)])
+				]),
 				maxChapterByTitle: clampChapterMap(maxMap),
 				updatedAt: Date.now()
 			};
 			tx.set(ref, next, { merge: true });
-			cache = next;
+			setCache(next, user.uid);
 		});
 	} catch (e) {
 		console.error('[lifetimeXp] bootstrap failed', e);
@@ -270,15 +283,6 @@ export type GrantReadingOpts = {
 	chapterNumber?: unknown;
 };
 
-/**
- * Grant XP when user reads a chapter.
- *
- * - First time title  → +XP_NEW_TITLE
- * - First time source → +XP_NEW_SOURCE
- * - Chapter progress  → +(newChapter - maxChapter) * XP_PER_CHAPTER
- *   Only when chapter number is HIGHER than previously granted for that title.
- *   Re-reading old chapters / same chapter → 0 chapter XP.
- */
 export async function grantReadingXp(opts: GrantReadingOpts): Promise<number> {
 	if (!browser || !db) return 0;
 	const user = getUser();
@@ -295,30 +299,25 @@ export async function grantReadingXp(opts: GrantReadingOpts): Promise<number> {
 		const ref = statsRef(user.uid, db);
 		await runTransaction(db, async (tx) => {
 			const snap = await tx.get(ref);
-			const cur = snap.exists()
-				? readStats(snap.data() as any)
-				: { ...EMPTY, maxChapterByTitle: {} };
+			const cur = snap.exists() ? readStats(snap.data()) : { ...EMPTY, maxChapterByTitle: {} };
 
 			let delta = 0;
 			const seenTitles = new Set(cur.seenTitles);
 			const seenSources = new Set(cur.seenSources);
 			const maxMap = { ...cur.maxChapterByTitle };
 
-			// New title bonus
 			if (!seenTitles.has(mangaKey)) {
 				seenTitles.add(mangaKey);
 				delta += XP_NEW_TITLE;
 				cur.titlesEver += 1;
 			}
 
-			// New source bonus
 			if (sourceKey && !seenSources.has(sourceKey)) {
 				seenSources.add(sourceKey);
 				delta += XP_NEW_SOURCE;
 				cur.sourcesEver += 1;
 			}
 
-			// Chapter progress — only grant for chapters ABOVE previous max
 			if (newChapter > 0) {
 				const prevMax = maxMap[mangaKey] || 0;
 				if (newChapter > prevMax) {
@@ -331,8 +330,7 @@ export async function grantReadingXp(opts: GrantReadingOpts): Promise<number> {
 			}
 
 			if (delta <= 0) {
-				// Still update cache so UI is consistent
-				cache = cur;
+				setCache(cur, user.uid);
 				return;
 			}
 
@@ -343,22 +341,16 @@ export async function grantReadingXp(opts: GrantReadingOpts): Promise<number> {
 			cur.updatedAt = Date.now();
 
 			tx.set(ref, cur, { merge: true });
-			cache = cur;
+			setCache(cur, user.uid);
 			granted = delta;
 		});
 	} catch (e) {
 		console.error('[lifetimeXp] grantReadingXp failed', e);
 	}
 
-	if (granted > 0 && browser) {
-		window.dispatchEvent(new CustomEvent('lifetime-xp-changed', { detail: { granted } }));
-	}
 	return granted;
 }
 
-/**
- * Grant XP when user adds a new bookmark.
- */
 export async function grantBookmarkXp(mangaId: string): Promise<number> {
 	if (!browser || !db) return 0;
 	const user = getUser();
@@ -373,9 +365,7 @@ export async function grantBookmarkXp(mangaId: string): Promise<number> {
 		const ref = statsRef(user.uid, db);
 		await runTransaction(db, async (tx) => {
 			const snap = await tx.get(ref);
-			const cur = snap.exists()
-				? readStats(snap.data() as any)
-				: { ...EMPTY, maxChapterByTitle: {} };
+			const cur = snap.exists() ? readStats(snap.data()) : { ...EMPTY, maxChapterByTitle: {} };
 
 			const seenTitles = new Set(cur.seenTitles);
 			const bmKey = 'bm:' + key;
@@ -389,14 +379,11 @@ export async function grantBookmarkXp(mangaId: string): Promise<number> {
 			granted = XP_NEW_BOOKMARK;
 
 			tx.set(ref, cur, { merge: true });
-			cache = cur;
+			setCache(cur, user.uid);
 		});
 	} catch (e) {
 		console.error('[lifetimeXp] grantBookmarkXp failed', e);
 	}
 
-	if (granted > 0 && browser) {
-		window.dispatchEvent(new CustomEvent('lifetime-xp-changed', { detail: { granted } }));
-	}
 	return granted;
 }

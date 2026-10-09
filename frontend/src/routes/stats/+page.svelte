@@ -20,7 +20,9 @@
 	import {
 		loadLifetimeStats,
 		bootstrapLifetimeFromLocal,
+		hydrateLifetimeFromLocalStorage,
 		getCachedLifetimeStats,
+		effectiveXp,
 		type LifetimeStats
 	} from '$lib/stores/lifetimeXp';
 	import {
@@ -44,8 +46,7 @@
 	let history = $state<ReadingEntry[]>([]);
 	let activityLog = $state<ActivityLogEntry[]>([]);
 	let bookmarkCount = $state(0);
-	let lifetime = $state<LifetimeStats | null>(null);
-	let useLifetime = $state(false);
+	let lifetimeXp = $state(0);
 
 	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
 	let novelHistory = $derived(history.filter((h) => isNovelSource(h.sourceId)));
@@ -144,9 +145,7 @@
 		})
 	);
 	
-	let totalXp = $derived(
-		useLifetime && lifetime ? Math.max(lifetime.totalXp, localXp) : localXp
-	);
+	let totalXp = $derived(Math.max(lifetimeXp, localXp));
 	let levelInfo = $derived(computeLevelInfo(totalXp));
 
 	function polar(cx: number, cy: number, r: number, angleDeg: number) {
@@ -219,12 +218,13 @@
 	}
 
 	async function loadLifetime() {
-		const user = getUser();
-		if (!user) {
-			useLifetime = false;
-			lifetime = null;
+		if (!getUser()) {
+			lifetimeXp = 0;
 			return;
 		}
+		// Instant from localStorage
+		hydrateLifetimeFromLocalStorage();
+		lifetimeXp = getCachedLifetimeStats().totalXp;
 		try {
 			const titleIds = history.map((h) => h.mangaId);
 			const sourceIds = [...new Set(history.map((h) => h.sourceId).filter(Boolean))];
@@ -240,13 +240,13 @@
 					chapterNumber: h.chapterNumber
 				}))
 			});
-			lifetime = stats;
-			useLifetime = true;
+			lifetimeXp = stats.totalXp;
 		} catch (e) {
 			console.error('lifetime load failed', e);
-			const s = await loadLifetimeStats();
-			lifetime = s;
-			useLifetime = true;
+			try {
+				const s = await loadLifetimeStats();
+				lifetimeXp = s.totalXp;
+			} catch {}
 		}
 	}
 
@@ -258,6 +258,12 @@
 		const obs = new MutationObserver(updateTheme);
 		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
+		// Paint lifetime from LS immediately (before async)
+		if (getUser()) {
+			hydrateLifetimeFromLocalStorage();
+			lifetimeXp = getCachedLifetimeStats().totalXp;
+		}
+
 		(async () => {
 			await whenHistoryReady();
 			await load();
@@ -268,8 +274,7 @@
 			void load();
 		};
 		const onXp = () => {
-			lifetime = getCachedLifetimeStats();
-			useLifetime = !!getUser();
+			lifetimeXp = getCachedLifetimeStats().totalXp;
 		};
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('bookmarks-changed', onChange);
