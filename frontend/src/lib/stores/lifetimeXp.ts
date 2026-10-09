@@ -113,6 +113,7 @@ function lsWrite(uid: string, stats: LifetimeStats) {
 	if (!browser) return;
 	try {
 		localStorage.setItem(LS_KEY + ':' + uid, JSON.stringify(stats));
+		localStorage.setItem(LS_KEY + ':last', JSON.stringify({ uid, ...stats }));
 	} catch {
 	}
 }
@@ -127,13 +128,29 @@ function setCache(stats: LifetimeStats, uid?: string) {
 
 export function hydrateLifetimeFromLocalStorage(): LifetimeStats | null {
 	if (!browser) return null;
+
 	const user = getUser();
-	if (!user) return null;
-	const fromLs = lsRead(user.uid);
-	if (fromLs && fromLs.totalXp > 0) {
-		cache = fromLs;
-		return fromLs;
+	let best = cache;
+
+	if (user) {
+		const fromLs = lsRead(user.uid);
+		if (fromLs && (!best || fromLs.totalXp >= best.totalXp)) {
+			best = fromLs;
+		}
 	}
+
+	try {
+		const raw = localStorage.getItem(LS_KEY + ':last');
+		if (raw) {
+			const fromLast = readStats(JSON.parse(raw));
+			if (fromLast.totalXp > 0 && (!best || fromLast.totalXp >= best.totalXp)) {
+				best = fromLast;
+			}
+		}
+	} catch {
+	}
+
+	if (best) cache = best;
 	return cache;
 }
 
@@ -384,7 +401,6 @@ export async function grantBookmarkXp(mangaId: string): Promise<number> {
 }
 
 export function getInstantLifetimeXp(): number {
-	if (cache && cache.totalXp > 0) return cache.totalXp;
-	const hydrated = hydrateLifetimeFromLocalStorage();
-	return hydrated?.totalXp ?? cache?.totalXp ?? 0;
+	hydrateLifetimeFromLocalStorage();
+	return cache?.totalXp ?? 0;
 }

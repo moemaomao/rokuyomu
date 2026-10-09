@@ -20,7 +20,6 @@
 	import {
 		loadLifetimeStats,
 		bootstrapLifetimeFromLocal,
-		hydrateLifetimeFromLocalStorage,
 		getCachedLifetimeStats,
 		getInstantLifetimeXp
 	} from '$lib/stores/lifetimeXp';
@@ -52,8 +51,8 @@
 	let history = $state<ReadingEntry[]>([]);
 	let activityLog = $state<ActivityLogEntry[]>([]);
 	let bookmarkCount = $state(0);
-	let permView = $state<ReturnType<typeof permanentStatsView> | null>(null);
 	let lifetimeXp = $state(0);
+	let permView = $state<ReturnType<typeof permanentStatsView> | null>(null);
 
 	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
 	let novelHistory = $derived(history.filter((h) => isNovelSource(h.sourceId)));
@@ -145,7 +144,7 @@
 		});
 		return { step, linePoints, areaPoints, bars, points };
 	});
-
+	
 	let localXp = $derived(
 		computeTotalXp({
 			titleCount: totalTitles,
@@ -154,7 +153,6 @@
 			chapterProgressXpSum: sumChapterProgressXp(history)
 		})
 	);
-	
 	let totalXp = $derived(Math.max(lifetimeXp, localXp));
 	let levelInfo = $derived(computeLevelInfo(totalXp));
 
@@ -227,18 +225,19 @@
 		}
 	}
 
+
+
+
 	async function loadLifetime() {
 		if (!getUser()) {
 			lifetimeXp = 0;
 			return;
 		}
-
-		hydrateLifetimeFromLocalStorage();
-		lifetimeXp = getCachedLifetimeStats().totalXp;
+		lifetimeXp = getInstantLifetimeXp();
 		try {
 			const titleIds = history.map((h) => h.mangaId);
 			const sourceIds = [...new Set(history.map((h) => h.sourceId).filter(Boolean))];
-			const stats = await bootstrapLifetimeFromLocal({
+			const s = await bootstrapLifetimeFromLocal({
 				titleCount: history.length,
 				bookmarkCount,
 				sourceCount: sourceIds.length,
@@ -250,12 +249,11 @@
 					chapterNumber: h.chapterNumber
 				}))
 			});
-			lifetimeXp = stats.totalXp;
+			lifetimeXp = Math.max(lifetimeXp, s.totalXp);
 		} catch (e) {
 			console.error('lifetime load failed', e);
 			try {
-				const s = await loadLifetimeStats();
-				lifetimeXp = s.totalXp;
+				lifetimeXp = Math.max(lifetimeXp, (await loadLifetimeStats()).totalXp);
 			} catch {}
 		}
 	}
@@ -264,7 +262,17 @@
 		hydratePermanentStats();
 		permView = permanentStatsView(getCachedPermanentStats());
 		try {
-			const doc = await loadPermanentStats();
+			let doc = await loadPermanentStats();
+			if (history.length > 0 && Object.keys(doc.titles || {}).length === 0) {
+				doc = await bootstrapPermanentFromHistory(
+					history.map((h) => ({
+						mangaId: h.mangaId,
+						sourceId: h.sourceId,
+						chapterNumber: h.chapterNumber,
+						mangaTitle: h.mangaTitle
+					}))
+				);
+			}
 			permView = permanentStatsView(doc);
 		} catch (e) {
 			console.error('permanent stats load failed', e);

@@ -31,6 +31,7 @@
 	// Hybrid sync
 	import { syncBookmarksOnLogin } from '$lib/stores/bookmark.svelte';
 	import { syncHistoryOnLogin } from '$lib/stores/history';
+	import { loadLifetimeStats, hydrateLifetimeFromLocalStorage } from '$lib/stores/lifetimeXp';
 	import { syncNotificationsOnLogin } from '$lib/stores/notification.svelte';
 
 	// Icons
@@ -220,7 +221,8 @@
 		await Promise.all([
 			syncBookmarksOnLogin(),
 			syncHistoryOnLogin(),
-			syncNotificationsOnLogin()
+			syncNotificationsOnLogin(),
+			loadLifetimeStats()
 		]);
 		loadBookmarks();
 		loadNotifBadge();
@@ -280,6 +282,9 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 onMount(() => {
+	// Lifetime XP instant hydrate (works before auth resolves)
+	hydrateLifetimeFromLocalStorage();
+
 	const mq = window.matchMedia('(min-width: 1024px)');
 	// ── Auto-retry Error 1102 ────────────────────────────────────────────────
 	const MAX_RETRY = 2;
