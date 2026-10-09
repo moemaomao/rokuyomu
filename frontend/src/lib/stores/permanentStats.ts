@@ -51,12 +51,14 @@ function recompute(doc: PermanentStatsDoc): PermanentStatsDoc {
 	const sources: Record<string, { count: number; isNovel: boolean }> = {};
 
 	for (const meta of Object.values(doc.titles)) {
-		if (meta.isNovel) novel++;
+		const isNov = isNovelSource(meta.sourceId) || !!meta.isNovel;
+		if (isNov) novel++;
 		else comic++;
 		progress += meta.maxChapter || 0;
 		const sid = meta.sourceId || 'unknown';
-		if (!sources[sid]) sources[sid] = { count: 0, isNovel: !!meta.isNovel };
+		if (!sources[sid]) sources[sid] = { count: 0, isNovel: isNov };
 		sources[sid].count++;
+		sources[sid].isNovel = isNov;
 	}
 
 	return {
@@ -184,6 +186,7 @@ export async function loadPermanentStats(): Promise<PermanentStatsDoc> {
 			if (snap.exists()) {
 				const remote = readDoc(snap.data());
 				const local = cache ?? { ...EMPTY, titles: {}, sources: {} };
+				// Merge: keep max chapter per title from both
 				const mergedTitles = { ...local.titles };
 				for (const [k, v] of Object.entries(remote.titles)) {
 					const cur = mergedTitles[k];
@@ -265,7 +268,7 @@ export async function recordPermanentReading(opts: RecordReadingOpts): Promise<P
 	const advanced = maxChapter > prevMax ? Math.ceil(maxChapter - prevMax) : 0;
 	titles[mangaKey] = {
 		maxChapter,
-		isNovel: prev?.isNovel ?? isNovel,
+		isNovel,
 		sourceId: sourceId || prev?.sourceId || 'unknown',
 		title: (opts.mangaTitle || prev?.title || '').slice(0, 120),
 		lastRead: Date.now()
@@ -309,7 +312,7 @@ export async function bootstrapPermanentFromHistory(
 		}
 		titles[mangaKey] = {
 			maxChapter,
-			isNovel: prev?.isNovel ?? isNovel,
+			isNovel,
 			sourceId: sourceId || prev?.sourceId || 'unknown',
 			title: (e.mangaTitle || prev?.title || '').slice(0, 120),
 			lastRead: Math.max(prev?.lastRead || 0, Date.now())
@@ -330,29 +333,41 @@ export async function bootstrapPermanentFromHistory(
 }
 
 export function permanentStatsView(docData: PermanentStatsDoc) {
-	const comicTitles = docData.comicTitles || 0;
-	const novelTitles = docData.novelTitles || 0;
-	const totalTitles = comicTitles + novelTitles;
-	const totalProgress = docData.chaptersReadEver || 0;
-
+	let comicTitles = 0;
+	let novelTitles = 0;
 	let comicProgress = 0;
 	let novelProgress = 0;
-	let comicWeight = 0;
-	let novelWeight = 0;
-	for (const m of Object.values(docData.titles || {})) {
-		if (m.isNovel) novelWeight += m.maxChapter || 0;
-		else comicWeight += m.maxChapter || 0;
-	}
-	const w = comicWeight + novelWeight || 1;
-	comicProgress = Math.round((totalProgress * comicWeight) / w);
-	novelProgress = Math.max(0, totalProgress - comicProgress);
 
-	const topSources = Object.entries(docData.sources || {})
-		.map(([id, v]) => ({
-			id,
-			count: v.count,
-			isNovel: v.isNovel
-		}))
+	for (const m of Object.values(docData.titles || {})) {
+		const novel = isNovelSource(m.sourceId) || !!m.isNovel;
+		const ch = Number(m.maxChapter) || 0;
+		const progress = ch > 0 ? ch : 1;
+		if (novel) {
+			novelTitles++;
+			novelProgress += progress;
+		} else {
+			comicTitles++;
+			comicProgress += progress;
+		}
+	}
+
+	comicProgress = Math.round(comicProgress * 10) / 10;
+	novelProgress = Math.round(novelProgress * 10) / 10;
+	const totalProgress = Math.round((comicProgress + novelProgress) * 10) / 10;
+	const totalTitles = comicTitles + novelTitles;
+
+	// Rebuild sources with fresh isNovel
+	const sourceMap = new Map<string, { count: number; isNovel: boolean }>();
+	for (const m of Object.values(docData.titles || {})) {
+		const sid = m.sourceId || 'unknown';
+		const novel = isNovelSource(sid) || !!m.isNovel;
+		const cur = sourceMap.get(sid) || { count: 0, isNovel: novel };
+		cur.count++;
+		cur.isNovel = novel;
+		sourceMap.set(sid, cur);
+	}
+	const topSources = [...sourceMap.entries()]
+		.map(([id, v]) => ({ id, count: v.count, isNovel: v.isNovel }))
 		.sort((a, b) => b.count - a.count)
 		.slice(0, 8);
 
@@ -364,6 +379,6 @@ export function permanentStatsView(docData: PermanentStatsDoc) {
 		novelProgress,
 		totalProgress,
 		topSources,
-		sourceCount: Object.keys(docData.sources || {}).length
+		sourceCount: sourceMap.size
 	};
 }
