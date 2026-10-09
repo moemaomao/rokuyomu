@@ -144,15 +144,15 @@
 		return { step, linePoints, areaPoints, bars, points };
 	});
 	
-	let localXp = $derived(
+	let liveLocalXp = $derived(
 		computeTotalXp({
-			titleCount: totalTitles,
+			titleCount: history.length,
 			bookmarkCount,
-			sourceCount: sourceMap.length,
+			sourceCount: new Set(history.map((h) => h.sourceId).filter(Boolean)).size,
 			chapterProgressXpSum: sumChapterProgressXp(history)
 		})
 	);
-	let totalXp = $derived(Math.max(lifetimeXp, localXp));
+	let totalXp = $derived(Math.max(lifetimeXp, liveLocalXp));
 	let levelInfo = $derived(computeLevelInfo(totalXp));
 
 	function polar(cx: number, cy: number, r: number, angleDeg: number) {
