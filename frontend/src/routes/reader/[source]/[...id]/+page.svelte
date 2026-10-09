@@ -1,714 +1,757 @@
 <script lang="ts">
-	import type { PageData } from './$types';
 	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto } from '$app/navigation';
+	import { getUser, isLoading } from '$lib/stores/auth.svelte';
+	import { getBookmarks } from '$lib/stores/bookmark.svelte';
 	import {
-		ChevronsUp,
-		Download,
-		Settings,
-		CloudDownload
+		getHistory,
+		whenHistoryReady,
+		getActivityLog,
+		type ReadingEntry,
+		type ActivityLogEntry
+	} from '$lib/stores/history';
+	import { isNovelSource } from '$lib/utils/novelSources';
+	import {
+		computeTotalXp,
+		computeLevelInfo,
+		sumChapterMarkers,
+		sumChapterProgressXp
+	} from '$lib/utils/level';
+	import {
+		loadLifetimeStats,
+		bootstrapLifetimeFromLocal,
+		getInstantLifetimeXp
+	} from '$lib/stores/lifetimeXp';
+	import {
+		loadPermanentStats,
+		hydratePermanentStats,
+		getCachedPermanentStats,
+		permanentStatsView,
+		bootstrapPermanentFromHistory
+	} from '$lib/stores/permanentStats';
+	import {
+		Trophy,
+		Zap,
+		BookOpen,
+		Bookmark,
+		Flame,
+		Library,
+		ScrollText,
+		Clock,
+		Star,
+		TrendingUp,
+		PieChart,
+		LogIn,
+		Activity
 	} from 'lucide-svelte';
-	import { saveReading } from '$lib/stores/history';
-	import { markChapterRead } from '$lib/utils/readChapters';
 
-	const { data }: { data: PageData } = $props();
-let {
-	pages: rawPages,
-	source,
-	chapterId,
-	mangaInfo,
-	chapters,
-	currentChapter,
-	prevChapter,
-	nextChapter
-} = $derived(data);
+	let ready = $state(false);
+	let isDark = $state(true);
+	let history = $state<ReadingEntry[]>([]);
+	let activityLog = $state<ActivityLogEntry[]>([]);
+	let bookmarkCount = $state(0);
+	let lifetimeXp = $state(0);
+	let permView = $state<ReturnType<typeof permanentStatsView> | null>(null);
 
-let pages = $state<string[]>([]);
+	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
+	let novelHistory = $derived(history.filter((h) => isNovelSource(h.sourceId)));
 
-function normChapterId(id: unknown): string {
-	return String(id ?? '').replace(/^\/+/, '').replace(/\/+$/, '');
-}
+	let comicTitles = $derived(permView ? permView.comicTitles : comicHistory.length);
+	let novelTitles = $derived(permView ? permView.novelTitles : novelHistory.length);
+	let totalTitles = $derived(permView ? permView.totalTitles : history.length);
 
-function chapterIdMatches(a: string, b: string): boolean {
-	if (!a || !b) return false;
-	if (a === b) return true;
-	return a.endsWith(b) || b.endsWith(a);
-}
+	let comicChapters = $derived(permView ? permView.comicProgress : sumChapterMarkers(comicHistory));
+	let novelChapters = $derived(permView ? permView.novelProgress : sumChapterMarkers(novelHistory));
+	let totalChapters = $derived(permView ? permView.totalProgress : comicChapters + novelChapters);
 
-$effect(() => {
-	if (!browser) return;
-	const incoming = rawPages ?? [];
-	const cid = normChapterId(chapterId);
-
-	if (pendingChapterId) {
-		if (!chapterIdMatches(cid, pendingChapterId)) return;
-		pages = incoming;
-		chapterLoading = false;
-		pendingChapterId = null;
-		currentPageIndex = 0;
-		imgEpoch += 1;
-		return;
-	}
-
-	pages = incoming;
-	chapterLoading = false;
-});
-
-	// ── Reader state ─────────────────────────────────────────────────────────
-	let currentPageIndex = $state(0);
-	let currentMode = $state<'webtoon' | 'page'>('webtoon');
-	let showControls = $state(true);
-	let lastScrollY = $state(0);
-
-	let isMenuOpen = $state(false);
-	let showChapterList = $state(false);
-	let dataSaver = $state(false);
-	let imageQuality = $state(600);
-	let imgEpoch = $state(0);
-	let chapterLoading = $state(false);
-	let pendingChapterId = $state<string | null>(null);
-
-	// ── Theme ──────────────────────────────────────────────────
-	let isDarkMode = $state(true);
-
-	function syncTheme() {
-		if (!browser) return;
-		const saved = localStorage.getItem('darkMode');
-		if (saved !== null) {
-			isDarkMode = saved === 'true';
-		} else {
-			isDarkMode = !document.documentElement.classList.contains('light');
+	let sourceMap = $derived.by(() => {
+		if (permView?.topSources?.length) {
+			return permView.topSources;
 		}
-	}
-
-	// ── Download ─────────────────────────────────────────────────────────────
-	let isDownloading = $state(false);
-	let downloadBannerActive = $state(false);
-	let downloadText = $state('Preparing download...');
-	let downloadCount = $state('0/0');
-	let downloadPercent = $state(0);
-
-	// ── Helpers ──────────────────────────────────────────────────────────────
-	function proxyImage(url: string, forDownload = false): string {
-		if (!url) return '';
-		let u = url.trim();
-		if (u.startsWith('//')) u = `https:${u}`;
-		else if (u.startsWith('/')) u = `https://weloma.net${u}`;
-
-		let filename = 'image.jpg';
-		try {
-			const path = new URL(u).pathname;
-			const last = path.split('/').pop() || '';
-			if (last) filename = decodeURIComponent(last);
-		} catch {}
-
-		filename = filename.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'image.jpg';
-		if (!/\.[a-zA-Z0-9]{2,5}$/.test(filename)) filename += '.jpg';
-
-		let proxy = `/api/proxy?url=${encodeURIComponent(u)}&source=${source}&filename=${encodeURIComponent(filename)}`;
-
-		if (forDownload) return proxy;
-
-		if (dataSaver && !/ihlv1\.xyz/i.test(u)) {
-			proxy += `&w=${imageQuality}`;
+		const m = new Map<string, { count: number; isNovel: boolean }>();
+		for (const h of history) {
+			const id = h.sourceId || 'unknown';
+			const cur = m.get(id) || { count: 0, isNovel: isNovelSource(id) };
+			cur.count++;
+			m.set(id, cur);
 		}
-		return proxy;
-	}
-
-	function handleScroll() {
-		const y = window.scrollY;
-		if (y > lastScrollY && y > 80) {
-			showControls = false;
-			isMenuOpen = false;
-			showChapterList = false;
-		} else {
-			showControls = true;
-		}
-		lastScrollY = y;
-	}
-
-	function handleMouseMove() {
-		showControls = true;
-	}
-
-	function prevPage() {
-		if (currentPageIndex > 0) currentPageIndex--;
-	}
-
-	function nextPage() {
-		if (currentPageIndex < pages.length - 1) currentPageIndex++;
-	}
-
-	function goToPage(index: number) {
-		if (index < 0 || index >= pages.length) return;
-		currentPageIndex = index;
-		if (currentMode === 'webtoon') {
-			const imgs = document.querySelectorAll('#reader img');
-			imgs[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-		}
-	}
-
-	function onPageSelect(e: Event) {
-		const val = parseInt((e.target as HTMLSelectElement).value, 10);
-		goToPage(val);
-	}
-
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			isMenuOpen = false;
-			showChapterList = false;
-		}
-		if (currentMode === 'page') {
-			if (e.key === 'ArrowLeft') prevPage();
-			if (e.key === 'ArrowRight') nextPage();
-		}
-	}
-
-	function closeMenu() {
-		isMenuOpen = false;
-		showChapterList = false;
-	}
-
-	function toggleMode() {
-		currentMode = currentMode === 'webtoon' ? 'page' : 'webtoon';
-		localStorage.setItem('readerMode', currentMode);
-		currentPageIndex = 0;
-	}
-
-	function toggleDataSaver() {
-		dataSaver = !dataSaver;
-		localStorage.setItem('dataSaver', String(dataSaver));
-		imgEpoch++;
-		currentPageIndex = 0;
-		if (currentMode === 'webtoon') window.scrollTo(0, 0);
-	}
-
-	function updateQuality(e: Event) {
-		imageQuality = parseInt((e.target as HTMLInputElement).value, 10);
-		localStorage.setItem('imageQuality', String(imageQuality));
-		if (dataSaver) {
-			imgEpoch++;
-			currentPageIndex = 0;
-			if (currentMode === 'webtoon') window.scrollTo(0, 0);
-		}
-	}
-
-	function scrollToTop() {
-		window.scrollTo({ top: 0, behavior: 'smooth' });
-	}
-
-	async function goToChapter(target: unknown) {
-		showChapterList = false;
-		isMenuOpen = false;
-		if (!target) return;
-		let rawId =
-			typeof target === 'object' && target !== null
-				? (target as { id?: string; slug?: string }).id ||
-					(target as { slug?: string }).slug
-				: target;
-		if (!rawId) return;
-		const cleanId = normChapterId(rawId);
-		if (!cleanId) return;
-		if (chapterIdMatches(cleanId, normChapterId(chapterId)) && pages.length > 0) return;
-
-		pendingChapterId = cleanId;
-		chapterLoading = true;
-		pages = [];
-		currentPageIndex = 0;
-		imgEpoch += 1;
-		try { window.scrollTo(0, 0); } catch {}
-
-		try {
-			await goto(`/reader/${source}/${cleanId}`, {
-				replaceState: true,
-				invalidateAll: true
-			});
-		} catch (e) {
-			console.error('[reader] goToChapter failed', e);
-			pendingChapterId = null;
-			chapterLoading = false;
-		}
-
-		const asked = cleanId;
-		setTimeout(() => {
-			if (pendingChapterId === asked) {
-				pendingChapterId = null;
-				chapterLoading = false;
-				pages = rawPages ?? [];
-			}
-		}, 12000);
-	}
-
-	// ── Download ZIP ─────────────────────────────────────────────────────────
-	let jszipReady: Promise<any> | null = null;
-
-	function loadJSZip(): Promise<any> {
-		if ((window as any).JSZip) return Promise.resolve((window as any).JSZip);
-		if (jszipReady) return jszipReady;
-		jszipReady = new Promise((resolve, reject) => {
-			const s = document.createElement('script');
-			s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-			s.onload = () => resolve((window as any).JSZip);
-			s.onerror = () => reject(new Error('Failed to load JSZip'));
-			document.head.appendChild(s);
-		});
-		return jszipReady;
-	}
-
-	async function handleDownload() {
-		if (isDownloading || !pages?.length) return;
-		isDownloading = true;
-		downloadBannerActive = true;
-		downloadPercent = 0;
-		downloadCount = `0/${pages.length}`;
-		downloadText = 'Loading JSZip...';
-
-		try {
-			const JSZip = await loadJSZip();
-			const zip = new JSZip();
-			const folderName = (
-				`${mangaInfo?.title || 'manga'}_${currentChapter?.title || chapterId}`
-			)
-				.replace(/[^\w\s.-]/g, '')
-				.replace(/\s+/g, '_')
-				.slice(0, 80);
-
-			downloadText = 'Downloading images...';
-			for (let i = 0; i < pages.length; i++) {
-				try {
-					const res = await fetch(proxyImage(pages[i], true));
-					if (!res.ok) throw new Error(`HTTP ${res.status}`);
-					const blob = await res.blob();
-					const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-					zip.file(`${folderName}/${String(i + 1).padStart(3, '0')}.${ext}`, blob);
-				} catch (err) {
-					console.warn('Failed to download page', i + 1, err);
-				}
-				downloadPercent = Math.round(((i + 1) / pages.length) * 100);
-				downloadCount = `${i + 1}/${pages.length}`;
-				downloadText = `Downloading image ${i + 1} of ${pages.length}...`;
-			}
-
-			downloadText = 'Creating ZIP file...';
-			const content = await zip.generateAsync({ type: 'blob' });
-			const a = document.createElement('a');
-			a.href = URL.createObjectURL(content);
-			a.download = `${folderName}.zip`;
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			URL.revokeObjectURL(a.href);
-			downloadText = 'Done!';
-			downloadPercent = 100;
-		} catch (err: any) {
-			downloadText = 'Failed: ' + (err?.message || 'unknown');
-		}
-
-		setTimeout(() => {
-			downloadBannerActive = false;
-			isDownloading = false;
-		}, 1500);
-	}
-
-	// ── Lifecycle ────────────────────────────────────────────────────────────
-	onMount(() => {
-		if (typeof window !== 'undefined') {
-			const u = new URL(window.location.href);
-			if (u.searchParams.has('server')) {
-				u.searchParams.delete('server');
-				const clean = u.pathname + (u.search ? u.search : '') + u.hash;
-				history.replaceState(history.state, '', clean);
-			}
-		}
-		syncTheme();
-		const obs = new MutationObserver(syncTheme);
-		obs.observe(document.documentElement, {
-			attributes: true,
-			attributeFilter: ['class']
-		});
-
-		const savedMode = localStorage.getItem('readerMode');
-		if (savedMode === 'page' || savedMode === 'webtoon') currentMode = savedMode;
-		dataSaver = localStorage.getItem('dataSaver') === 'true';
-		imageQuality = parseInt(localStorage.getItem('imageQuality') || '600', 10);
-
-		return () => obs.disconnect();
+		return [...m.entries()]
+			.map(([id, v]) => ({ id, ...v }))
+			.sort((a, b) => b.count - a.count);
 	});
 
-	$effect(() => {
-		if (!browser) return;
-		const mid = mangaInfo?.id;
-		const cid = chapterId;
-		const src = source;
-		if (!mid || !cid) return;
-		const title = currentChapter?.title || `Chapter ${currentChapter?.number || 0}`;
-		const num = currentChapter?.number || 0;
-		markChapterRead(src, mid, cid, num);
-		saveReading({
-			mangaId: mid,
-			mangaSlug: mangaInfo?.slug || '',
-			mangaTitle: mangaInfo?.title || '',
-			cover: mangaInfo?.cover || '',
-			chapterId: cid,
-			chapterTitle: title,
-			chapterNumber: num,
-			sourceId: src
+	let topSources = $derived(sourceMap.slice(0, 8));
+
+	function localDateKey(d: Date): string {
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	}
+
+	let activityDays = $derived.by(() => {
+		const days: { label: string; count: number; key: string }[] = [];
+		const now = new Date();
+		for (let i = 13; i >= 0; i--) {
+			const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+			const key = localDateKey(d);
+			const label =
+				i === 0 ? 'Today' : i === 1 ? 'Yday' : d.toLocaleDateString('en', { weekday: 'short' });
+			days.push({ label, count: 0, key });
+		}
+		const map = new Map(days.map((x) => [x.key, x]));
+		const source = activityLog.length > 0 ? activityLog : history;
+		for (const h of source) {
+			const ts = Number(h.timestamp);
+			if (!ts) continue;
+			const ms = ts < 1e12 ? ts * 1000 : ts;
+			const key = localDateKey(new Date(ms));
+			const row = map.get(key);
+			if (row) row.count++;
+		}
+		return days;
+	});
+
+	let maxActivity = $derived(Math.max(1, ...activityDays.map((d) => d.count)));
+
+	const CHART_H = 120;
+	const CHART_PAD_TOP = 16;
+	const CHART_PAD_BOT = 4;
+	const CHART_USABLE = CHART_H - CHART_PAD_TOP - CHART_PAD_BOT;
+
+	let activityChart = $derived.by(() => {
+		const n = activityDays.length || 1;
+		const step = 100 / n;
+		const points = activityDays.map((d, i) => {
+			const x = step * i + step / 2;
+			const h = d.count === 0 ? 0 : Math.max(0.08, d.count / maxActivity);
+			const y = CHART_PAD_TOP + CHART_USABLE * (1 - h);
+			return { x, y, h, count: d.count, key: d.key, label: d.label, i };
 		});
+		const linePoints = points.map((p) => `${p.x},${(p.y / CHART_H) * 100}`).join(' ');
+		const areaPoints =
+			`${step / 2},${((CHART_PAD_TOP + CHART_USABLE) / CHART_H) * 100} ` +
+			linePoints +
+			` ${step * (n - 1) + step / 2},${((CHART_PAD_TOP + CHART_USABLE) / CHART_H) * 100}`;
+		const bars = points.map((p) => {
+			const x = step * p.i + step * 0.2;
+			const barW = step * 0.6;
+			const hRatio = p.count === 0 ? 0.015 : Math.max(0.08, p.count / maxActivity);
+			const barH = CHART_USABLE * hRatio;
+			const y = CHART_PAD_TOP + CHART_USABLE - barH;
+			return { x, y, barW, barH, count: p.count, key: p.key, label: p.label };
+		});
+		return { step, linePoints, areaPoints, bars, points };
 	});
 	
-	// ── SEO / share card ─────────────────────────────────────────────────────
-	let pageTitle = $derived(
-		mangaInfo?.title
-			? `${mangaInfo.title} - ${currentChapter?.title || 'Chapter'} | RokuYomu`
-			: 'Reader | RokuYomu'
+	// Level XP: use LIVE history only for local fallback (not permanent chart counts)
+	let liveLocalXp = $derived(
+		computeTotalXp({
+			titleCount: history.length,
+			bookmarkCount,
+			sourceCount: new Set(history.map((h) => h.sourceId).filter(Boolean)).size,
+			chapterProgressXpSum: sumChapterProgressXp(history)
+		})
 	);
-	let pageDesc = $derived(
-		mangaInfo?.title
-			? `Baca ${mangaInfo.title}${currentChapter?.title ? ` — ${currentChapter.title}` : ''} di RokuYomu`
-			: 'Baca chapter manga di RokuYomu'
+	let totalXp = $derived(Math.max(lifetimeXp, liveLocalXp));
+	let levelInfo = $derived(computeLevelInfo(totalXp));
+
+	function polar(cx: number, cy: number, r: number, angleDeg: number) {
+		const a = ((angleDeg - 90) * Math.PI) / 180;
+		return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+	}
+
+	function arcPath(
+		cx: number,
+		cy: number,
+		r: number,
+		startAngle: number,
+		endAngle: number
+	): string {
+		if (endAngle - startAngle >= 359.9) {
+			const p1 = polar(cx, cy, r, 0);
+			const p2 = polar(cx, cy, r, 179.9);
+			return `M ${p1.x} ${p1.y} A ${r} ${r} 0 1 1 ${p2.x} ${p2.y} A ${r} ${r} 0 1 1 ${p1.x} ${p1.y}`;
+		}
+		const start = polar(cx, cy, r, startAngle);
+		const end = polar(cx, cy, r, endAngle);
+		const large = endAngle - startAngle > 180 ? 1 : 0;
+		return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${large} 1 ${end.x} ${end.y} Z`;
+	}
+
+	let titlePie = $derived.by(() => {
+		const total = Math.max(1, totalTitles);
+		const comicAngle = (comicTitles / total) * 360;
+		return {
+			comicPct: Math.round((comicTitles / total) * 100),
+			novelPct: Math.round((novelTitles / total) * 100),
+			comicPath: comicTitles > 0 ? arcPath(100, 100, 80, 0, comicAngle || 0.1) : '',
+			novelPath: novelTitles > 0 ? arcPath(100, 100, 80, comicAngle, 360) : ''
+		};
+	});
+
+	let chapterPie = $derived.by(() => {
+		const total = Math.max(1, totalChapters);
+		const comicAngle = (comicChapters / total) * 360;
+		return {
+			comicPct: Math.round((comicChapters / total) * 100),
+			novelPct: Math.round((novelChapters / total) * 100),
+			comicPath: comicChapters > 0 ? arcPath(100, 100, 80, 0, comicAngle || 0.1) : '',
+			novelPath: novelChapters > 0 ? arcPath(100, 100, 80, comicAngle, 360) : ''
+		};
+	});
+
+	let recent = $derived(history.slice(0, 10));
+
+	function formatTime(ts: number): string {
+		const ms = ts < 1e12 ? ts * 1000 : ts;
+		const diff = Date.now() - ms;
+		const m = Math.floor(diff / 60000);
+		const h = Math.floor(diff / 3600000);
+		const d = Math.floor(diff / 86400000);
+		if (d > 0) return `${d}d ago`;
+		if (h > 0) return `${h}h ago`;
+		if (m > 0) return `${m}m ago`;
+		return 'Just now';
+	}
+
+	async function load() {
+		history = getHistory();
+		bookmarkCount = getBookmarks().length;
+		try {
+			activityLog = await getActivityLog(14);
+		} catch {
+			activityLog = [];
+		}
+	}
+
+
+
+
+	async function loadLifetime() {
+		if (!getUser()) {
+			lifetimeXp = 0;
+			return;
+		}
+		lifetimeXp = getInstantLifetimeXp();
+		try {
+			const titleIds = history.map((h) => h.mangaId);
+			const sourceIds = [...new Set(history.map((h) => h.sourceId).filter(Boolean))];
+			const s = await bootstrapLifetimeFromLocal({
+				titleCount: history.length,
+				bookmarkCount,
+				sourceCount: sourceIds.length,
+				chapterProgressXpSum: sumChapterProgressXp(history),
+				titleIds,
+				sourceIds,
+				chapterProgress: history.map((h) => ({
+					mangaId: h.mangaId,
+					chapterNumber: h.chapterNumber
+				}))
+			});
+			lifetimeXp = Math.max(lifetimeXp, s.totalXp);
+		} catch (e) {
+			console.error('lifetime load failed', e);
+			try {
+				lifetimeXp = Math.max(lifetimeXp, (await loadLifetimeStats()).totalXp);
+			} catch {}
+		}
+	}
+
+	async function loadPermanent() {
+		hydratePermanentStats();
+		permView = permanentStatsView(getCachedPermanentStats());
+		try {
+			let doc = await loadPermanentStats();
+			if (history.length > 0 && Object.keys(doc.titles || {}).length === 0) {
+				doc = await bootstrapPermanentFromHistory(
+					history.map((h) => ({
+						mangaId: h.mangaId,
+						sourceId: h.sourceId,
+						chapterNumber: h.chapterNumber,
+						mangaTitle: h.mangaTitle
+					}))
+				);
+			}
+			permView = permanentStatsView(doc);
+		} catch (e) {
+			console.error('permanent stats load failed', e);
+		}
+	}
+
+	onMount(() => {
+		const updateTheme = () => {
+			isDark = document.documentElement.classList.contains('dark');
+		};
+		updateTheme();
+		const obs = new MutationObserver(updateTheme);
+		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+		if (getUser()) {
+			lifetimeXp = getInstantLifetimeXp();
+		}
+		hydratePermanentStats();
+		permView = permanentStatsView(getCachedPermanentStats());
+
+		(async () => {
+			await whenHistoryReady();
+			await load();
+			await loadLifetime();
+			await loadPermanent();
+			ready = true;
+		})();
+		const onChange = () => {
+			void load();
+		};
+		const onXp = () => {
+			lifetimeXp = Math.max(lifetimeXp, getInstantLifetimeXp());
+		};
+		window.addEventListener('history-changed', onChange);
+		window.addEventListener('bookmarks-changed', onChange);
+		window.addEventListener('activity-changed', onChange);
+		window.addEventListener('permanent-stats-changed', () => {
+			permView = permanentStatsView(getCachedPermanentStats());
+		});
+		window.addEventListener('lifetime-xp-changed', onXp);
+		return () => {
+			obs.disconnect();
+			window.removeEventListener('history-changed', onChange);
+			window.removeEventListener('bookmarks-changed', onChange);
+			window.removeEventListener('activity-changed', onChange);
+			window.removeEventListener('lifetime-xp-changed', onXp);
+		};
+	});
+
+	let card = $derived(
+		isDark
+			? 'border-zinc-800 bg-zinc-900/50'
+			: 'border-zinc-200 bg-white shadow-sm'
 	);
-	let pageImage = $derived(
-		mangaInfo?.cover && /^https?:\/\//i.test(String(mangaInfo.cover).trim())
-			? String(mangaInfo.cover).trim()
-			: ''
+	let cardSoft = $derived(
+		isDark ? 'border-zinc-800 bg-zinc-900/40' : 'border-zinc-200 bg-white shadow-sm'
 	);
+	let textMain = $derived(isDark ? 'text-white' : 'text-zinc-900');
+	let textMuted = $derived(isDark ? 'text-zinc-500' : 'text-zinc-500');
+	let textSub = $derived(isDark ? 'text-zinc-300' : 'text-zinc-700');
+	let pieHole = $derived(isDark ? '#18181b' : '#f4f4f5');
+	let pieEmpty = $derived(isDark ? '#27272a' : '#e4e4e7');
+	let pieText = $derived(isDark ? '#fff' : '#18181b');
+	let barTrack = $derived(isDark ? 'bg-zinc-800' : 'bg-zinc-200');
+	let divide = $derived(isDark ? 'divide-zinc-800/80' : 'divide-zinc-100');
+	let hoverRow = $derived(isDark ? 'hover:bg-zinc-800/40' : 'hover:bg-zinc-50');
 </script>
 
-<svelte:window onkeydown={handleKeydown} onscroll={handleScroll} />
-
 <svelte:head>
-	<title>{pageTitle}</title>
-	<meta name="description" content={pageDesc} />
-
-	<meta property="og:type" content="website" />
-	<meta property="og:site_name" content="RokuYomu" />
-	<meta property="og:title" content={pageTitle} />
-	<meta property="og:description" content={pageDesc} />
-	{#if pageImage}
-		<meta property="og:image" content={pageImage} />
-	{/if}
-
-	<meta name="twitter:card" content="summary_large_image" />
-	<meta name="twitter:title" content={pageTitle} />
-	<meta name="twitter:description" content={pageDesc} />
-	{#if pageImage}
-		<meta name="twitter:image" content={pageImage} />
-	{/if}
+	<title>My Stats — RokuYomu</title>
 </svelte:head>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="relative flex min-h-screen flex-col font-['Kodchasan',sans-serif]
-		{isDarkMode ? 'bg-black text-zinc-100' : 'bg-zinc-100 text-zinc-900'}"
-	onmousemove={handleMouseMove}
->
-	<!-- Title bar -->
-	<div class="relative z-10 px-4 py-3 text-center">
-		<p
-			class="m-0 text-[1.02em] font-medium opacity-85
-				{isDarkMode ? 'text-zinc-200' : 'text-zinc-700'}"
-		>
-			{#if mangaInfo?.title}{mangaInfo.title}{/if}
-			{#if currentChapter?.title}
-				{' '}{currentChapter.title}
-			{:else}
-				Loading chapter...
-			{/if}
-		</p>
+<div class="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
+	<div class="border-b pb-4 {isDark ? 'border-zinc-800' : 'border-zinc-200'}">
+		<h1 class="flex items-center gap-2 text-xl font-bold text-violet-500 md:text-2xl">
+			<Trophy class="h-6 w-6" />
+			My Stats
+		</h1>
+		<p class="mt-1 text-sm {textMuted}">Reading progress · Rank · Breakdown</p>
 	</div>
 
-	<!-- Download banner -->
-	{#if downloadBannerActive}
-		<div class="sticky top-0 z-[90] mx-auto mb-1.5 w-full max-w-[900px] px-3">
+	{#if !ready}
+		<div class="flex min-h-[40vh] items-center justify-center">
 			<div
-				class="flex items-center gap-2.5 rounded-xl border px-3 py-2 backdrop-blur-md
-					{isDarkMode
-					? 'border-emerald-500/25 bg-black/50'
-					: 'border-emerald-500/40 bg-white/80'}"
-			>
-				<div class="text-emerald-500 {isDownloading ? 'animate-spin' : ''}">
-					<CloudDownload class="h-4 w-4" />
-				</div>
-				<div class="min-w-0 flex-1">
-					<p
-						class="mb-1 truncate text-[0.76rem] font-medium
-							{isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}"
-					>
-						{downloadText}
-					</p>
-					<div
-						class="h-1 w-full overflow-hidden rounded-full
-							{isDarkMode ? 'bg-white/10' : 'bg-zinc-200'}"
-					>
+				class="h-10 w-10 animate-spin rounded-full border-2 border-t-violet-500 {isDark
+					? 'border-zinc-700'
+					: 'border-zinc-300'}"
+			></div>
+		</div>
+	{:else}
+		<div
+			class="relative overflow-hidden rounded-2xl border p-5
+				{isDark
+				? 'border-zinc-800 bg-gradient-to-br from-zinc-900 via-zinc-900 to-violet-950/40'
+				: 'border-zinc-200 bg-gradient-to-br from-white via-white to-violet-50 shadow-sm'}"
+		>
+			<div
+				class="pointer-events-none absolute -top-16 -right-10 h-40 w-40 rounded-full blur-3xl {isDark
+					? 'bg-violet-600/20'
+					: 'bg-violet-400/15'}"
+			></div>
+			<div class="relative flex flex-wrap items-center gap-4">
+				<div class="relative shrink-0">
+					{#if getUser()?.photoURL}
+						<img
+							src={getUser()!.photoURL}
+							alt=""
+							class="h-16 w-16 rounded-2xl object-cover ring-2 ring-violet-500/40"
+						/>
+					{:else if getUser()}
 						<div
-							class="h-full rounded-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all"
-							style="width: {downloadPercent}%"
+							class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-xl font-black text-white ring-2 ring-violet-400/30"
+						>
+							{(getUser()?.displayName?.[0] || getUser()?.email?.[0] || 'U').toUpperCase()}
+						</div>
+					{:else}
+						<div
+							class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br {levelInfo.rankCls} text-2xl font-black text-zinc-900 shadow-lg"
+						>
+							{levelInfo.lv}
+						</div>
+					{/if}
+					<span
+						class="absolute -right-1.5 -bottom-1.5 flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-gradient-to-r px-1.5 text-xs font-black text-zinc-900 shadow-md {levelInfo.rankCls}"
+					>
+						{levelInfo.lv}
+					</span>
+				</div>
+
+				<div class="min-w-0 flex-1">
+					<div class="flex flex-wrap items-center gap-2">
+						{#if getUser()}
+							<span class="truncate text-lg font-bold {textMain}">
+								{getUser()?.displayName || 'Reader'}
+							</span>
+						{:else}
+							<span class="text-lg font-bold {textMain}">Level {levelInfo.lv}</span>
+						{/if}
+						<span
+							class="inline-flex items-center gap-1 rounded-md bg-gradient-to-r px-2 py-0.5 text-[11px] font-bold text-zinc-900 {levelInfo.rankCls}"
+						>
+							<Star class="h-3 w-3" />
+							{levelInfo.rank}
+						</span>
+					</div>
+					{#if getUser()?.email}
+						<p class="mt-0.5 truncate text-[12px] {textMuted}">{getUser()?.email}</p>
+					{:else if !getUser()}
+						<button
+							onclick={() => goto('/')}
+							class="mt-0.5 flex items-center gap-1 text-[12px] text-violet-500 hover:underline"
+						>
+							<LogIn class="h-3 w-3" />
+							Login for cloud sync
+						</button>
+					{/if}
+					<div class="mt-2 flex items-center justify-between text-[11px]">
+						<span class="flex items-center gap-1 font-semibold text-violet-500">
+							<Zap class="h-3.5 w-3.5" />
+							{levelInfo.totalXp} XP
+						</span>
+						<span class="{textMuted}"
+							>{levelInfo.remaining} / {levelInfo.need} to next</span
+						>
+					</div>
+					<div class="mt-1.5 h-2.5 overflow-hidden rounded-full {barTrack}">
+						<div
+							class="h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-amber-400 transition-all duration-700"
+							style="width: {levelInfo.progress}%"
 						></div>
 					</div>
 				</div>
-				<span
-					class="min-w-[40px] text-right text-[0.72rem] font-semibold
-						{isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}"
-				>
-					{downloadCount}
-				</span>
 			</div>
 		</div>
-	{/if}
 
-	<!-- Reader -->
-	<main id="reader" class="mx-auto w-full max-w-[900px] flex-1 pb-20">
-		{#if chapterLoading}
-			<div
-				class="flex min-h-[50vh] flex-col items-center justify-center gap-3 py-16 text-center
-					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
-			>
-				<div
-					class="h-9 w-9 animate-spin rounded-full border-2 border-violet-500 border-t-transparent"
-				></div>
-				<p class="text-sm">Loading chapter…</p>
-			</div>
-		{:else if !pages?.length}
-			<div
-				class="py-16 text-center
-					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
-			>
-				Images not available
-			</div>
-		{:else if currentMode === 'webtoon'}
-			{#each pages as pageUrl, i (imgEpoch + '-' + i)}
-				<div class="w-full leading-none">
-					<img
-						src={proxyImage(pageUrl)}
-						alt="Page {i + 1}"
-						class="block w-full"
-						loading={i < 4 ? 'eager' : 'lazy'}
-						decoding="async"
-						referrerpolicy="no-referrer"
-					/>
+		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+			{#each [
+				{ icon: BookOpen, label: 'Titles', value: totalTitles, color: 'text-sky-500' },
+				{ icon: Bookmark, label: 'Bookmarks', value: bookmarkCount, color: 'text-rose-500' },
+				{ icon: Flame, label: 'Progress', value: totalChapters, color: 'text-orange-500' },
+				{ icon: Library, label: 'Sources', value: sourceMap.length, color: 'text-emerald-500' },
+				{ icon: ScrollText, label: 'Comics', value: comicTitles, color: 'text-red-500' },
+				{ icon: BookOpen, label: 'Novels', value: novelTitles, color: 'text-violet-500' }
+			] as c}
+				<div class="rounded-2xl border p-3.5 {card}">
+					<div class="flex items-center gap-1.5 text-[11px] {textMuted}">
+						<c.icon class="h-3.5 w-3.5 {c.color}" />
+						{c.label}
+					</div>
+					<p class="mt-1 text-2xl font-black tabular-nums {textMain}">{c.value}</p>
 				</div>
 			{/each}
-		{:else}
-			<div class="flex h-[calc(100vh-140px)] w-full items-center justify-center">
-				{#key imgEpoch + '-' + currentPageIndex}
-					<img
-						src={proxyImage(pages[currentPageIndex])}
-						alt="Page {currentPageIndex + 1}"
-						class="max-h-full max-w-full object-contain"
-						referrerpolicy="no-referrer"
-					/>
-				{/key}
+		</div>
+
+		<div class="grid gap-4 md:grid-cols-2">
+			<div class="rounded-2xl border p-5 {cardSoft}">
+				<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
+					<PieChart class="h-4 w-4 text-violet-500" />
+					Titles: Comic vs Novel
+				</h2>
+				<div class="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+					<svg viewBox="0 0 200 200" class="h-44 w-44 shrink-0">
+						{#if totalTitles === 0}
+							<circle cx="100" cy="100" r="80" fill={pieEmpty} />
+							<text x="100" y="105" text-anchor="middle" fill="#71717a" font-size="12"
+								>No data</text
+							>
+						{:else}
+							{#if titlePie.comicPath}
+								<path d={titlePie.comicPath} fill="#f87171" />
+							{/if}
+							{#if titlePie.novelPath}
+								<path d={titlePie.novelPath} fill="#a78bfa" />
+							{/if}
+							<circle cx="100" cy="100" r="48" fill={pieHole} />
+							<text
+								x="100"
+								y="96"
+								text-anchor="middle"
+								fill={pieText}
+								font-size="18"
+								font-weight="700">{totalTitles}</text
+							>
+							<text x="100" y="114" text-anchor="middle" fill="#71717a" font-size="10"
+								>titles</text
+							>
+						{/if}
+					</svg>
+					<div class="w-full max-w-[200px] space-y-2 text-sm">
+						<div class="flex items-center gap-2">
+							<span class="h-3 w-3 shrink-0 rounded-full bg-red-400"></span>
+							<span class="{textMuted}">Comic / Manga</span>
+							<span class="ml-auto font-bold tabular-nums {textMain}"
+								>{comicTitles}
+								<span class="{textMuted}">({titlePie.comicPct}%)</span></span
+							>
+						</div>
+						<div class="flex items-center gap-2">
+							<span class="h-3 w-3 shrink-0 rounded-full bg-violet-400"></span>
+							<span class="{textMuted}">Novel</span>
+							<span class="ml-auto font-bold tabular-nums {textMain}"
+								>{novelTitles}
+								<span class="{textMuted}">({titlePie.novelPct}%)</span></span
+							>
+						</div>
+					</div>
+				</div>
 			</div>
-			<button
-				onclick={prevPage}
-				disabled={currentPageIndex === 0}
-				class="fixed top-1/2 left-2 z-[200] -translate-y-1/2 border-0 bg-transparent text-[34px] disabled:opacity-20
-					{isDarkMode ? 'text-white/80' : 'text-zinc-800/80'}"
-			>
-				‹
-			</button>
-			<button
-				onclick={nextPage}
-				disabled={currentPageIndex >= pages.length - 1}
-				class="fixed top-1/2 right-2 z-[200] -translate-y-1/2 border-0 bg-transparent text-[34px] disabled:opacity-20
-					{isDarkMode ? 'text-white/80' : 'text-zinc-800/80'}"
-			>
-				›
-			</button>
-		{/if}
-	</main>
 
-	{#if isMenuOpen}
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div
-			class="fixed inset-0 z-[305]"
-			onclick={closeMenu}
-		></div>
-	{/if}
+			<div class="rounded-2xl border p-5 {cardSoft}">
+				<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
+					<PieChart class="h-4 w-4 text-amber-500" />
+					Progress markers: Comic vs Novel
+				</h2>
+				<div class="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+					<svg viewBox="0 0 200 200" class="h-44 w-44 shrink-0">
+						{#if totalChapters === 0}
+							<circle cx="100" cy="100" r="80" fill={pieEmpty} />
+							<text x="100" y="105" text-anchor="middle" fill="#71717a" font-size="12"
+								>No data</text
+							>
+						{:else}
+							{#if chapterPie.comicPath}
+								<path d={chapterPie.comicPath} fill="#fb923c" />
+							{/if}
+							{#if chapterPie.novelPath}
+								<path d={chapterPie.novelPath} fill="#2dd4bf" />
+							{/if}
+							<circle cx="100" cy="100" r="48" fill={pieHole} />
+							<text
+								x="100"
+								y="96"
+								text-anchor="middle"
+								fill={pieText}
+								font-size="18"
+								font-weight="700">{totalChapters}</text
+							>
+							<text x="100" y="114" text-anchor="middle" fill="#71717a" font-size="10"
+								>ch.</text
+							>
+						{/if}
+					</svg>
+					<div class="w-full max-w-[200px] space-y-2 text-sm">
+						<div class="flex items-center gap-2">
+							<span class="h-3 w-3 shrink-0 rounded-full bg-orange-400"></span>
+							<span class="{textMuted}">Comic progress</span>
+							<span class="ml-auto font-bold tabular-nums {textMain}"
+								>{comicChapters}
+								<span class="{textMuted}">({chapterPie.comicPct}%)</span></span
+							>
+						</div>
+						<div class="flex items-center gap-2">
+							<span class="h-3 w-3 shrink-0 rounded-full bg-teal-400"></span>
+							<span class="{textMuted}">Novel progress</span>
+							<span class="ml-auto font-bold tabular-nums {textMain}"
+								>{novelChapters}
+								<span class="{textMuted}">({chapterPie.novelPct}%)</span></span
+							>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
 
-	<div
-		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3
-			{isDarkMode ? 'border-white/5' : 'border-zinc-300/60 bg-white/70 backdrop-blur-md'}"
-	>
-		<button
-			onclick={() => prevChapter && !chapterLoading && goToChapter(prevChapter)}
-			disabled={!prevChapter || chapterLoading}
-			aria-label="Previous chapter"
-			title="Previous chapter"
-			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
-				{isDarkMode
-					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
-					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
-		>
-			<svg
-				viewBox="0 0 24 24"
-				width="20"
-				height="20"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				aria-hidden="true"
-			>
-				<path d="M13 5l-7 7 7 7" />
-				<path d="M19 5l-7 7 7 7" opacity="0.6" />
-			</svg>
-		</button>
-
-		<button
-			onclick={() => nextChapter && !chapterLoading && goToChapter(nextChapter)}
-			disabled={!nextChapter || chapterLoading}
-			aria-label="Next chapter"
-			title="Next chapter"
-			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
-				{isDarkMode
-					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
-					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
-		>
-			<svg
-				viewBox="0 0 24 24"
-				width="20"
-				height="20"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				aria-hidden="true"
-			>
-				<path d="M11 5l7 7-7 7" />
-				<path d="M5 5l7 7-7 7" opacity="0.6" />
-			</svg>
-		</button>
-	</div>
-
-	<div class="fixed right-[15px] bottom-[78px] z-[320] flex flex-col items-center gap-2.5">
-	<button
-		onclick={scrollToTop}
-		class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,150,255,0.15)] text-[18px] text-[#4da6ff] backdrop-blur-md transition hover:scale-108 hover:bg-[rgba(0,150,255,0.25)]"
-		title="Scroll to top"
-	>
-		<ChevronsUp class="h-5 w-5" />
-	</button>
-
-	<button
-		onclick={handleDownload}
-		disabled={isDownloading || !pages?.length}
-		class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.15)] text-[18px] text-[#35d98a] backdrop-blur-md transition hover:scale-108 hover:bg-[rgba(0,200,120,0.25)] disabled:opacity-50"
-		title="Download ZIP"
-	>
-		<Download class="h-5 w-5" />
-	</button>
-
-	<div class="relative z-[330]">
-		<button
-			onclick={() => {
-				isMenuOpen = !isMenuOpen;
-				if (!isMenuOpen) showChapterList = false;
-			}}
-			class="flex h-[42px] w-[42px] items-center justify-center rounded-full border-0 bg-transparent text-[21px] text-purple-500 transition hover:rotate-90"
-			title="Settings"
-		>
-			<Settings class="h-6 w-6" strokeWidth={2} />
-		</button>
-
-		{#if isMenuOpen}
-			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-			<div
-				class="absolute right-0 bottom-[52px] z-[340] flex max-h-[65vh] w-[210px] flex-col gap-2 overflow-y-auto rounded-xl px-3.5 py-3 shadow-[0_6px_25px_rgba(0,0,0,0.35)]
-					{isDarkMode ? 'bg-black/85' : 'border border-zinc-200 bg-white/95'}"
-				onclick={(e) => e.stopPropagation()}
-			>
-				<button
-					onclick={toggleMode}
-					class="w-full rounded-lg border-0 bg-purple-800 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition hover:bg-purple-700"
+		<div class="rounded-2xl border p-5 {cardSoft}">
+			<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
+				<Activity class="h-4 w-4 text-sky-500" />
+				Activity — last 14 days
+			</h2>
+			<div class="relative w-full" style="height: {CHART_H + 22}px">
+				<svg
+					viewBox="0 0 100 {CHART_H}"
+					preserveAspectRatio="none"
+					class="absolute inset-x-0 top-0 w-full"
+					style="height: {CHART_H}px"
 				>
-					Mode: {currentMode === 'webtoon' ? 'Webtoon' : 'Page'}
-				</button>
-
-				<select
-					class="w-full cursor-pointer rounded-lg border-0 bg-purple-800 px-3 py-2.5 text-[0.87em] text-white outline-none"
-					value={currentPageIndex}
-					onchange={onPageSelect}
-				>
-					{#each pages as _, i}
-						<option value={i} class="bg-zinc-900 text-white">
-							Page {i + 1} / {pages.length}
-						</option>
+					{#each [0.25, 0.5, 0.75, 1] as g}
+						<line
+							x1="0"
+							y1={CHART_PAD_TOP + CHART_USABLE * (1 - g)}
+							x2="100"
+							y2={CHART_PAD_TOP + CHART_USABLE * (1 - g)}
+							stroke={isDark ? '#3f3f46' : '#e4e4e7'}
+							stroke-width="0.3"
+							stroke-dasharray="1.5 1.5"
+							vector-effect="non-scaling-stroke"
+						/>
 					{/each}
-				</select>
 
-				<button
-					onclick={() => (showChapterList = !showChapterList)}
-					class="w-full rounded-lg border-0 bg-purple-800 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition hover:bg-purple-700"
-				>
-					Chapter List
-				</button>
-
-				{#if showChapterList}
-	<div
-		class="max-h-[280px] overflow-y-auto rounded-lg py-1
-			{isDarkMode ? 'bg-[rgba(25,25,25,0.8)]' : 'bg-zinc-100'}"
-	>
-		{#each [...(chapters || [])].reverse() as chapter}
-			<button
-				onclick={() => goToChapter(chapter)}
-				class="w-full border-b px-3 py-2 text-left text-[0.84em] transition last:border-b-0
-					{isDarkMode
-						? 'border-zinc-600/80 text-white hover:bg-white/10'
-						: 'border-zinc-200 text-zinc-800 hover:bg-zinc-200/80'}
-					{chapter.id === chapterId || chapter.id === currentChapter?.id
-						? 'bg-purple-500/25 font-medium'
-						: ''}"
-			>
-				{chapter.title}
-			</button>
-		{/each}
-		{#if !chapters?.length}
-			<p
-				class="px-3 py-2 text-center text-[0.84em]
-					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
-			>
-				Empty
-			</p>
-		{/if}
-	</div>
-{/if}
-
-				<div
-					class="flex items-center justify-between px-0.5 py-1 text-[0.87em]
-						{isDarkMode ? 'text-white' : 'text-zinc-800'}"
-				>
-					<span>Data Saver</span>
-					<input
-						type="checkbox"
-						checked={dataSaver}
-						onchange={toggleDataSaver}
-						class="h-4 w-4 cursor-pointer accent-purple-600"
+					<polygon
+						points={activityChart.areaPoints}
+						fill="url(#activityGrad)"
+						opacity="0.25"
 					/>
+
+					<polyline
+						points={activityChart.linePoints}
+						fill="none"
+						stroke="#8b5cf6"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						vector-effect="non-scaling-stroke"
+					/>
+
+					{#each activityChart.points as p}
+						<circle
+							cx={p.x}
+							cy={p.y}
+							r={p.count > 0 ? 1.8 : 1.1}
+							fill={p.count > 0 ? '#a78bfa' : isDark ? '#52525b' : '#d4d4d8'}
+							stroke={isDark ? '#18181b' : '#fff'}
+							stroke-width="0.7"
+							vector-effect="non-scaling-stroke"
+						>
+							<title>{p.count} reads · {p.key}</title>
+						</circle>
+					{/each}
+
+					<defs>
+						<linearGradient id="activityGrad" x1="0" y1="0" x2="0" y2="1">
+							<stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.45" />
+							<stop offset="100%" stop-color="#8b5cf6" stop-opacity="0" />
+						</linearGradient>
+					</defs>
+				</svg>
+
+				<div class="pointer-events-none absolute inset-x-0 top-0 flex" style="height: {CHART_H}px">
+					{#each activityChart.points as p}
+						<div class="relative flex-1">
+							{#if p.count > 0}
+								<span
+									class="absolute left-1/2 -translate-x-1/2 text-[9px] font-bold tabular-nums text-violet-500"
+									style="top: {Math.max(0, (p.y / CHART_H) * CHART_H - 14)}px"
+								>
+									{p.count}
+								</span>
+							{/if}
+						</div>
+					{/each}
 				</div>
 
-				{#if dataSaver}
-					<div
-						class="flex flex-col gap-1.5
-							{isDarkMode ? 'text-white' : 'text-zinc-800'}"
-					>
-						<label for="image-quality" class="text-[0.8em]">
-							Quality:
-							<span class="font-semibold text-emerald-500">{imageQuality}</span>px
-						</label>
-						<input
-							id="image-quality"
-							type="range"
-							min="600"
-							max="1200"
-							step="100"
-							value={imageQuality}
-							oninput={updateQuality}
-							class="w-full cursor-pointer accent-purple-600"
-						/>
-					</div>
-				{/if}
+				<div class="absolute inset-x-0 bottom-0 flex">
+					{#each activityDays as day}
+						<span class="flex-1 text-center text-[9px] {textMuted} sm:text-[10px]">
+							{day.label}
+						</span>
+					{/each}
+				</div>
 			</div>
-		{/if}
-	</div>
-  </div>
+		</div>
+
+		<div class="rounded-2xl border p-5 {cardSoft}">
+			<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
+				<TrendingUp class="h-4 w-4 text-emerald-500" />
+				Top sources
+			</h2>
+			{#if topSources.length === 0}
+				<p class="text-sm {textMuted}">No reading data yet.</p>
+			{:else}
+				<div class="space-y-2">
+					{#each topSources as s}
+						{@const pct = Math.round((s.count / Math.max(10, topSources[0]?.count || 10)) * 100)}
+						<div>
+							<div class="mb-1 flex items-center justify-between text-xs">
+								<span class="font-medium {textSub}">
+									{s.id}
+									<span
+										class="ml-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase {s.isNovel
+											? isDark
+												? 'bg-violet-500/20 text-violet-300'
+												: 'bg-violet-100 text-violet-700'
+											: isDark
+												? 'bg-red-500/20 text-red-300'
+												: 'bg-red-100 text-red-700'}"
+									>
+										{s.isNovel ? 'novel' : 'comic'}
+									</span>
+								</span>
+								<span class="tabular-nums {textMuted}">{s.count} · {pct}%</span>
+							</div>
+							<div class="h-1.5 overflow-hidden rounded-full {barTrack}">
+								<div
+									class="h-full rounded-full {s.isNovel ? 'bg-violet-500' : 'bg-red-500'}"
+									style="width: {pct}%"
+								></div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+
+		<div class="rounded-2xl border p-5 {cardSoft}">
+			<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
+				<Clock class="h-4 w-4 {textMuted}" />
+				Recent reads
+			</h2>
+			{#if recent.length === 0}
+				<p class="text-sm {textMuted}">Start reading to build your stats.</p>
+			{:else}
+				<div class="divide-y {divide}">
+					{#each recent as item}
+						<a
+							href="/manga/{item.sourceId}{item.mangaId}"
+							class="flex items-center gap-3 py-2.5 transition {hoverRow}"
+						>
+							<div class="min-w-0 flex-1">
+								<p class="truncate text-sm font-medium {textSub}">
+									{item.mangaTitle || 'Untitled'}
+								</p>
+								<p class="truncate text-[11px] {textMuted}">
+									{item.sourceId} · Ch.{item.chapterNumber || '?'} · {item.chapterTitle || ''}
+								</p>
+							</div>
+							<span
+								class="shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase {isNovelSource(
+									item.sourceId
+								)
+									? isDark
+										? 'bg-violet-500/15 text-violet-300'
+										: 'bg-violet-100 text-violet-700'
+									: isDark
+										? 'bg-red-500/15 text-red-300'
+										: 'bg-red-100 text-red-700'}"
+							>
+								{isNovelSource(item.sourceId) ? 'novel' : 'comic'}
+							</span>
+							<span class="shrink-0 text-[11px] {textMuted}">{formatTime(item.timestamp)}</span>
+						</a>
+					{/each}
+				</div>
+				<a
+					href="/history"
+					class="mt-3 inline-block text-xs font-medium text-violet-500 hover:underline"
+				>
+					View full history →
+				</a>
+			{/if}
+		</div>
+	{/if}
 </div>

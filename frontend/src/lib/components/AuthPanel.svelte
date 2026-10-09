@@ -85,12 +85,14 @@
 
 	async function calcStats() {
 		const { localXp, hist, sourceCount } = calcLocal();
+		// Same rule as /stats: max(lifetime, local)
 		let total = Math.max(getInstantLifetimeXp(), localXp);
 		applyLevel(total);
 
 		if (!getUser()) return;
 
 		try {
+			// Re-seed lifetime from current local if cloud was wiped
 			const s = await bootstrapLifetimeFromLocal({
 				titleCount: hist.length,
 				bookmarkCount,
