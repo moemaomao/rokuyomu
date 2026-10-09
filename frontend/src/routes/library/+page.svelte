@@ -7,6 +7,8 @@
 		clearLibrary,
 		chooseLibraryFolder,
 		librarySupportsDisk,
+		ensureLibraryLoaded,
+		isLibraryReady,
 		type LibraryEntry
 	} from '$lib/stores/library.svelte';
 	import { Library, FolderOpen, RefreshCw, Trash2, HardDrive, BookOpen } from 'lucide-svelte';
@@ -17,9 +19,13 @@
 	let msg = $state('');
 	let diskOk = $state(false);
 
-	function load() {
-		items = getLibrary();
+	async function load() {
 		diskOk = librarySupportsDisk();
+		if (!isLibraryReady()) {
+			items = await ensureLibraryLoaded();
+		} else {
+			items = getLibrary();
+		}
 	}
 
 	async function handleSync() {
@@ -81,9 +87,17 @@
 	}
 
 	onMount(() => {
-		load();
-		window.addEventListener('library-changed', load);
-		return () => window.removeEventListener('library-changed', load);
+		void load();
+		const onLib = () => {
+			void load();
+		};
+		window.addEventListener('library-changed', onLib);
+		// Retry shortly after mount in case IDB was still opening
+		const t = setTimeout(() => void load(), 300);
+		return () => {
+			window.removeEventListener('library-changed', onLib);
+			clearTimeout(t);
+		};
 	});
 </script>
 

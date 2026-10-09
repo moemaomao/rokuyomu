@@ -1,8 +1,3 @@
-/**
- * Offline Library — metadata in IndexedDB, files on local disk (File System Access).
- * Can sync list from bookmarks (metadata only).
- */
-
 import { browser } from '$app/environment';
 import {
 	idbGetLibrary,
@@ -16,32 +11,46 @@ import {
 import { getBookmarks } from '$lib/stores/bookmark.svelte';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
 import { getLibraryRoot, supportsFileSystemAccess, pickLibraryRoot } from '$lib/utils/localFs';
+import { isNovelSource } from '$lib/utils/novelSources';
 
 export type { LibraryEntry, LibraryChapterRef };
 
 let entries = $state<LibraryEntry[]>([]);
 let ready = $state(false);
 let hasRoot = $state(false);
+let loadError = $state<string | null>(null);
 
 function libKey(mangaId: string, sourceId: string): string {
 	return `${sourceId}::${normalizeMangaId(mangaId)}`;
 }
 
+async function reloadFromIdb() {
+	const list = await idbGetLibrary();
+	entries = list;
+	return list;
+}
+
 if (browser) {
 	(async () => {
 		try {
-			entries = await idbGetLibrary();
-			// Only restore existing handle — do NOT open picker on page load
+			await reloadFromIdb();
 			const root = await getLibraryRoot().catch(() => null);
 			hasRoot = !!root || supportsFileSystemAccess();
-		} catch (e) {
+			loadError = null;
+		} catch (e: any) {
 			console.error('[library] load failed', e);
 			entries = [];
+			loadError = e?.message || 'Failed to load library';
 		} finally {
 			ready = true;
+			window.dispatchEvent(new CustomEvent('library-changed'));
 		}
 		window.addEventListener('library-changed', async () => {
-			entries = await idbGetLibrary();
+			try {
+				await reloadFromIdb();
+			} catch (e) {
+				console.warn('[library] refresh failed', e);
+			}
 		});
 	})();
 }
@@ -65,7 +74,6 @@ export function isChapterInLibrary(
 	const n = String(chapterId || '');
 	const set = getOfflineChapterIds(sourceId, mangaId);
 	if (set.has(n)) return true;
-	// also match with/without leading slash
 	const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
 	return set.has(alt);
 }
@@ -86,13 +94,16 @@ export async function removeChapterFromLibrary(
 	);
 	const next = { ...existing, chapters, timestamp: Date.now() };
 	await idbPutLibraryEntry(next);
-	entries = await idbGetLibrary();
+	await reloadFromIdb();
 	window.dispatchEvent(new CustomEvent('library-changed'));
 }
 
-
 export function isLibraryReady(): boolean {
 	return ready;
+}
+
+export function getLibraryLoadError(): string | null {
+	return loadError;
 }
 
 export function librarySupportsDisk(): boolean {
@@ -141,8 +152,7 @@ export async function upsertLibraryEntry(partial: {
 		timestamp: Date.now()
 	};
 	await idbPutLibraryEntry(next);
-	const list = await idbGetLibrary();
-	entries = list;
+	await reloadFromIdb();
 	window.dispatchEvent(new CustomEvent('library-changed'));
 }
 
@@ -150,7 +160,7 @@ export async function removeLibraryEntry(mangaId: string, sourceId: string) {
 	if (!browser) return;
 	const key = libKey(mangaId, sourceId);
 	await idbDeleteLibraryEntry(key);
-	entries = await idbGetLibrary();
+	await reloadFromIdb();
 	window.dispatchEvent(new CustomEvent('library-changed'));
 }
 
@@ -161,7 +171,6 @@ export async function clearLibrary() {
 	window.dispatchEvent(new CustomEvent('library-changed'));
 }
 
-/** Sync metadata from bookmarks into library (does not download chapters). */
 export async function syncLibraryFromBookmarks(): Promise<number> {
 	if (!browser) return 0;
 	const bms = getBookmarks();
@@ -176,7 +185,7 @@ export async function syncLibraryFromBookmarks(): Promise<number> {
 				mangaTitle: b.mangaTitle,
 				cover: b.cover || '',
 				sourceId: b.sourceId,
-				isNovel: false,
+				isNovel: isNovelSource(b.sourceId),
 				localPath: '',
 				chapters: [],
 				timestamp: Date.now()
@@ -190,4 +199,16 @@ export async function syncLibraryFromBookmarks(): Promise<number> {
 	entries = list;
 	window.dispatchEvent(new CustomEvent('library-changed'));
 	return added;
+}
+
+export async function ensureLibraryLoaded(): Promise<LibraryEntry[]> {
+	if (!browser) return [];
+	try {
+		const list = await reloadFromIdb();
+		ready = true;
+		return list;
+	} catch (e: any) {
+		loadError = e?.message || 'load failed';
+		return entries;
+	}
 }

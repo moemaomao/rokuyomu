@@ -147,7 +147,7 @@ export function getDB() {
 				if (oldVersion < 4 && !db.objectStoreNames.contains('permanentStats')) {
 					db.createObjectStore('permanentStats', { keyPath: 'key' });
 				}
-				if (oldVersion < 5 && !db.objectStoreNames.contains('library')) {
+				if (!db.objectStoreNames.contains('library')) {
 					const store = db.createObjectStore('library', { keyPath: 'key' });
 					store.createIndex('by-timestamp', 'timestamp');
 				}
@@ -334,8 +334,14 @@ export async function idbSetPermanentStats(doc: PermanentStatsDoc): Promise<void
 // ===== Offline Library =====
 export async function idbGetLibrary(): Promise<LibraryEntry[]> {
 	const db = await getDB();
-	const all = await db.getAllFromIndex('library', 'by-timestamp');
-	return all.reverse();
+	try {
+		const all = await db.getAllFromIndex('library', 'by-timestamp');
+		return all.reverse();
+	} catch (e) {
+		console.warn('[idb] library index fallback', e);
+		const all = await db.getAll('library');
+		return all.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+	}
 }
 
 export async function idbPutLibraryEntry(entry: LibraryEntry) {
