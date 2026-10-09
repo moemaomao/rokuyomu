@@ -26,6 +26,12 @@
 		type LifetimeStats
 	} from '$lib/stores/lifetimeXp';
 	import {
+		loadPermanentStats,
+		hydratePermanentStats,
+		getCachedPermanentStats,
+		permanentStatsView
+	} from '$lib/stores/permanentStats';
+	import {
 		Trophy,
 		Zap,
 		BookOpen,
@@ -46,20 +52,25 @@
 	let history = $state<ReadingEntry[]>([]);
 	let activityLog = $state<ActivityLogEntry[]>([]);
 	let bookmarkCount = $state(0);
+	let permView = $state<ReturnType<typeof permanentStatsView> | null>(null);
 	let lifetimeXp = $state(0);
 
 	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
 	let novelHistory = $derived(history.filter((h) => isNovelSource(h.sourceId)));
 
-	let comicTitles = $derived(comicHistory.length);
-	let novelTitles = $derived(novelHistory.length);
-	let totalTitles = $derived(history.length);
+	// Prefer permanent aggregates (survive history clear); fall back to live history
+	let comicTitles = $derived(permView ? permView.comicTitles : comicHistory.length);
+	let novelTitles = $derived(permView ? permView.novelTitles : novelHistory.length);
+	let totalTitles = $derived(permView ? permView.totalTitles : history.length);
 
-	let comicChapters = $derived(sumChapterMarkers(comicHistory));
-	let novelChapters = $derived(sumChapterMarkers(novelHistory));
-	let totalChapters = $derived(comicChapters + novelChapters);
+	let comicChapters = $derived(permView ? permView.comicProgress : sumChapterMarkers(comicHistory));
+	let novelChapters = $derived(permView ? permView.novelProgress : sumChapterMarkers(novelHistory));
+	let totalChapters = $derived(permView ? permView.totalProgress : comicChapters + novelChapters);
 
 	let sourceMap = $derived.by(() => {
+		if (permView?.topSources?.length) {
+			return permView.topSources;
+		}
 		const m = new Map<string, { count: number; isNovel: boolean }>();
 		for (const h of history) {
 			const id = h.sourceId || 'unknown';
@@ -250,6 +261,17 @@
 		}
 	}
 
+	async function loadPermanent() {
+		hydratePermanentStats();
+		permView = permanentStatsView(getCachedPermanentStats());
+		try {
+			const doc = await loadPermanentStats();
+			permView = permanentStatsView(doc);
+		} catch (e) {
+			console.error('permanent stats load failed', e);
+		}
+	}
+
 	onMount(() => {
 		const updateTheme = () => {
 			isDark = document.documentElement.classList.contains('dark');
@@ -263,11 +285,14 @@
 			hydrateLifetimeFromLocalStorage();
 			lifetimeXp = getCachedLifetimeStats().totalXp;
 		}
+		hydratePermanentStats();
+		permView = permanentStatsView(getCachedPermanentStats());
 
 		(async () => {
 			await whenHistoryReady();
 			await load();
 			await loadLifetime();
+			await loadPermanent();
 			ready = true;
 		})();
 		const onChange = () => {
@@ -279,6 +304,9 @@
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('bookmarks-changed', onChange);
 		window.addEventListener('activity-changed', onChange);
+		window.addEventListener('permanent-stats-changed', () => {
+			permView = permanentStatsView(getCachedPermanentStats());
+		});
 		window.addEventListener('lifetime-xp-changed', onXp);
 		return () => {
 			obs.disconnect();

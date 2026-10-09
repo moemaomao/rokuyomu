@@ -38,12 +38,28 @@ export interface NotificationEntry {
 	timestamp: number;
 }
 
-/** One reading session event for the activity graph (not limited to 30 titles). */
 export interface ActivityLogEntry {
 	id?: number;
 	mangaId: string;
 	sourceId: string;
 	timestamp: number;
+}
+
+export interface PermanentTitleMeta {
+	maxChapter: number;
+	isNovel: boolean;
+	sourceId: string;
+	title: string;
+	lastRead: number;
+}
+
+export interface PermanentStatsDoc {
+	titles: Record<string, PermanentTitleMeta>;
+	sources: Record<string, { count: number; isNovel: boolean }>;
+	comicTitles: number;
+	novelTitles: number;
+	totalProgress: number;
+	updatedAt: number;
 }
 
 interface MikorokuDB extends DBSchema {
@@ -67,13 +83,15 @@ interface MikorokuDB extends DBSchema {
 		value: ActivityLogEntry;
 		indexes: { 'by-timestamp': number };
 	};
+	permanentStats: {
+		key: string;
+		value: PermanentStatsDoc & { key: string };
+	};
 }
 
 const DB_NAME = 'mikoroku-db';
-/** v3: add activityLog store for 14–30 day reading activity graph */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
-/** Keep activity events for 30 days */
 export const ACTIVITY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 let dbPromise: Promise<IDBPDatabase<MikorokuDB>> | null = null;
@@ -100,6 +118,9 @@ export function getDB() {
 						autoIncrement: true
 					});
 					store.createIndex('by-timestamp', 'timestamp');
+				}
+				if (oldVersion < 4 && !db.objectStoreNames.contains('permanentStats')) {
+					db.createObjectStore('permanentStats', { keyPath: 'key' });
 				}
 			}
 		});
@@ -262,4 +283,20 @@ export async function idbSetAllNotifications(list: NotificationEntry[]) {
 		)
 	);
 	await tx.done;
+}
+
+
+const PERM_KEY = 'main';
+
+export async function idbGetPermanentStats(): Promise<PermanentStatsDoc | null> {
+	const db = await getDB();
+	const row = await db.get('permanentStats', PERM_KEY);
+	if (!row) return null;
+	const { key: _k, ...rest } = row;
+	return rest as PermanentStatsDoc;
+}
+
+export async function idbSetPermanentStats(doc: PermanentStatsDoc): Promise<void> {
+	const db = await getDB();
+	await db.put('permanentStats', { ...doc, key: PERM_KEY });
 }

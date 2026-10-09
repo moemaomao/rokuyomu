@@ -10,6 +10,7 @@ import {
 import { db } from '$lib/firebase';
 import { getUser } from '$lib/stores/auth.svelte';
 import { grantReadingXp } from '$lib/stores/lifetimeXp';
+import { recordPermanentReading } from '$lib/stores/permanentStats';
 import {
 	idbGetHistory,
 	idbDeleteHistory,
@@ -236,6 +237,18 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 		});
 	} catch (e) {
 		console.error('Failed to grant reading XP', e);
+	}
+
+	// Permanent aggregates (donuts / top sources) — survive history clear
+	try {
+		await recordPermanentReading({
+			mangaId: full.mangaId,
+			sourceId: full.sourceId,
+			chapterNumber: full.chapterNumber,
+			mangaTitle: full.mangaTitle
+		});
+	} catch (e) {
+		console.error('Failed to record permanent stats', e);
 	}
 }
 
