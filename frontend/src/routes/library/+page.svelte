@@ -141,6 +141,32 @@
 		return map[l] || '';
 	}
 
+	/** When API does not send lang, pick a sensible default per source (homepage flags need this). */
+	function defaultLangForSource(sourceId: string, isNovel?: boolean): string {
+		const s = String(sourceId || '').toLowerCase();
+		const idLang = new Set([
+			'sakuranovel',
+			'meionovel',
+			'bacalightnovel',
+			'noveltoon',
+			'lovelyblossoms'
+		]);
+		if (idLang.has(s)) return 'id';
+		const jaLang = new Set(['weloma', 'rawkuma', 'senkuro']);
+		if (jaLang.has(s)) return 'ja';
+		const koLang = new Set(['asurascans', 'flamecomics', 'reaperscans']);
+		if (koLang.has(s)) return 'ko';
+		const zhLang = new Set(['manhuaplus', 'mangadex']);
+		if (zhLang.has(s)) return 'zh';
+		// Most novel aggregators on this site are English
+		if (isNovel) return 'en';
+		return 'en';
+	}
+
+	function effectiveLang(e: LibraryEntry): string {
+		return (e.lang && String(e.lang).trim()) || defaultLangForSource(e.sourceId, e.isNovel);
+	}
+
 	/** Homepage-style latest chapter label */
 	function latestChapterLabel(e: LibraryEntry): string {
 		if (e.latestChapter) return String(e.latestChapter);
@@ -249,7 +275,7 @@
 			try {
 				let latest = '';
 				let maxN = -1;
-				let lang = e.lang || '';
+				let lang = e.lang || defaultLangForSource(e.sourceId, e.isNovel);
 				for (const c of chapters) {
 					const m = String(c.title || c.number || '').match(/(\d+(?:\.\d+)?)/);
 					const n = m ? parseFloat(m[1]) : Number(c.number) || -1;
@@ -257,7 +283,7 @@
 						maxN = n;
 						latest = m ? m[1] : String(c.number ?? c.title ?? '');
 					}
-					if (!lang && c.lang) lang = String(c.lang);
+					if (c.lang) lang = String(c.lang);
 				}
 				if (latest || lang) {
 					const { upsertLibraryEntry } = await import('$lib/stores/library.svelte');
@@ -598,11 +624,12 @@
 
 						{#if latestChapterLabel(e)}
 							<span
-								class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]"
+								class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 flex items-center gap-0.5 sm:top-[17px]"
 							>
-								{#if listChapterFlag(e.lang)}
+								{#if listChapterFlag(effectiveLang(e))}
 									<span
-										class="fi fi-{listChapterFlag(e.lang)} text-[8px] leading-none sm:text-[9px]"
+										class="fi fi-{listChapterFlag(effectiveLang(e))} shrink-0 text-[8px] leading-none sm:text-[9px]"
+										title={effectiveLang(e)}
 									></span>
 								{/if}
 								<span>Ch. {latestChapterLabel(e)}</span>
