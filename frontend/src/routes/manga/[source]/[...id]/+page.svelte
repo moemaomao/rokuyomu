@@ -10,6 +10,8 @@
 		unmarkChapterRead
 	} from '$lib/utils/readChapters';
 	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
+	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
+	import { getOfflineChapterIds } from '$lib/stores/library.svelte';
 	import { Bell, BellOff, Check } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
@@ -42,13 +44,30 @@
 		return !!s && s.phase !== 'idle' && s.phase !== 'done' && s.phase !== 'error';
 	}
 
+	let offlineIds = $state<Set<string>>(new Set());
+
+	function refreshOfflineChapters() {
+		if (!manga?.id || !source) {
+			offlineIds = new Set();
+			return;
+		}
+		offlineIds = getOfflineChapterIds(source, manga.id);
+	}
+
+	function isOffline(chapterId: string | number | undefined): boolean {
+		if (chapterId == null || chapterId === '') return false;
+		const n = String(chapterId);
+		if (offlineIds.has(n)) return true;
+		const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
+		return offlineIds.has(alt);
+	}
+
 	function dlLabel(chapterId: string): string {
 		const s = dlState[chapterId];
 		if (!s || s.phase === 'idle') return '';
 		if (s.phase === 'error') return '!';
 		if (s.phase === 'done') return '✓';
 		if (s.phase === 'images' && 'total' in s && s.total) return `${s.current}/${s.total}`;
-		if (s.phase === 'zip') return '…';
 		return '…';
 	}
 
@@ -57,19 +76,45 @@
 		e.stopPropagation();
 		if (!chapter?.id || isDownloading(chapter.id)) return;
 		const id = String(chapter.id);
+		const novel = isNovelSource(source);
 		try {
-			await downloadChapter({
-				source,
-				chapterId: id,
-				chapterTitle: chapter.title || `Chapter ${chapter.number}`,
-				mangaTitle: manga?.title,
-				onProgress: (p) => {
-					dlState = { ...dlState, [id]: p };
-				}
-			});
+			if (novel) {
+				await downloadNovelChapterPdf({
+					source,
+					chapterId: id,
+					chapterTitle: chapter.title || `Chapter ${chapter.number}`,
+					novelTitle: manga?.title,
+					mangaId: manga?.id,
+					cover: manga?.cover || '',
+					onProgress: (p) => {
+						dlState = {
+							...dlState,
+							[id]: {
+								phase: p.phase,
+								current: p.current,
+								total: p.total,
+								message: p.message
+							}
+						};
+					}
+				});
+			} else {
+				await downloadChapter({
+					source,
+					chapterId: id,
+					chapterTitle: chapter.title || `Chapter ${chapter.number}`,
+					mangaTitle: manga?.title,
+					mangaId: manga?.id,
+					cover: manga?.cover || '',
+					onProgress: (p) => {
+						dlState = { ...dlState, [id]: p };
+					}
+				});
+			}
+			refreshOfflineChapters();
 			setTimeout(() => {
 				dlState = { ...dlState, [id]: { phase: 'idle' } };
-			}, 1500);
+			}, 800);
 		} catch (err: any) {
 			console.error('[download chapter]', err);
 			dlState = {
@@ -554,15 +599,18 @@
 				refreshReadChapters();
 			}
 		};
+		refreshOfflineChapters();
 		window.addEventListener('bookmarks-changed', onChange);
 		window.addEventListener('notifications-changed', onChange);
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('read-chapters-changed', onChange);
+		window.addEventListener('library-changed', refreshOfflineChapters);
 		return () => {
 			window.removeEventListener('bookmarks-changed', onChange);
 			window.removeEventListener('notifications-changed', onChange);
 			window.removeEventListener('history-changed', onChange);
 			window.removeEventListener('read-chapters-changed', onChange);
+			window.removeEventListener('library-changed', refreshOfflineChapters);
 		};
 	});
 
@@ -1075,21 +1123,27 @@
 									{/if}
 									<button
 										type="button"
-										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-300 disabled:opacity-50"
-										title="Download chapter"
-										aria-label="Download {chapter.title}"
+										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded border transition disabled:opacity-50 {isOffline(chapter.id)
+											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
+										title={isOffline(chapter.id) ? "Sudah offline di library" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Offline ${chapter.title}` : `Download ${chapter.title}`}
 										disabled={isDownloading(chapter.id)}
 										onclick={(e) => handleDownloadChapter(e, chapter)}
 									>
-										{#if isDownloading(chapter.id) || dlLabel(chapter.id)}
-											<span class="text-[8px] font-bold">{dlLabel(chapter.id) || '…'}</span>
-										{:else}
-											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-												<polyline points="7 10 12 15 17 10" />
-												<line x1="12" x2="12" y1="15" y2="3" />
-											</svg>
-										{/if}
+										{#if isDownloading(chapter.id)}
+										<span class="text-[8px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
+									{:else if isOffline(chapter.id)}
+										<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 6 9 17l-5-5" />
+										</svg>
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" x2="12" y1="15" y2="3" />
+										</svg>
+									{/if}
 									</button>
 									<div class="absolute inset-x-0 bottom-0 bg-black/85 px-1 py-1.5 text-center">
 										<p
@@ -1147,21 +1201,27 @@
 									</a>
 									<button
 										type="button"
-										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 transition hover:bg-emerald-500/30 hover:text-emerald-300 disabled:opacity-50"
-										title="Download chapter"
-										aria-label="Download {chapter.title}"
+										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-50 {isOffline(chapter.id)
+											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
+										title={isOffline(chapter.id) ? "Sudah offline di library" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Offline ${chapter.title}` : `Download ${chapter.title}`}
 										disabled={isDownloading(chapter.id)}
 										onclick={(e) => handleDownloadChapter(e, chapter)}
 									>
-										{#if isDownloading(chapter.id) || dlLabel(chapter.id)}
-											<span class="text-[9px] font-bold tabular-nums">{dlLabel(chapter.id) || '…'}</span>
-										{:else}
-											<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-												<polyline points="7 10 12 15 17 10" />
-												<line x1="12" x2="12" y1="15" y2="3" />
-											</svg>
-										{/if}
+										{#if isDownloading(chapter.id)}
+										<span class="text-[9px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
+									{:else if isOffline(chapter.id)}
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 6 9 17l-5-5" />
+										</svg>
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" x2="12" y1="15" y2="3" />
+										</svg>
+									{/if}
 									</button>
 								</div>
 							{/each}
@@ -1206,21 +1266,27 @@
 									</div>
 									<button
 										type="button"
-										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-300 disabled:opacity-50"
-										title="Download chapter"
-										aria-label="Download {chapter.title}"
+										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-50 {isOffline(chapter.id)
+											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_10px_rgba(139,92,246,0.45)]'
+											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
+										title={isOffline(chapter.id) ? "Sudah offline di library" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Offline ${chapter.title}` : `Download ${chapter.title}`}
 										disabled={isDownloading(chapter.id)}
 										onclick={(e) => handleDownloadChapter(e, chapter)}
 									>
-										{#if isDownloading(chapter.id) || dlLabel(chapter.id)}
-											<span class="text-[10px] font-bold">{dlLabel(chapter.id) || '…'}</span>
-										{:else}
-											<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-												<polyline points="7 10 12 15 17 10" />
-												<line x1="12" x2="12" y1="15" y2="3" />
-											</svg>
-										{/if}
+										{#if isDownloading(chapter.id)}
+										<span class="text-[10px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
+									{:else if isOffline(chapter.id)}
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 6 9 17l-5-5" />
+										</svg>
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" x2="12" y1="15" y2="3" />
+										</svg>
+									{/if}
 									</button>
 								</a>
 							{/each}

@@ -1,14 +1,13 @@
-/**
- * Client-side chapter downloader for RokuYomu detail page.
- * Uses existing /api/pages + /api/proxy — no server ZIP needed.
- *
- * Drop at: frontend/src/lib/utils/downloadChapter.ts
- * Optional: pnpm add jszip && pnpm add -D @types/jszip
- * (falls back to sequential single-image downloads if JSZip missing)
- */
+import {
+	supportsFileSystemAccess,
+	ensureLibraryRoot,
+	saveMangaChapterToDisk,
+	sanitizePathSegment
+} from '$lib/utils/localFs';
+import { upsertLibraryEntry } from '$lib/stores/library.svelte';
 
 export type DownloadProgress = {
-	phase: 'pages' | 'images' | 'zip' | 'done' | 'error';
+	phase: 'pages' | 'images' | 'zip' | 'disk' | 'fetch' | 'pdf' | 'done' | 'error';
 	current: number;
 	total: number;
 	message?: string;
@@ -28,10 +27,7 @@ function pad(n: number, width = 3): string {
 	return String(n).padStart(width, '0');
 }
 
-async function fetchAllPageUrls(
-	source: string,
-	chapterId: string
-): Promise<string[]> {
+async function fetchAllPageUrls(source: string, chapterId: string): Promise<string[]> {
 	const all: string[] = [];
 	let start = 0;
 	const count = 40;
@@ -97,11 +93,10 @@ function triggerDownload(blob: Blob, filename: string) {
 
 async function tryLoadJSZip(): Promise<any | null> {
 	try {
-	
 		const mod = await import('jszip');
 		return (mod as any).default || mod;
 	} catch {
-		
+		/* */
 	}
 	try {
 		const g = globalThis as any;
@@ -124,20 +119,101 @@ export async function downloadChapter(opts: {
 	chapterId: string;
 	chapterTitle: string;
 	mangaTitle?: string;
+	mangaId?: string;
+	cover?: string;
 	onProgress?: ProgressCb;
+	forceZip?: boolean;
 }): Promise<void> {
-	const { source, chapterId, chapterTitle, mangaTitle, onProgress } = opts;
+	const {
+		source,
+		chapterId,
+		chapterTitle,
+		mangaTitle,
+		mangaId,
+		cover,
+		onProgress,
+		forceZip
+	} = opts;
 	const report = (p: DownloadProgress) => onProgress?.(p);
 
 	report({ phase: 'pages', current: 0, total: 0, message: 'Fetching page list…' });
 	const urls = await fetchAllPageUrls(source, chapterId);
 	if (!urls.length) throw new Error('No pages found');
 
-	const JSZip = await tryLoadJSZip();
 	const baseName = sanitizeFilename(
 		[mangaTitle, chapterTitle].filter(Boolean).join(' - ')
 	);
+	const titleSafe = sanitizePathSegment(mangaTitle || 'Manga');
+	const chapterSafe = sanitizePathSegment(chapterTitle || 'Chapter');
 
+	if (!forceZip && supportsFileSystemAccess()) {
+		const root = await ensureLibraryRoot();
+		if (root) {
+			const pages: { blob: Blob; ext: string }[] = [];
+			for (let i = 0; i < urls.length; i++) {
+				report({
+					phase: 'images',
+					current: i + 1,
+					total: urls.length,
+					message: `Downloading ${i + 1}/${urls.length}`
+				});
+				try {
+					pages.push(await fetchImageBlob(urls[i], source));
+				} catch (e) {
+					console.warn('[download] skip page', i + 1, e);
+				}
+			}
+
+			report({
+				phase: 'disk',
+				current: pages.length,
+				total: urls.length,
+				message: 'Saving to local folder…'
+			});
+
+			const path = await saveMangaChapterToDisk({
+				root,
+				mangaTitle: titleSafe,
+				chapterTitle: chapterSafe,
+				pages,
+				meta: {
+					source,
+					mangaId: mangaId || '',
+					mangaTitle: mangaTitle || titleSafe,
+					chapterId,
+					chapterTitle,
+					savedAt: Date.now(),
+					pageCount: pages.length
+				}
+			});
+
+			try {
+				await upsertLibraryEntry({
+					mangaId: mangaId || chapterId,
+					mangaTitle: mangaTitle || titleSafe,
+					cover: cover || '',
+					sourceId: source,
+					isNovel: false,
+					localPath: path,
+					chapters: [
+						{
+							chapterId,
+							chapterTitle,
+							savedAt: Date.now(),
+							pageCount: pages.length
+						}
+					]
+				});
+			} catch (e) {
+				console.warn('[library] upsert failed', e);
+			}
+
+			report({ phase: 'done', current: pages.length, total: urls.length, message: path });
+			return;
+		}
+	}
+
+	const JSZip = await tryLoadJSZip();
 	if (JSZip) {
 		const zip = new JSZip();
 		const folder = zip.folder(baseName) || zip;

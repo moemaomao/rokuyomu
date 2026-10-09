@@ -63,6 +63,25 @@ export interface PermanentStatsDoc {
 	updatedAt: number;
 }
 
+export interface LibraryChapterRef {
+	chapterId: string;
+	chapterTitle: string;
+	savedAt: number;
+	pageCount?: number;
+}
+
+export interface LibraryEntry {
+	key: string; // sourceId::mangaId
+	mangaId: string;
+	mangaTitle: string;
+	cover: string;
+	sourceId: string;
+	isNovel: boolean;
+	localPath: string;
+	chapters: LibraryChapterRef[];
+	timestamp: number;
+}
+
 interface MikorokuDB extends DBSchema {
 	bookmarks: {
 		key: string;
@@ -88,10 +107,15 @@ interface MikorokuDB extends DBSchema {
 		key: string;
 		value: PermanentStatsDoc & { key: string };
 	};
+	library: {
+		key: string;
+		value: LibraryEntry;
+		indexes: { 'by-timestamp': number };
+	};
 }
 
 const DB_NAME = 'mikoroku-db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export const ACTIVITY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -122,6 +146,10 @@ export function getDB() {
 				}
 				if (oldVersion < 4 && !db.objectStoreNames.contains('permanentStats')) {
 					db.createObjectStore('permanentStats', { keyPath: 'key' });
+				}
+				if (oldVersion < 5 && !db.objectStoreNames.contains('library')) {
+					const store = db.createObjectStore('library', { keyPath: 'key' });
+					store.createIndex('by-timestamp', 'timestamp');
 				}
 			}
 		});
@@ -301,4 +329,34 @@ export async function idbGetPermanentStats(): Promise<PermanentStatsDoc | null> 
 export async function idbSetPermanentStats(doc: PermanentStatsDoc): Promise<void> {
 	const db = await getDB();
 	await db.put('permanentStats', { ...doc, key: PERM_KEY });
+}
+
+// ===== Offline Library =====
+export async function idbGetLibrary(): Promise<LibraryEntry[]> {
+	const db = await getDB();
+	const all = await db.getAllFromIndex('library', 'by-timestamp');
+	return all.reverse();
+}
+
+export async function idbPutLibraryEntry(entry: LibraryEntry) {
+	const db = await getDB();
+	await db.put('library', entry);
+}
+
+export async function idbDeleteLibraryEntry(key: string) {
+	const db = await getDB();
+	await db.delete('library', key);
+}
+
+export async function idbClearLibrary() {
+	const db = await getDB();
+	await db.clear('library');
+}
+
+export async function idbSetAllLibrary(list: LibraryEntry[]) {
+	const db = await getDB();
+	const tx = db.transaction('library', 'readwrite');
+	await tx.store.clear();
+	await Promise.all(list.map((e) => tx.store.put(e)));
+	await tx.done;
 }
