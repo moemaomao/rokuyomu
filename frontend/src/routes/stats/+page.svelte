@@ -234,7 +234,11 @@
 				sourceCount: sourceIds.length,
 				chapterProgressXpSum: sumChapterProgressXp(history),
 				titleIds,
-				sourceIds
+				sourceIds,
+				chapterProgress: history.map((h) => ({
+					mangaId: h.mangaId,
+					chapterNumber: h.chapterNumber
+				}))
 			});
 			lifetime = stats;
 			useLifetime = true;
