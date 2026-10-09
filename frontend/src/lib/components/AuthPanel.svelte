@@ -7,7 +7,7 @@
 		logout
 	} from '$lib/stores/auth.svelte';
 	import { getBookmarks } from '$lib/stores/bookmark.svelte';
-	import { getHistory } from '$lib/stores/history';
+	import { getHistory, whenHistoryReady } from '$lib/stores/history';
 	import {
 		computeTotalXp,
 		computeLevelInfo,
@@ -16,10 +16,8 @@
 	} from '$lib/utils/level';
 	import {
 		loadLifetimeStats,
-		hydrateLifetimeFromLocalStorage,
-		getCachedLifetimeStats,
-		getInstantLifetimeXp,
-		effectiveXp
+		bootstrapLifetimeFromLocal,
+		getInstantLifetimeXp
 	} from '$lib/stores/lifetimeXp';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
@@ -65,7 +63,7 @@
 		rankColor = info.rankCls;
 	}
 
-	function calcLocalXp(): number {
+	function calcLocal() {
 		const hist = getHistory();
 		const bms = getBookmarks();
 		historyCount = hist.length;
@@ -73,42 +71,60 @@
 		chaptersRead = sumChapterMarkers(hist);
 		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
 		uniqueSources = sources.size;
-		return computeTotalXp({
-			titleCount: historyCount,
-			bookmarkCount,
-			sourceCount: uniqueSources,
-			chapterProgressXpSum: sumChapterProgressXp(hist)
-		});
-	}
-
-	function paintInstant() {
-		const localXp = calcLocalXp();
-		if (getUser()) {
-			const instant = getInstantLifetimeXp();
-			applyLevel(Math.max(instant, localXp));
-		} else {
-			applyLevel(localXp);
-		}
+		return {
+			localXp: computeTotalXp({
+				titleCount: historyCount,
+				bookmarkCount,
+				sourceCount: uniqueSources,
+				chapterProgressXpSum: sumChapterProgressXp(hist)
+			}),
+			hist,
+			sourceCount: uniqueSources
+		};
 	}
 
 	async function calcStats() {
-		const localXp = calcLocalXp();
-		if (getUser()) {
-			paintInstant();
+		const { localXp, hist, sourceCount } = calcLocal();
+		let total = Math.max(getInstantLifetimeXp(), localXp);
+		applyLevel(total);
+
+		if (!getUser()) return;
+
+		try {
+			const s = await bootstrapLifetimeFromLocal({
+				titleCount: hist.length,
+				bookmarkCount,
+				sourceCount,
+				chapterProgressXpSum: sumChapterProgressXp(hist),
+				titleIds: hist.map((h) => h.mangaId),
+				sourceIds: [...new Set(hist.map((h) => h.sourceId).filter(Boolean))],
+				chapterProgress: hist.map((h) => ({
+					mangaId: h.mangaId,
+					chapterNumber: h.chapterNumber
+				}))
+			});
+			total = Math.max(getInstantLifetimeXp(), s.totalXp, localXp);
+			applyLevel(total);
+		} catch (e) {
+			console.error('[AuthPanel] lifetime', e);
 			try {
-				await loadLifetimeStats();
-				applyLevel(Math.max(getInstantLifetimeXp(), localXp));
-			} catch (e) {
-				console.error('[AuthPanel] lifetime load failed', e);
-			}
-		} else {
-			applyLevel(localXp);
+				const s = await loadLifetimeStats();
+				applyLevel(Math.max(getInstantLifetimeXp(), s.totalXp, localXp));
+			} catch {}
 		}
 	}
 
 	onMount(() => {
-		paintInstant(); // instant from localStorage — no flash Lv1
-		void calcStats();
+		// Instant paint from LS
+		applyLevel(Math.max(getInstantLifetimeXp(), calcLocal().localXp));
+
+		(async () => {
+			try {
+				await whenHistoryReady();
+			} catch {}
+			await calcStats();
+		})();
+
 		const refresh = () => void calcStats();
 		window.addEventListener('history-changed', refresh);
 		window.addEventListener('bookmarks-changed', refresh);
@@ -138,6 +154,7 @@
 		onSuccess();
 	}
 </script>
+
 
 
 <div
