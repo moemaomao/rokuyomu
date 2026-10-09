@@ -19,6 +19,12 @@
 		bootstrapLifetimeFromLocal,
 		getInstantLifetimeXp
 	} from '$lib/stores/lifetimeXp';
+	import {
+		loadPermanentStats,
+		hydratePermanentStats,
+		getCachedPermanentStats,
+		permanentStatsView
+	} from '$lib/stores/permanentStats';
 	import EmailLoginForm from '$lib/components/EmailLoginForm.svelte';
 	import {
 		LogOut,
@@ -66,59 +72,96 @@
 	function calcLocal() {
 		const hist = getHistory();
 		const bms = getBookmarks();
-		historyCount = hist.length;
-		bookmarkCount = bms.length;
-		chaptersRead = sumChapterMarkers(hist);
-		const sources = new Set(hist.map((h) => h.sourceId).filter(Boolean));
-		uniqueSources = sources.size;
-		return {
-			localXp: computeTotalXp({
-				titleCount: historyCount,
-				bookmarkCount,
-				sourceCount: uniqueSources,
-				chapterProgressXpSum: sumChapterProgressXp(hist)
-			}),
-			hist,
-			sourceCount: uniqueSources
-		};
+		const liveHistory = hist.length;
+		const liveBookmarks = bms.length;
+		const liveSources = new Set(hist.map((h) => h.sourceId).filter(Boolean)).size;
+		const liveProgress = sumChapterMarkers(hist);
+		const localXp = computeTotalXp({
+			titleCount: liveHistory,
+			bookmarkCount: liveBookmarks,
+			sourceCount: liveSources,
+			chapterProgressXpSum: sumChapterProgressXp(hist)
+		});
+		return { hist, liveHistory, liveBookmarks, liveSources, liveProgress, localXp };
+	}
+
+	function applyCounts(opts: {
+		titles: number;
+		bookmarks: number;
+		progress: number;
+		sources: number;
+	}) {
+		historyCount = opts.titles;
+		bookmarkCount = opts.bookmarks;
+		chaptersRead = opts.progress;
+		uniqueSources = opts.sources;
 	}
 
 	async function calcStats() {
-		const { localXp, hist, sourceCount } = calcLocal();
-		// Same rule as /stats: max(lifetime, local)
-		let total = Math.max(getInstantLifetimeXp(), localXp);
+		const local = calcLocal();
+		
+		hydratePermanentStats();
+		const perm = permanentStatsView(getCachedPermanentStats());
+		const hasPerm = perm.totalTitles > 0;
+
+		applyCounts({
+			titles: hasPerm ? perm.totalTitles : local.liveHistory,
+			bookmarks: local.liveBookmarks,
+			progress: hasPerm ? perm.totalProgress : local.liveProgress,
+			sources: hasPerm ? perm.sourceCount : local.liveSources
+		});
+
+		let total = Math.max(getInstantLifetimeXp(), local.localXp);
 		applyLevel(total);
 
 		if (!getUser()) return;
 
 		try {
-			// Re-seed lifetime from current local if cloud was wiped
-			const s = await bootstrapLifetimeFromLocal({
-				titleCount: hist.length,
-				bookmarkCount,
-				sourceCount,
-				chapterProgressXpSum: sumChapterProgressXp(hist),
-				titleIds: hist.map((h) => h.mangaId),
-				sourceIds: [...new Set(hist.map((h) => h.sourceId).filter(Boolean))],
-				chapterProgress: hist.map((h) => ({
-					mangaId: h.mangaId,
-					chapterNumber: h.chapterNumber
-				}))
+			const [life, permDoc] = await Promise.all([
+				bootstrapLifetimeFromLocal({
+					titleCount: local.liveHistory,
+					bookmarkCount: local.liveBookmarks,
+					sourceCount: local.liveSources,
+					chapterProgressXpSum: sumChapterProgressXp(local.hist),
+					titleIds: local.hist.map((h) => h.mangaId),
+					sourceIds: [...new Set(local.hist.map((h) => h.sourceId).filter(Boolean))],
+					chapterProgress: local.hist.map((h) => ({
+						mangaId: h.mangaId,
+						chapterNumber: h.chapterNumber
+					}))
+				}),
+				loadPermanentStats()
+			]);
+
+			const perm2 = permanentStatsView(permDoc);
+			const hasPerm2 = perm2.totalTitles > 0;
+			applyCounts({
+				titles: hasPerm2 ? perm2.totalTitles : local.liveHistory,
+				bookmarks: local.liveBookmarks,
+				progress: hasPerm2 ? perm2.totalProgress : local.liveProgress,
+				sources: hasPerm2 ? perm2.sourceCount : local.liveSources
 			});
-			total = Math.max(getInstantLifetimeXp(), s.totalXp, localXp);
+
+			total = Math.max(getInstantLifetimeXp(), life.totalXp, local.localXp);
 			applyLevel(total);
 		} catch (e) {
-			console.error('[AuthPanel] lifetime', e);
+			console.error('[AuthPanel] stats load', e);
 			try {
 				const s = await loadLifetimeStats();
-				applyLevel(Math.max(getInstantLifetimeXp(), s.totalXp, localXp));
+				applyLevel(Math.max(getInstantLifetimeXp(), s.totalXp, local.localXp));
 			} catch {}
 		}
 	}
 
 	onMount(() => {
-		// Instant paint from LS
-		applyLevel(Math.max(getInstantLifetimeXp(), calcLocal().localXp));
+		const local = calcLocal();
+		applyCounts({
+			titles: local.liveHistory,
+			bookmarks: local.liveBookmarks,
+			progress: local.liveProgress,
+			sources: local.liveSources
+		});
+		applyLevel(Math.max(getInstantLifetimeXp(), local.localXp));
 
 		(async () => {
 			try {
@@ -131,10 +174,12 @@
 		window.addEventListener('history-changed', refresh);
 		window.addEventListener('bookmarks-changed', refresh);
 		window.addEventListener('lifetime-xp-changed', refresh);
+		window.addEventListener('permanent-stats-changed', refresh);
 		return () => {
 			window.removeEventListener('history-changed', refresh);
 			window.removeEventListener('bookmarks-changed', refresh);
 			window.removeEventListener('lifetime-xp-changed', refresh);
+			window.removeEventListener('permanent-stats-changed', refresh);
 		};
 	});
 
@@ -156,6 +201,7 @@
 		onSuccess();
 	}
 </script>
+
 
 
 
