@@ -22,14 +22,14 @@
 		bootstrapLifetimeFromLocal,
 		hydrateLifetimeFromLocalStorage,
 		getCachedLifetimeStats,
-		effectiveXp,
-		type LifetimeStats
+		getInstantLifetimeXp
 	} from '$lib/stores/lifetimeXp';
 	import {
 		loadPermanentStats,
 		hydratePermanentStats,
 		getCachedPermanentStats,
-		permanentStatsView
+		permanentStatsView,
+		bootstrapPermanentFromHistory
 	} from '$lib/stores/permanentStats';
 	import {
 		Trophy,
@@ -58,7 +58,6 @@
 	let comicHistory = $derived(history.filter((h) => !isNovelSource(h.sourceId)));
 	let novelHistory = $derived(history.filter((h) => isNovelSource(h.sourceId)));
 
-	// Prefer permanent aggregates (survive history clear); fall back to live history
 	let comicTitles = $derived(permView ? permView.comicTitles : comicHistory.length);
 	let novelTitles = $derived(permView ? permView.novelTitles : novelHistory.length);
 	let totalTitles = $derived(permView ? permView.totalTitles : history.length);
@@ -233,7 +232,7 @@
 			lifetimeXp = 0;
 			return;
 		}
-		// Instant from localStorage
+
 		hydrateLifetimeFromLocalStorage();
 		lifetimeXp = getCachedLifetimeStats().totalXp;
 		try {
@@ -280,10 +279,8 @@
 		const obs = new MutationObserver(updateTheme);
 		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
-		// Paint lifetime from LS immediately (before async)
 		if (getUser()) {
-			hydrateLifetimeFromLocalStorage();
-			lifetimeXp = getCachedLifetimeStats().totalXp;
+			lifetimeXp = getInstantLifetimeXp();
 		}
 		hydratePermanentStats();
 		permView = permanentStatsView(getCachedPermanentStats());
@@ -299,7 +296,7 @@
 			void load();
 		};
 		const onXp = () => {
-			lifetimeXp = getCachedLifetimeStats().totalXp;
+			lifetimeXp = Math.max(lifetimeXp, getInstantLifetimeXp());
 		};
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('bookmarks-changed', onChange);
