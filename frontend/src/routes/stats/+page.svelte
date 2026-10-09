@@ -674,7 +674,7 @@
 			{:else}
 				<div class="space-y-2">
 					{#each topSources as s}
-						{@const pct = Math.round((s.count / Math.max(25, topSources[0]?.count || 25)) * 100)}
+						{@const pct = Math.round((s.count / Math.max(100, topSources[0]?.count || 100)) * 100)}
 						<div>
 							<div class="mb-1 flex items-center justify-between text-xs">
 								<span class="font-medium {textSub}">
