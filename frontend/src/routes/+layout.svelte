@@ -424,7 +424,7 @@ onMount(() => {
 
 	window.addEventListener('scroll', handleScroll, { passive: true });
 const BROKEN_CACHE_KEY = 'rokuyomu_broken_sources_v1';
-const BROKEN_CACHE_TTL = 30 * 60 * 1000; // 30 menit
+const BROKEN_CACHE_TTL = 30 * 60 * 1000;
 
 async function loadBrokenSourcesOnce() {
 	if (!db) return;

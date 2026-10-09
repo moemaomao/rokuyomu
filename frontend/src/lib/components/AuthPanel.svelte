@@ -107,7 +107,7 @@
 	}
 
 	onMount(() => {
-		paintInstant();
+		paintInstant(); // instant from localStorage — no flash Lv1
 		void calcStats();
 		const refresh = () => void calcStats();
 		window.addEventListener('history-changed', refresh);

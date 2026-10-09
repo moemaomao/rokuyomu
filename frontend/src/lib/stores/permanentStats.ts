@@ -163,7 +163,6 @@ export function hydratePermanentStats(): PermanentStatsDoc {
 export async function loadPermanentStats(): Promise<PermanentStatsDoc> {
 	if (!browser) return { ...EMPTY, titles: {}, sources: {} };
 
-	// IDB first
 	try {
 		const idb = await idbGetPermanentStats();
 		if (idb && Object.keys(idb.titles || {}).length > 0) {
@@ -228,6 +227,7 @@ async function syncToCloud(docData: PermanentStatsDoc) {
 						comicTitles: docData.comicTitles,
 						novelTitles: docData.novelTitles,
 						totalProgress: docData.totalProgress,
+						chaptersReadEver: docData.chaptersReadEver || 0,
 						sources: docData.sources,
 						updatedAt: docData.updatedAt
 					}
