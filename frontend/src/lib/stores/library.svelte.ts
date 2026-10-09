@@ -44,6 +44,11 @@ function plainEntry(e: LibraryEntry): LibraryEntry {
 		isNovel: !!e.isNovel,
 		localPath: String(e.localPath ?? ''),
 		chapters: (e.chapters || []).map(plainChapter),
+		latestChapter:
+			e.latestChapter != null && String(e.latestChapter) !== ''
+				? String(e.latestChapter)
+				: undefined,
+		lang: e.lang != null && String(e.lang) !== '' ? String(e.lang) : undefined,
 		timestamp: Number(e.timestamp) || Date.now()
 	};
 }
@@ -173,6 +178,8 @@ export async function upsertLibraryEntry(partial: {
 	isNovel: boolean;
 	localPath?: string;
 	chapters?: LibraryChapterRef[];
+	latestChapter?: string;
+	lang?: string;
 }): Promise<void> {
 	if (!browser) return;
 	const key = libKey(partial.mangaId, partial.sourceId);
@@ -195,6 +202,9 @@ export async function upsertLibraryEntry(partial: {
 		isNovel: partial.isNovel,
 		localPath: partial.localPath || existing?.localPath || '',
 		chapters: Array.from(chapterMap.values()).sort((a, b) => b.savedAt - a.savedAt),
+		latestChapter:
+			partial.latestChapter || existing?.latestChapter || undefined,
+		lang: partial.lang || existing?.lang || undefined,
 		timestamp: Date.now()
 	});
 	await idbPutLibraryEntry(next);

@@ -71,7 +71,7 @@ export interface LibraryChapterRef {
 }
 
 export interface LibraryEntry {
-	key: string;
+	key: string; // sourceId::mangaId
 	mangaId: string;
 	mangaTitle: string;
 	cover: string;
@@ -79,6 +79,10 @@ export interface LibraryEntry {
 	isNovel: boolean;
 	localPath: string;
 	chapters: LibraryChapterRef[];
+	/** Latest known chapter number/label for the series (homepage-style badge) */
+	latestChapter?: string;
+	/** Primary chapter language (for flag badge, e.g. en, ja, id) */
+	lang?: string;
 	timestamp: number;
 }
 
@@ -346,6 +350,7 @@ export async function idbGetLibrary(): Promise<LibraryEntry[]> {
 
 export async function idbPutLibraryEntry(entry: LibraryEntry) {
 	const db = await getDB();
+	// Plain clone — Svelte proxies / non-cloneable fields cause DataCloneError
 	const plain: LibraryEntry = {
 		key: String(entry.key),
 		mangaId: String(entry.mangaId ?? ''),
@@ -360,6 +365,10 @@ export async function idbPutLibraryEntry(entry: LibraryEntry) {
 			savedAt: Number(c.savedAt) || Date.now(),
 			pageCount: typeof c.pageCount === 'number' ? c.pageCount : undefined
 		})),
+		latestChapter: entry.latestChapter != null && entry.latestChapter !== ''
+			? String(entry.latestChapter)
+			: undefined,
+		lang: entry.lang != null && String(entry.lang) !== '' ? String(entry.lang) : undefined,
 		timestamp: Number(entry.timestamp) || Date.now()
 	};
 	await db.put('library', plain);
@@ -395,6 +404,10 @@ export async function idbSetAllLibrary(list: LibraryEntry[]) {
 					savedAt: Number(c.savedAt) || Date.now(),
 					pageCount: typeof c.pageCount === 'number' ? c.pageCount : undefined
 				})),
+				latestChapter: entry.latestChapter != null && entry.latestChapter !== ''
+					? String(entry.latestChapter)
+					: undefined,
+				lang: entry.lang != null && String(entry.lang) !== '' ? String(entry.lang) : undefined,
 				timestamp: Number(entry.timestamp) || Date.now()
 			} satisfies LibraryEntry)
 		)

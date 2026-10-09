@@ -108,6 +108,50 @@
 		await load();
 	}
 
+
+	function listChapterFlag(lang?: string): string {
+		const l = String(lang || '')
+			.trim()
+			.toLowerCase();
+		const map: Record<string, string> = {
+			en: 'gb',
+			'en-us': 'us',
+			id: 'id',
+			ja: 'jp',
+			'ja-ro': 'jp',
+			ko: 'kr',
+			'ko-ro': 'kr',
+			zh: 'cn',
+			'zh-hk': 'hk',
+			'zh-ro': 'cn',
+			fr: 'fr',
+			pl: 'pl',
+			es: 'es',
+			'es-la': 'mx',
+			'pt-br': 'br',
+			pt: 'pt',
+			ru: 'ru',
+			vi: 'vn',
+			th: 'th',
+			ar: 'sa',
+			de: 'de',
+			it: 'it',
+			tr: 'tr'
+		};
+		return map[l] || '';
+	}
+
+	/** Homepage-style latest chapter label */
+	function latestChapterLabel(e: LibraryEntry): string {
+		if (e.latestChapter) return String(e.latestChapter);
+		let max = 0;
+		for (const c of e.chapters || []) {
+			const m = String(c.chapterTitle || '').match(/(\d+(?:\.\d+)?)/);
+			if (m) max = Math.max(max, parseFloat(m[1]));
+		}
+		return max > 0 ? String(max) : '';
+	}
+
 	function href(e: LibraryEntry) {
 		const id = e.mangaId.startsWith('/') ? e.mangaId : `/${e.mangaId}`;
 		return `/manga/${e.sourceId}${id}`;
@@ -124,7 +168,7 @@
 		img.src = `/api/proxy?url=${encodeURIComponent(original)}&source=${img.dataset.source || ''}`;
 	}
 
-	type ChapterRow = { id: string; title: string; number?: number };
+	type ChapterRow = { id: string; title: string; number?: number; lang?: string };
 
 	async function fetchAllChapters(source: string, mangaId: string): Promise<ChapterRow[]> {
 		const out: ChapterRow[] = [];
@@ -155,7 +199,8 @@
 				out.push({
 					id: String(c.id),
 					title: String(c.title || `Chapter ${c.number ?? ''}`),
-					number: c.number
+					number: c.number,
+					lang: c.lang ? String(c.lang) : undefined
 				});
 			}
 			if (!j.hasMore || batchList.length === 0) break;
@@ -200,6 +245,35 @@
 
 		try {
 			const chapters = await fetchAllChapters(e.sourceId, e.mangaId);
+			// Remember series latest (highest number / last in oldest-sorted list)
+			try {
+				let latest = '';
+				let maxN = -1;
+				let lang = e.lang || '';
+				for (const c of chapters) {
+					const m = String(c.title || c.number || '').match(/(\d+(?:\.\d+)?)/);
+					const n = m ? parseFloat(m[1]) : Number(c.number) || -1;
+					if (n >= maxN) {
+						maxN = n;
+						latest = m ? m[1] : String(c.number ?? c.title ?? '');
+					}
+					if (!lang && c.lang) lang = String(c.lang);
+				}
+				if (latest || lang) {
+					const { upsertLibraryEntry } = await import('$lib/stores/library.svelte');
+					await upsertLibraryEntry({
+						mangaId: e.mangaId,
+						mangaTitle: e.mangaTitle,
+						cover: e.cover || '',
+						sourceId: e.sourceId,
+						isNovel: e.isNovel,
+						latestChapter: latest || undefined,
+						lang: lang || undefined
+					});
+				}
+			} catch (err) {
+				console.warn('[library] latestChapter update', err);
+			}
 			const pending = chapters.filter((c) => {
 				const n = c.id;
 				const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
@@ -346,6 +420,16 @@
 			background: rgba(0, 0, 0, 0.82);
 			border-color: rgba(63, 63, 70, 0.5);
 			color: #fafafa;
+		}
+		.badge-stick-ch {
+			border-radius: 0 0.3rem 0.3rem 0;
+			margin-top: 1px;
+		}
+		.badge-chapter {
+			background: rgba(234, 179, 8, 0.82);
+			border-color: rgba(250, 204, 21, 0.4);
+			color: #1c1917;
+			font-weight: 800;
 		}
 	</style>
 </svelte:head>
@@ -511,6 +595,19 @@
 						<span class="badge-stick badge-stick-tl badge-source absolute top-0 left-0 z-20">
 							{e.sourceId}
 						</span>
+
+						{#if latestChapterLabel(e)}
+							<span
+								class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]"
+							>
+								{#if listChapterFlag(e.lang)}
+									<span
+										class="fi fi-{listChapterFlag(e.lang)} text-[8px] leading-none sm:text-[9px]"
+									></span>
+								{/if}
+								<span>Ch. {latestChapterLabel(e)}</span>
+							</span>
+						{/if}
 
 						<span
 							class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {e.isNovel
