@@ -11,7 +11,7 @@
 	} from '$lib/utils/readChapters';
 	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
 	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
-	import { getOfflineChapterIds } from '$lib/stores/library.svelte';
+	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/library.svelte';
 	import { Bell, BellOff, Check } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
@@ -46,10 +46,15 @@
 
 	let offlineIds = $state<Set<string>>(new Set());
 
-	function refreshOfflineChapters() {
+	async function refreshOfflineChapters() {
 		if (!manga?.id || !source) {
 			offlineIds = new Set();
 			return;
+		}
+		try {
+			await ensureLibraryLoaded();
+		} catch {
+			/* ignore */
 		}
 		offlineIds = getOfflineChapterIds(source, manga.id);
 	}
@@ -111,7 +116,7 @@
 					}
 				});
 			}
-			refreshOfflineChapters();
+			await refreshOfflineChapters();
 			setTimeout(() => {
 				dlState = { ...dlState, [id]: { phase: 'idle' } };
 			}, 800);
@@ -599,18 +604,19 @@
 				refreshReadChapters();
 			}
 		};
-		refreshOfflineChapters();
+		const onLibrary = () => void refreshOfflineChapters();
+		void refreshOfflineChapters();
 		window.addEventListener('bookmarks-changed', onChange);
 		window.addEventListener('notifications-changed', onChange);
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('read-chapters-changed', onChange);
-		window.addEventListener('library-changed', refreshOfflineChapters);
+		window.addEventListener('library-changed', onLibrary);
 		return () => {
 			window.removeEventListener('bookmarks-changed', onChange);
 			window.removeEventListener('notifications-changed', onChange);
 			window.removeEventListener('history-changed', onChange);
 			window.removeEventListener('read-chapters-changed', onChange);
-			window.removeEventListener('library-changed', refreshOfflineChapters);
+			window.removeEventListener('library-changed', onLibrary);
 		};
 	});
 

@@ -61,9 +61,26 @@ export function getLibrary(): LibraryEntry[] {
 
 export function getOfflineChapterIds(sourceId: string, mangaId: string): Set<string> {
 	const key = libKey(mangaId, sourceId);
-	const entry = entries.find((e) => e.key === key);
+	let entry = entries.find((e) => e.key === key);
+	if (!entry) {
+		const norm = normalizeMangaId(mangaId);
+		entry = entries.find(
+			(e) =>
+				e.sourceId === sourceId &&
+				(normalizeMangaId(e.mangaId) === norm || e.mangaId === mangaId)
+		);
+	}
 	if (!entry?.chapters?.length) return new Set();
-	return new Set(entry.chapters.map((c) => String(c.chapterId)));
+	const set = new Set<string>();
+	for (const c of entry.chapters) {
+		const id = String(c.chapterId || '');
+		if (!id) continue;
+		set.add(id);
+		set.add(id.startsWith('/') ? id.slice(1) : `/${id}`);
+		const seg = id.split('/').filter(Boolean).pop();
+		if (seg) set.add(seg);
+	}
+	return set;
 }
 
 export function isChapterInLibrary(
@@ -72,10 +89,13 @@ export function isChapterInLibrary(
 	chapterId: string
 ): boolean {
 	const n = String(chapterId || '');
+	if (!n) return false;
 	const set = getOfflineChapterIds(sourceId, mangaId);
 	if (set.has(n)) return true;
 	const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
-	return set.has(alt);
+	if (set.has(alt)) return true;
+	const seg = n.split('/').filter(Boolean).pop();
+	return !!(seg && set.has(seg));
 }
 
 export async function removeChapterFromLibrary(

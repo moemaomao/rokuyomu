@@ -146,6 +146,7 @@ export async function downloadChapter(opts: {
 	const titleSafe = sanitizePathSegment(mangaTitle || 'Manga');
 	const chapterSafe = sanitizePathSegment(chapterTitle || 'Chapter');
 
+	// ── Prefer local disk folders ──────────────────────────────────────────
 	if (!forceZip && supportsFileSystemAccess()) {
 		const root = await ensureLibraryRoot();
 		if (root) {
@@ -213,6 +214,7 @@ export async function downloadChapter(opts: {
 		}
 	}
 
+	// ── ZIP fallback ───────────────────────────────────────────────────────
 	const JSZip = await tryLoadJSZip();
 	if (JSZip) {
 		const zip = new JSZip();
@@ -240,10 +242,30 @@ export async function downloadChapter(opts: {
 			compressionOptions: { level: 6 }
 		});
 		triggerDownload(out, `${baseName}.zip`);
+		try {
+			await upsertLibraryEntry({
+				mangaId: mangaId || chapterId,
+				mangaTitle: mangaTitle || titleSafe,
+				cover: cover || '',
+				sourceId: source,
+				isNovel: false,
+				chapters: [
+					{
+						chapterId: String(chapterId),
+						chapterTitle,
+						savedAt: Date.now(),
+						pageCount: urls.length
+					}
+				]
+			});
+		} catch (e) {
+			console.warn('[library] upsert failed', e);
+		}
 		report({ phase: 'done', current: urls.length, total: urls.length });
 		return;
 	}
 
+	// ── Sequential single-file fallback ────────────────────────────────────
 	for (let i = 0; i < urls.length; i++) {
 		report({
 			phase: 'images',
@@ -258,6 +280,25 @@ export async function downloadChapter(opts: {
 		} catch (e) {
 			console.warn('[download] skip page', i + 1, e);
 		}
+	}
+	try {
+		await upsertLibraryEntry({
+			mangaId: mangaId || chapterId,
+			mangaTitle: mangaTitle || titleSafe,
+			cover: cover || '',
+			sourceId: source,
+			isNovel: false,
+			chapters: [
+				{
+					chapterId: String(chapterId),
+					chapterTitle,
+					savedAt: Date.now(),
+					pageCount: urls.length
+				}
+			]
+		});
+	} catch (e) {
+		console.warn('[library] upsert failed', e);
 	}
 	report({ phase: 'done', current: urls.length, total: urls.length });
 }

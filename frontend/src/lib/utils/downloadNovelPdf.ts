@@ -13,7 +13,6 @@ export type NovelDownloadProgress = {
 	message?: string;
 };
 
-
 type ProgressCb = (p: NovelDownloadProgress) => void;
 
 function sanitizeFilename(name: string): string {
@@ -142,9 +141,9 @@ function buildSimplePdf(title: string, body: string): Blob {
 	return new Blob([pdf], { type: 'application/pdf' });
 }
 
+
 function htmlToPlainText(raw: string): string {
 	let s = String(raw || '');
-
 	s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
 	s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
 	s = s.replace(/<ins[\s\S]*?<\/ins>/gi, '');
@@ -166,6 +165,7 @@ function htmlToPlainText(raw: string): string {
 		.replace(/&apos;/gi, "'")
 		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
 		.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+	// collapse whitespace
 	s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 	return s;
 }
@@ -223,11 +223,12 @@ export async function downloadNovelChapterPdf(opts: {
 		[novelTitle, title].filter(Boolean).join(' - ')
 	) + '.pdf';
 
+	let savedPath = '';
 	if (supportsFileSystemAccess()) {
 		const root = await ensureLibraryRoot();
 		if (root) {
 			report({ phase: 'disk', current: 1, total: 1, message: 'Saving to local folder…' });
-			const path = await saveNovelPdfToDisk({
+			savedPath = await saveNovelPdfToDisk({
 				root,
 				novelTitle: sanitizePathSegment(novelTitle || 'Novel'),
 				chapterTitle: title,
@@ -242,33 +243,33 @@ export async function downloadNovelChapterPdf(opts: {
 					isNovel: true
 				}
 			});
-
-			try {
-				await upsertLibraryEntry({
-					mangaId: mangaId || chapterId,
-					mangaTitle: novelTitle || title,
-					cover: cover || '',
-					sourceId: source,
-					isNovel: true,
-					localPath: path,
-					chapters: [
-						{
-							chapterId,
-							chapterTitle: title,
-							savedAt: Date.now(),
-							pageCount: 1
-						}
-					]
-				});
-			} catch (e) {
-				console.warn('[library] upsert failed', e);
-			}
-
-			report({ phase: 'done', current: 1, total: 1, message: path });
-			return;
 		}
 	}
 
-	triggerDownload(pdfBlob, fileName);
-	report({ phase: 'done', current: 1, total: 1 });
+	if (!savedPath) {
+		triggerDownload(pdfBlob, fileName);
+	}
+
+	try {
+		await upsertLibraryEntry({
+			mangaId: mangaId || chapterId,
+			mangaTitle: novelTitle || title,
+			cover: cover || '',
+			sourceId: source,
+			isNovel: true,
+			localPath: savedPath || undefined,
+			chapters: [
+				{
+					chapterId: String(chapterId),
+					chapterTitle: title,
+					savedAt: Date.now(),
+					pageCount: 1
+				}
+			]
+		});
+	} catch (e) {
+		console.warn('[library] upsert failed', e);
+	}
+
+	report({ phase: 'done', current: 1, total: 1, message: savedPath || fileName });
 }
