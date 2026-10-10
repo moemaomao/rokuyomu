@@ -2,6 +2,7 @@
  * Deep Search API
  * - Title search (q) across sources
  * - Genre tags: filtered by series genres when available; MangaDex uses official tag UUIDs
+ * - tags-only mode: also searches other sources using genre name as keyword query
  *
  * Query params:
  *   q        : title keyword (min 2 chars) — title only, never mixed with tags
@@ -275,7 +276,8 @@ async function searchOneSource(
 	const lang = 'all';
 	const type = isNovelSource(sourceId) ? 'novel' : 'all';
 
-	if (kv) {
+	if (isWorkerSource(sourceId)) {
+		if (!kv) return [];
 		const candidateKeys = [
 			browseCacheKey(sourceId, 1, q, lang, type, per),
 			browseCacheKey(sourceId, 1, q, lang, type, 6),
@@ -301,6 +303,7 @@ async function searchOneSource(
 				}));
 			}
 		}
+		return [];
 	}
 
 	try {
@@ -395,7 +398,7 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 		if (md.length) lists.push(md);
 	}
 
-	const searchQ = query;
+	const searchQ = query || (tagsOnly ? tagParts.join(' ') : '');
 	if (searchQ || tagsOnly) {
 		const ids = sourceIds.filter((id) => id !== 'mangadex' || !tagParts.length);
 		for (let i = 0; i < ids.length; i += CONCURRENCY) {
@@ -422,25 +425,25 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 
 			const genres = getItemGenres(m);
 			const genreScore = scoreGenres(genres, tagParts);
-			const titleScore = query ? scoreTitle(m.title || '', query) : 0;
+			const titleScore = searchQ ? scoreTitle(m.title || '', searchQ) : 0;
 
 			if (tagParts.length > 0) {
 				if (genres.length > 0) {
 					const allMatch = tagParts.every((t) => matchesGenreTag(genres, t));
 					if (!allMatch) continue;
 				} else if (tagsOnly) {
-					continue;
 				} else if (query.length >= 2 && titleScore < 200) {
 					continue;
 				}
 			}
 
-			if (query.length >= 2 && titleScore < 40 && genreScore === 0) continue;
+			if (searchQ.length >= 2 && titleScore < 40 && genreScore === 0) continue;
 
 			const score =
 				genreScore +
 				titleScore +
-				(m.sourceId === 'mangadex' && genreScore > 0 ? 150 : 0);
+				(m.sourceId === 'mangadex' && genreScore > 0 ? 150 : 0) +
+				(tagsOnly && genres.length === 0 ? -300 : 0);
 
 			scored.push({
 				...m,
