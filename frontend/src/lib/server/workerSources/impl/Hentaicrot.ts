@@ -304,6 +304,16 @@ export class HentaicrotSource extends BaseSource {
 				if (t.length > 30 && !description) description = t;
 			});
 		}
+	
+		description = description
+			.replace(/Alternative\s*Name\(s\)\s*:[^.]*?(?=\s|$)/gi, '')
+			.replace(/Jumlah\s*halaman\s*:\s*\d+/gi, '')
+			.replace(/Bahasa\s*:\s*\S+/gi, '')
+			.replace(/Artists?\s*:[^.]*?(?=\s|$)/gi, '')
+			.replace(/Groups?\s*:[^.]*?(?=\s|$)/gi, '')
+			.replace(/\s{2,}/g, ' ')
+			.replace(/\s*[·|]\s*$/g, '')
+			.trim();
 
 		const metaLines: string[] = [];
 		if (altTitle) metaLines.push(`Alt: ${altTitle}`);
@@ -312,13 +322,13 @@ export class HentaicrotSource extends BaseSource {
 		if (pageCount) metaLines.push(`Pages: ${pageCount}`);
 		if (language) metaLines.push(`Language: ${language}`);
 		if (metaLines.length) {
-			description = [description, metaLines.join(' · ')].filter(Boolean).join('\n\n');
+			description = [description, metaLines.join('\n')].filter(Boolean).join('\n\n');
 		}
 
 		const chapters: Chapter[] = [
 			{
 				id: path,
-				title: '',
+				title: 'Chapter 1',
 				number: 1,
 				isLocked: false
 			}

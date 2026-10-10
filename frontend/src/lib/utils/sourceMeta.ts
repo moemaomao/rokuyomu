@@ -208,6 +208,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	luacomic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-600' },
 	rokaricomics: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-indigo-600' },
 	hentaicrot: { flag: 'id', lang: 'ID', isR18: true, color: 'bg-rose-600' },
+	hentaipaw: { flag: 'jp', lang: 'JP', isR18: true, color: 'bg-pink-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

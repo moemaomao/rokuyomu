@@ -108,8 +108,10 @@ import { ArtLapsaSource } from '../impl/manga/ArtLapsa';
 import { LuaComicSource } from '../impl/manga/LuaComic';
 import { RokariComicsSource } from '../impl/manga/RokariComics';
 import { HentaicrotSource } from '../impl/manga/Hentaicrot';
+import { HentaiPawSource } from '../impl/manga/HentaiPaw';
 
 const mangaSources: Record<string, IMangaSource> = {
+	hentaipaw: new HentaiPawSource(),
 	hentaicrot: new HentaicrotSource(),
 	rokaricomics: new RokariComicsSource(),
 	luacomic: new LuaComicSource(),
