@@ -8,7 +8,7 @@
  *   q        : title keyword (min 2 chars) — title only, never mixed with tags
  *   tags     : comma-separated genre names
  *   sources  : optional source ids
- *   limit    : default 48, max 100
+ *   limit    : default 72, max 200
  *   per      : max per source
  *   type     : all | manga | novel
  */
@@ -20,10 +20,10 @@ import { remoteLatest, isWorkerSource } from '$lib/server/scraperClient';
 import { readCache } from '$lib/server/cache';
 import { NOVEL_SOURCE_IDS, isNovelSource } from '$lib/utils/novelSources';
 
-const DEFAULT_LIMIT = 48;
-const MAX_LIMIT = 100;
-const DEFAULT_PER = 8;
-const MAX_PER = 16;
+const DEFAULT_LIMIT = 72;
+const MAX_LIMIT = 200;
+const DEFAULT_PER = 12;
+const MAX_PER = 24;
 const CONCURRENCY = 5;
 const FETCH_TIMEOUT_MS = 6000;
 
