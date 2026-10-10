@@ -212,6 +212,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	manta: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	valirscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-600' },
 	drakecomic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
+	erisscans: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-rose-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {

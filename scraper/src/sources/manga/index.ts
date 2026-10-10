@@ -112,8 +112,10 @@ import { HentaiPawSource } from '../impl/manga/HentaiPaw';
 import { MantaSource } from '../impl/manga/Manta';
 import { ValirScansSource } from '../impl/manga/ValirScans';
 import { DrakeComicSource } from '../impl/manga/DrakeComic';
+import { ErisScansSource } from '../impl/manga/ErisScans';
 
 const mangaSources: Record<string, IMangaSource> = {
+	erisscans: new ErisScansSource(),
 	drakecomic: new DrakeComicSource(),
 	valirscans: new ValirScansSource(),
 	manta: new MantaSource(),
