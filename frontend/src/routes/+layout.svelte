@@ -656,6 +656,15 @@
 				</svg>
 				Discord
 			</a>
+			<a
+				href="https://github.com/moemaomao/rokuyomu"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<Github class="h-5 w-5 shrink-0" />
+				GitHub
+			</a>
 		</nav>
 	</aside>
 
