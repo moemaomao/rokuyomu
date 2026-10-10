@@ -1,8 +1,6 @@
 <script lang="ts">
     import { Search, Loader2, X, Tag } from 'lucide-svelte';
     import { onMount } from 'svelte';
-    import { page } from '$app/stores';
-    import { get } from 'svelte/store';
     import { browser } from '$app/environment';
     import type { Manga } from '$lib/server/sources/types';
     import { isNovelSource } from '$lib/utils/novelSources';
@@ -67,22 +65,38 @@
         const q = (sp.get('q') || '').trim();
         const tagsParam = (sp.get('tags') || '').trim();
         const type = (sp.get('type') || 'all').toLowerCase();
-        if (q) query = q;
-        if (tagsParam) {
-            selectedTags = tagsParam
-                .split(',')
-                .map((t) => normalizeTagName(t.trim()))
-                .filter(Boolean);
-            selectedTags = [...new Set(selectedTags)];
-        }
+        query = q;
+        selectedTags = tagsParam
+            ? [
+                    ...new Set(
+                        tagsParam
+                            .split(',')
+                            .map((t) => normalizeTagName(t.trim()))
+                            .filter(Boolean)
+                    )
+                ]
+            : [];
         if (type === 'manga' || type === 'novel' || type === 'all') {
-            typeFilter = type;
+            typeFilter = type as TypeFilter;
         }
+    }
+
+    function syncUrl() {
+        if (!browser) return;
+        const sp = new URLSearchParams();
+        if (query.trim()) sp.set('q', query.trim());
+        if (selectedTags.length) sp.set('tags', selectedTags.join(','));
+        if (typeFilter !== 'all') sp.set('type', typeFilter);
+        const qs = sp.toString();
+        const next = qs ? `/deep-search?${qs}` : '/deep-search';
+        const cur = window.location.pathname + window.location.search;
+        if (cur !== next) history.replaceState({}, '', next);
     }
 
     onMount(() => {
         if (!browser) return;
-        applySearchParams(new URLSearchParams(get(page).url.searchParams));
+        // Prefer window.location so client navigations with ?tags= are always applied
+        applySearchParams(new URLSearchParams(window.location.search));
         if (query.length >= 2 || selectedTags.length > 0) {
             void runSearch();
         }
@@ -94,11 +108,13 @@
         } else {
             selectedTags = [...selectedTags, tag];
         }
+        syncUrl();
         scheduleSearch();
     }
 
     function setType(t: TypeFilter) {
         typeFilter = t;
+        syncUrl();
         scheduleSearch();
     }
 
@@ -162,6 +178,7 @@
         results = [];
         meta = null;
         error = '';
+        syncUrl();
     }
 
     function mangaHref(m: Manga): string {
