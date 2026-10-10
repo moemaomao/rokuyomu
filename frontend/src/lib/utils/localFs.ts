@@ -235,11 +235,9 @@ export async function readCoverFromDisk(opts: {
 				const fh = await titleDir.getFileHandle(name);
 				return await fh.getFile();
 			} catch {
-				/* try next */
 			}
 		}
 	} catch {
-		/* missing */
 	}
 	return null;
 }

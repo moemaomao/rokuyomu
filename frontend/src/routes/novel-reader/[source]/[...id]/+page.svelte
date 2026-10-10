@@ -16,8 +16,10 @@
 		Check,
 		X,
 		Languages,
-		MoreVertical
+		MoreVertical,
+		Download
 	} from 'lucide-svelte';
+	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
 
 	interface Chapter {
 		id?: string | number;
@@ -71,7 +73,6 @@
 	let isPaused = $state(false);
 	let settingsReady = $state(false);
 
-	// === AI Translate ===
 	let isTranslating = $state(false);
 	let showTranslated = $state(false);
 	let translatedContent = $state('');
@@ -79,6 +80,10 @@
 	let translateError = $state('');
 	let usedModel = $state('');
 	let fromCache = $state(false);
+
+	let isDownloading = $state(false);
+	let downloadProgress = $state(0);
+	let downloadLabel = $state('');
 
 	const DEFAULT_PROMPTS: Record<string, string> = {
 		id: `Kamu adalah penerjemah profesional light novel.
@@ -145,7 +150,6 @@ Nội dung:
 	let showPromptEditor = $state(false);
 	let showLangDropdown = $state(false);
 	let promptDraft = $state(defaultPromptFor('id'));
-	/** Track last default so we only auto-switch prompt when user hasn't customized it */
 	let lastDefaultPrompt = $state(defaultPromptFor('id'));
 
 	const LANG_OPTIONS = [
@@ -199,7 +203,6 @@ Nội dung:
 				promptDraft = langDefault;
 			}
 		} catch {
-			// Ignore parse errors
 		}
 	}
 
@@ -412,7 +415,6 @@ Nội dung:
 		showLangDropdown = false;
 		if (code === targetLang) return;
 		const nextDefault = defaultPromptFor(code);
-		// If user still on default (or empty), switch prompt language with target
 		if (
 			!translatePrompt.trim() ||
 			translatePrompt === lastDefaultPrompt ||
@@ -444,6 +446,60 @@ Nội dung:
 		});
 		return groups;
 	});
+
+
+	async function downloadChapterFile() {
+		if (isDownloading || !browser || !chapterId || !source) return;
+
+		isDownloading = true;
+		downloadProgress = 5;
+		downloadLabel = 'Preparing…';
+		showTools = false;
+
+		try {
+			const novelTitle = (novelInfo as { title?: string } | null)?.title || title || 'Novel';
+			const chTitle =
+				(currentChapter as { title?: string } | null)?.title || title || 'Chapter';
+			const mangaId = (novelInfo as { id?: string } | null)?.id || '';
+			const cover = (novelInfo as { cover?: string } | null)?.cover || '';
+
+			await downloadNovelChapterPdf({
+				source,
+				chapterId: String(chapterId),
+				chapterTitle: chTitle,
+				novelTitle,
+				mangaId: mangaId ? String(mangaId) : undefined,
+				cover: cover || undefined,
+				onProgress: (p) => {
+					if (p.phase === 'fetch') {
+						downloadProgress = 15;
+						downloadLabel = p.message || 'Fetching…';
+					} else if (p.phase === 'pdf') {
+						downloadProgress = 45;
+						downloadLabel = p.message || 'Building PDF…';
+					} else if (p.phase === 'disk') {
+						downloadProgress = 80;
+						downloadLabel = p.message || 'Saving to library…';
+					} else if (p.phase === 'done') {
+						downloadProgress = 100;
+						downloadLabel = p.message || 'Done';
+					} else if (p.phase === 'error') {
+						downloadLabel = p.message || 'Failed';
+					}
+				}
+			});
+
+			await new Promise((r) => setTimeout(r, 600));
+		} catch (e) {
+			console.error('[novel download]', e);
+			downloadLabel = e instanceof Error ? e.message : 'Failed';
+			await new Promise((r) => setTimeout(r, 1000));
+		} finally {
+			isDownloading = false;
+			downloadProgress = 0;
+			downloadLabel = '';
+		}
+	}
 
 	async function goChapter(ch: Chapter | null | undefined) {
 		if (!ch?.id || !source) return;
@@ -720,6 +776,25 @@ Nội dung:
 					{/if}
 				</button>
 
+				<button
+					type="button"
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
+						{isDownloading
+							? 'bg-emerald-500/20 text-emerald-300'
+							: isDark
+								? 'text-emerald-400 active:bg-white/10'
+								: 'text-emerald-600 active:bg-zinc-100'}"
+					title={isDownloading ? downloadLabel || 'Downloading…' : 'Download to Offline Library (PDF)'}
+					disabled={isDownloading || !content}
+					onclick={downloadChapterFile}
+				>
+					{#if isDownloading}
+						<span class="text-[9px] font-bold tabular-nums">{downloadProgress}%</span>
+					{:else}
+						<Download class="h-4 w-4 pointer-events-none" />
+					{/if}
+				</button>
+
 				<select
 					class="touch-manipulation h-8 w-11 rounded-lg border-0 text-[10px] text-center outline-none cursor-pointer appearance-none
 						{isDark ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-700'}"
@@ -767,6 +842,21 @@ Nội dung:
 		</button>
 	</div>
 
+	{#if isDownloading}
+		<div class="fixed inset-x-0 top-0 z-[750] h-1 overflow-hidden bg-zinc-800/80">
+			<div
+				class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+				style="width: {downloadProgress}%"
+			></div>
+		</div>
+		<div
+			class="fixed left-1/2 top-3 z-[750] -translate-x-1/2 rounded-full border px-3 py-1 text-xs font-medium shadow-lg
+				{isDark ? 'border-emerald-500/30 bg-zinc-900/95 text-emerald-300' : 'border-emerald-500/40 bg-white/95 text-emerald-700'}"
+		>
+			{downloadLabel || 'Downloading…'} · {downloadProgress}%
+		</div>
+	{/if}
+
 	{#if isTranslating}
 		<div
 			class="fixed inset-0 z-[700] flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -792,14 +882,14 @@ Nội dung:
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-[650] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-xs p-3"
+			class="fixed inset-0 z-[650] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
 			onclick={() => {
 				showPromptEditor = false;
 				showLangDropdown = false;
 			}}
 		>
 			<div
-				class="w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-5 shadow-xl max-h-[85vh] overflow-y-auto border
+				class="w-full max-w-md rounded-2xl p-4 shadow-xl max-h-[min(70vh,560px)] overflow-y-auto border
 					{isDark
 					? 'bg-zinc-900 text-zinc-100 border-white/10'
 					: 'bg-white text-zinc-900 border-zinc-200'}"
@@ -882,8 +972,8 @@ Nội dung:
 				<label class="block text-sm mb-1.5 opacity-70" for="ai-prompt">Prompt</label>
 				<textarea
 					id="ai-prompt"
-					rows="10"
-					class="w-full rounded-xl border px-3.5 py-2.5 text-sm font-mono leading-relaxed outline-none resize-y min-h-[160px] transition
+					rows="6"
+					class="w-full rounded-xl border px-3.5 py-2.5 text-sm font-mono leading-relaxed outline-none resize-y min-h-[100px] max-h-[28vh] transition
 						{isDark
 						? 'bg-zinc-800/80 border-white/10 text-zinc-100 focus:border-violet-500/50'
 						: 'bg-zinc-50 border-zinc-200 text-zinc-900 focus:border-violet-400 focus:bg-white'}"
@@ -931,11 +1021,11 @@ Nội dung:
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-[600] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-xs"
+			class="fixed inset-0 z-[600] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
 			onclick={() => (showSettings = false)}
 		>
 			<div
-				class="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-xl max-h-[80vh] overflow-y-auto {isDark
+				class="w-full max-w-sm rounded-2xl p-4 shadow-xl max-h-[min(70vh,520px)] overflow-y-auto {isDark
 					? 'bg-zinc-900 text-zinc-100'
 					: 'bg-white text-zinc-900'}"
 				onclick={(e) => e.stopPropagation()}

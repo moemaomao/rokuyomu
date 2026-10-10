@@ -73,7 +73,20 @@
 		if (s.phase === 'error') return '!';
 		if (s.phase === 'done') return '✓';
 		if (s.phase === 'images' && 'total' in s && s.total) return `${s.current}/${s.total}`;
+		if (s.phase === 'zip') return '…';
 		return '…';
+	}
+
+	function dlPercent(chapterId: string): number {
+		const s = dlState[chapterId];
+		if (!s || s.phase === 'idle' || s.phase === 'error') return 0;
+		if (s.phase === 'done') return 100;
+		if (s.phase === 'zip') return 95;
+		if (s.phase === 'pages') return 5;
+		if ('total' in s && s.total > 0) {
+			return Math.min(90, Math.round((s.current / s.total) * 90) + 5);
+		}
+		return 10;
 	}
 
 	async function handleDownloadChapter(e: MouseEvent, chapter: any) {
@@ -1117,6 +1130,19 @@
 									href={chapterHref(source, chapter.id)}
 									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105 {isChapterRead(chapter) ? 'chapter-read' : ''}"
 								>
+									{#if isDownloading(chapter.id)}
+										<div class="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-black/40">
+											<div
+												class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+												style="width: {dlPercent(chapter.id)}%"
+											></div>
+										</div>
+										<div class="absolute inset-x-0 top-1 z-20 flex justify-center">
+											<span class="rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
+												{dlLabel(chapter.id) || '…'}
+											</span>
+										</div>
+									{/if}
 									{#if chapterCover(chapter)}
 										<img
 											src={proxyImage(chapterCover(chapter), 150, 150)}
@@ -1179,7 +1205,15 @@
 					{:else if viewMode === 'grid-text'}
 						<div class="grid grid-cols-3 gap-2.5 pb-8 md:grid-cols-4 lg:grid-cols-6">
 							{#each displayedChapters as chapter}
-								<div class="relative">
+								<div class="relative overflow-hidden rounded-[10px]">
+									{#if isDownloading(chapter.id)}
+										<div class="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-zinc-800/80">
+											<div
+												class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+												style="width: {dlPercent(chapter.id)}%"
+											></div>
+										</div>
+									{/if}
 									<a
 										href="/reader/{source}{chapter.id}"
 										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''} {isChapterRead(chapter) ? 'chapter-read' : ''}"
@@ -1235,10 +1269,19 @@
 					{:else}
 						<div class="flex flex-col gap-2.5 pb-8">
 							{#each displayedChapters as chapter}
-								<a
-									href="/reader/{source}{chapter.id}"
-									class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40 {isChapterRead(chapter) ? 'chapter-read' : ''}"
-								>
+								<div class="relative overflow-hidden rounded-xl">
+									{#if isDownloading(chapter.id)}
+										<div class="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-zinc-800/80">
+											<div
+												class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+												style="width: {dlPercent(chapter.id)}%"
+											></div>
+										</div>
+									{/if}
+									<a
+										href="/reader/{source}{chapter.id}"
+										class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40 {isChapterRead(chapter) ? 'chapter-read' : ''}"
+									>
 									<div class="h-full w-[90px] shrink-0 overflow-hidden bg-zinc-300 dark:bg-zinc-900">
 										{#if chapterCover(chapter)}
 											<img
@@ -1295,6 +1338,7 @@
 									{/if}
 									</button>
 								</a>
+								</div>
 							{/each}
 						</div>
 					{/if}

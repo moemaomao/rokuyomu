@@ -11,6 +11,8 @@
 	} from 'lucide-svelte';
 	import { saveReading } from '$lib/stores/history';
 	import { markChapterRead } from '$lib/utils/readChapters';
+	import { downloadChapter } from '$lib/utils/downloadChapter';
+	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/library.svelte';
 
 	const { data }: { data: PageData } = $props();
 let {
@@ -88,6 +90,7 @@ $effect(() => {
 	let downloadText = $state('Preparing download...');
 	let downloadCount = $state('0/0');
 	let downloadPercent = $state(0);
+	let isOfflineChapter = $state(false);
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 	function proxyImage(url: string, forDownload = false): string {
@@ -240,67 +243,77 @@ $effect(() => {
 		}, 12000);
 	}
 
-	// ── Download ZIP ─────────────────────────────────────────────────────────
-	let jszipReady: Promise<any> | null = null;
-
-	function loadJSZip(): Promise<any> {
-		if ((window as any).JSZip) return Promise.resolve((window as any).JSZip);
-		if (jszipReady) return jszipReady;
-		jszipReady = new Promise((resolve, reject) => {
-			const s = document.createElement('script');
-			s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-			s.onload = () => resolve((window as any).JSZip);
-			s.onerror = () => reject(new Error('Failed to load JSZip'));
-			document.head.appendChild(s);
-		});
-		return jszipReady;
+	// ── Download → Offline Library (cached + parallel) ───────────────────────
+	async function refreshOfflineStatus() {
+		if (!browser || !source || !mangaInfo?.id) {
+			isOfflineChapter = false;
+			return;
+		}
+		try {
+			await ensureLibraryLoaded();
+			const ids = getOfflineChapterIds(source, String(mangaInfo.id));
+			const cid = String(chapterId ?? '');
+			const alt = cid.startsWith('/') ? cid.slice(1) : `/${cid}`;
+			isOfflineChapter = ids.has(cid) || ids.has(alt) || ids.has(cid.replace(/^\/+/, ''));
+		} catch {
+			isOfflineChapter = false;
+		}
 	}
 
+	$effect(() => {
+		chapterId;
+		mangaInfo;
+		source;
+		if (browser) void refreshOfflineStatus();
+	});
+
 	async function handleDownload() {
-		if (isDownloading || !pages?.length) return;
+		if (isDownloading || !chapterId || !source) return;
 		isDownloading = true;
 		downloadBannerActive = true;
 		downloadPercent = 0;
-		downloadCount = `0/${pages.length}`;
-		downloadText = 'Loading JSZip...';
+		downloadCount = '0/0';
+		downloadText = 'Preparing download…';
 
 		try {
-			const JSZip = await loadJSZip();
-			const zip = new JSZip();
-			const folderName = (
-				`${mangaInfo?.title || 'manga'}_${currentChapter?.title || chapterId}`
-			)
-				.replace(/[^\w\s.-]/g, '')
-				.replace(/\s+/g, '_')
-				.slice(0, 80);
-
-			downloadText = 'Downloading images...';
-			for (let i = 0; i < pages.length; i++) {
-				try {
-					const res = await fetch(proxyImage(pages[i], true));
-					if (!res.ok) throw new Error(`HTTP ${res.status}`);
-					const blob = await res.blob();
-					const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-					zip.file(`${folderName}/${String(i + 1).padStart(3, '0')}.${ext}`, blob);
-				} catch (err) {
-					console.warn('Failed to download page', i + 1, err);
+			await downloadChapter({
+				source: String(source),
+				chapterId: String(chapterId),
+				pageUrls: pages?.length ? [...pages] : undefined,
+				concurrency: 6,
+				chapterTitle:
+					(currentChapter as { title?: string } | null)?.title ||
+					String(chapterId),
+				mangaTitle: (mangaInfo as { title?: string } | null)?.title || 'Manga',
+				mangaId: (mangaInfo as { id?: string } | null)?.id
+					? String((mangaInfo as { id?: string }).id)
+					: undefined,
+				cover: (mangaInfo as { cover?: string } | null)?.cover || '',
+				onProgress: (p) => {
+					if (p.phase === 'pages') {
+						downloadText = p.message || 'Fetching pages…';
+						downloadPercent = 5;
+					} else if (p.phase === 'images') {
+						downloadText = p.message || `Downloading ${p.current}/${p.total}`;
+						downloadCount = `${p.current}/${p.total}`;
+						downloadPercent =
+							p.total > 0 ? Math.round((p.current / p.total) * 90) : 10;
+					} else if (p.phase === 'zip' || p.phase === 'disk') {
+						downloadText = p.message || 'Saving…';
+						downloadPercent = 95;
+					} else if (p.phase === 'done') {
+						downloadText = p.message || 'Saved to Offline Library';
+						downloadPercent = 100;
+					} else if (p.phase === 'error') {
+						downloadText = p.message || 'Failed';
+					}
 				}
-				downloadPercent = Math.round(((i + 1) / pages.length) * 100);
-				downloadCount = `${i + 1}/${pages.length}`;
-				downloadText = `Downloading image ${i + 1} of ${pages.length}...`;
-			}
-
-			downloadText = 'Creating ZIP file...';
-			const content = await zip.generateAsync({ type: 'blob' });
-			const a = document.createElement('a');
-			a.href = URL.createObjectURL(content);
-			a.download = `${folderName}.zip`;
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			URL.revokeObjectURL(a.href);
-			downloadText = 'Done!';
+			});
+			await refreshOfflineStatus();
 			downloadPercent = 100;
+			if (!downloadText || downloadText.startsWith('Downloading')) {
+				downloadText = isOfflineChapter ? 'Saved to Offline Library' : 'Done!';
+			}
 		} catch (err: any) {
 			downloadText = 'Failed: ' + (err?.message || 'unknown');
 		}
@@ -418,7 +431,6 @@ $effect(() => {
 		</p>
 	</div>
 
-	<!-- Download banner -->
 	{#if downloadBannerActive}
 		<div class="sticky top-0 z-[90] mx-auto mb-1.5 w-full max-w-[900px] px-3">
 			<div
@@ -592,10 +604,19 @@ $effect(() => {
 	<button
 		onclick={handleDownload}
 		disabled={isDownloading || !pages?.length}
-		class="flex h-10 w-10 items-center justify-center rounded-full border-0 bg-[rgba(0,200,120,0.15)] text-[18px] text-[#35d98a] backdrop-blur-md transition hover:scale-108 hover:bg-[rgba(0,200,120,0.25)] disabled:opacity-50"
-		title="Download ZIP"
+		class="flex h-10 w-10 items-center justify-center rounded-full border-0 backdrop-blur-md transition hover:scale-108 disabled:opacity-50
+			{isOfflineChapter
+				? 'bg-[rgba(139,92,246,0.25)] text-[#c4b5fd] hover:bg-[rgba(139,92,246,0.35)]'
+				: 'bg-[rgba(0,200,120,0.15)] text-[#35d98a] hover:bg-[rgba(0,200,120,0.25)]'}"
+		title={isOfflineChapter ? 'Sudah di Offline Library (download ulang)' : 'Download ke Offline Library'}
 	>
-		<Download class="h-5 w-5" />
+		{#if isOfflineChapter}
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M20 6 9 17l-5-5" />
+			</svg>
+		{:else}
+			<Download class="h-5 w-5" />
+		{/if}
 	</button>
 
 	<div class="relative z-[330]">
