@@ -299,7 +299,7 @@ export class ErisScansSource extends BaseSource {
 					date: dateStr,
 					cover,
 					isLocked
-				});
+				} as Chapter);
 			}
 		);
 
@@ -352,6 +352,7 @@ export class ErisScansSource extends BaseSource {
 		try {
 			const html = await this.fetchHtml(`${path}/`);
 			const $ = cheerio.load(html);
+
 			const pages: string[] = [];
 			const seen = new Set<string>();
 
