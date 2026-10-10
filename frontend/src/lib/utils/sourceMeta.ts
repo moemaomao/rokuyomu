@@ -211,6 +211,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	hentaipaw: { flag: 'jp', lang: 'JP', isR18: true, color: 'bg-pink-600' },
 	manta: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-violet-600' },
 	valirscans: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-amber-600' },
+	drakecomic: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-emerald-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
