@@ -2,6 +2,8 @@
 	import { Search, Loader2, X, Tag } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { goto, afterNavigate } from '$app/navigation';
+	import { page } from '$app/stores';
 	import type { Manga } from '$lib/server/sources/types';
 	import { isNovelSource } from '$lib/utils/novelSources';
 
@@ -39,7 +41,6 @@
 	type TypeFilter = 'all' | 'manga' | 'novel';
 
 	const PAGE_SIZE = 72;
-	const LOAD_MORE_STEP = 48;
 	const CACHE_KEY = 'rokuyomu:deep-search:last';
 
 	interface CachePayload {
@@ -76,6 +77,7 @@
 	let currentOffset = $state(0);
 	let hasMore = $state(false);
 	let searchSeq = 0;
+	let initialized = $state(false);
 
 	function baseCacheKey(): string {
 		return [query.trim(), selectedTags.slice().sort().join(','), typeFilter].join('|');
@@ -156,16 +158,39 @@
 		if (typeFilter !== 'all') sp.set('type', typeFilter);
 		const qs = sp.toString();
 		const next = qs ? `/deep-search?${qs}` : '/deep-search';
-		const cur = window.location.pathname + window.location.search;
-		if (cur !== next) history.replaceState({}, '', next);
+		const cur = $page.url.pathname + $page.url.search;
+		if (cur !== next) {
+			void goto(next, { replaceState: true, keepFocus: true, noScroll: true });
+		}
 	}
 
-	onMount(() => {
+	function bootstrapFromUrl() {
 		if (!browser) return;
 		applySearchParams(new URLSearchParams(window.location.search));
 		if (query.length >= 2 || selectedTags.length > 0) {
 			const restored = loadCache();
 			if (!restored) {
+				void runSearch(false);
+			}
+		} else {
+			results = [];
+			meta = null;
+			hasMore = false;
+		}
+	}
+
+	onMount(() => {
+		bootstrapFromUrl();
+		initialized = true;
+	});
+
+	afterNavigate(({ to, from, type }) => {
+		if (!browser) return;
+		if (to?.url.pathname !== '/deep-search') return;
+		if (from && from.url.pathname !== '/deep-search') {
+			applySearchParams(new URLSearchParams(to.url.search));
+			const restored = loadCache();
+			if (!restored && (query.length >= 2 || selectedTags.length > 0)) {
 				void runSearch(false);
 			}
 		}
@@ -304,6 +329,7 @@
 			try {
 				sessionStorage.removeItem(CACHE_KEY);
 			} catch {
+				/* ignore */
 			}
 		}
 		syncUrl();
@@ -425,10 +451,12 @@
 		{/if}
 	</div>
 
+	<!-- Error -->
 	{#if error}
 		<p class="mb-4 text-sm text-red-500 dark:text-red-400">{error}</p>
 	{/if}
 
+	<!-- Meta -->
 	{#if meta && !loading}
 		<p class="mb-4 text-xs text-zinc-500">
 			{results.length} shown{#if meta.totalMatched != null}
@@ -439,6 +467,7 @@
 		</p>
 	{/if}
 
+	<!-- Loading skeleton (light + dark) -->
 	{#if loading && results.length === 0}
 		<div class="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each Array(12) as _}
@@ -453,12 +482,14 @@
 		</div>
 	{/if}
 
+	<!-- Results -->
 	{#if results.length > 0}
 		<div class="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each results as m (m.sourceId + ':' + m.id)}
 				{@const kind = itemType(m)}
 				<a
 					href={mangaHref(m)}
+					data-sveltekit-preload-data="hover"
 					class="group overflow-hidden rounded-xl border border-zinc-200 bg-white transition hover:border-violet-300 hover:bg-zinc-50 dark:border-transparent dark:bg-zinc-900/10 dark:hover:bg-zinc-800/80"
 				>
 					<div class="relative aspect-[2/3] overflow-hidden bg-zinc-100 dark:bg-zinc-800">
@@ -502,6 +533,7 @@
 			{/each}
 		</div>
 
+		<!-- Load more -->
 		{#if hasMore}
 			<div class="mt-8 flex justify-center">
 				<button
