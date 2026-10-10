@@ -62,7 +62,6 @@ export class MantaSource extends BaseSource {
 			const url = v?.downloadUrl || (typeof v === 'string' ? v : '');
 			if (url) return url;
 		}
-		// any downloadUrl
 		for (const v of Object.values(image)) {
 			if (v && typeof v === 'object' && (v as any).downloadUrl) {
 				return (v as any).downloadUrl;
@@ -78,13 +77,39 @@ export class MantaSource extends BaseSource {
 	}
 
 	private seriesIdFromPath(id: string): string {
-		const m = String(id).match(/\/series\/(\d+)/) || String(id).match(/^(\d+)$/);
-		return m?.[1] || String(id).replace(/^\//, '');
+		const s = String(id);
+		const m =
+			s.match(/\/series\/(\d+)/) ||
+			s.match(/^(\d+)(?:\/|$)/);
+		return m?.[1] || s.replace(/^\//, '').split('/')[0];
 	}
 
 	private episodeIdFromPath(id: string): string {
-		const m = String(id).match(/\/episodes\/(\d+)/) || String(id).match(/^(\d+)$/);
-		return m?.[1] || String(id).replace(/^\//, '');
+		const s = String(id);
+		const m =
+			s.match(/\/episodes\/(\d+)/) ||
+			s.match(/\/episode\/(\d+)/) ||
+			s.match(/(\d+)\s*$/);
+		return m?.[1] || s.replace(/^\//, '');
+	}
+
+	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+		const s = String(chapterId);
+		const embedded = s.match(/\/series\/(\d+)/);
+		if (embedded) return `/series/${embedded[1]}`;
+
+		const eid = this.episodeIdFromPath(s);
+		if (!/^\d+$/.test(eid)) return null;
+		try {
+			const res = await this.getJson<{ data?: any }>(
+				`/front/v1/episodes/${eid}?lang=${this.LANG}`
+			);
+			const sid = res.data?.seriesId ?? res.data?.series?.id;
+			if (sid) return `/series/${sid}`;
+		} catch (e) {
+			console.warn('[manta] resolveMangaIdFromChapter', eid, e);
+		}
+		return null;
 	}
 
 	private mapSeriesItem(item: any): Manga | null {
@@ -232,8 +257,8 @@ export class MantaSource extends BaseSource {
 					ep?.data?.title ||
 					`Episode ${ep.ord ?? ''}`.trim();
 				return {
-					id: `/episodes/${ep.id}`,
-					title: locked ? `${epTitle}` : epTitle,
+					id: `/series/${sid}/episodes/${ep.id}`,
+					title: epTitle,
 					number: Number(ep.ord) || 0,
 					date: ep.openAt || ep.createdAt || undefined,
 					isLocked: locked
