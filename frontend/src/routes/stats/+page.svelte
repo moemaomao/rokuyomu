@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { getUser, isLoading } from '$lib/stores/auth.svelte';
 	import { getBookmarks } from '$lib/stores/bookmark.svelte';
@@ -89,14 +90,28 @@
 		return `${y}-${m}-${day}`;
 	}
 
+	let activityWindow = $state(7);
+
+	function updateActivityWindow() {
+		if (typeof window === 'undefined') return;
+		activityWindow = window.matchMedia('(min-width: 640px)').matches ? 14 : 7;
+	}
+
 	let activityDays = $derived.by(() => {
+		const windowDays = activityWindow;
 		const days: { label: string; count: number; key: string }[] = [];
 		const now = new Date();
-		for (let i = 13; i >= 0; i--) {
+		for (let i = windowDays - 1; i >= 0; i--) {
 			const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
 			const key = localDateKey(d);
-			const label =
-				i === 0 ? 'Today' : i === 1 ? 'Yday' : d.toLocaleDateString('en', { weekday: 'short' });
+			let label: string;
+			if (i === 0) label = 'Today';
+			else if (i === 1) label = 'Yday';
+			else if (windowDays <= 7) {
+				label = d.toLocaleDateString('en', { weekday: 'short' });
+			} else {
+				label = d.toLocaleDateString('en', { weekday: 'short' });
+			}
 			days.push({ label, count: 0, key });
 		}
 		const map = new Map(days.map((x) => [x.key, x]));
@@ -218,7 +233,7 @@
 		history = getHistory();
 		bookmarkCount = getBookmarks().length;
 		try {
-			activityLog = await getActivityLog(14);
+			activityLog = await getActivityLog(activityWindow);
 		} catch {
 			activityLog = [];
 		}
@@ -283,22 +298,24 @@
 			isDark = document.documentElement.classList.contains('dark');
 		};
 		updateTheme();
+		updateActivityWindow();
+		const mq = window.matchMedia('(min-width: 640px)');
+		const onMq = () => updateActivityWindow();
+		mq.addEventListener?.('change', onMq);
+
 		const obs = new MutationObserver(updateTheme);
 		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
+		// Instant UI from cache — avoid blocking first paint when opened from AuthPanel
 		if (getUser()) {
 			lifetimeXp = getInstantLifetimeXp();
 		}
 		hydratePermanentStats();
 		permView = permanentStatsView(getCachedPermanentStats());
+		history = getHistory();
+		bookmarkCount = getBookmarks().length;
+		ready = true;
 
-		(async () => {
-			await whenHistoryReady();
-			await load();
-			await loadLifetime();
-			await loadPermanent();
-			ready = true;
-		})();
 		const onChange = () => {
 			void load();
 		};
@@ -312,8 +329,29 @@
 			permView = permanentStatsView(getCachedPermanentStats());
 		});
 		window.addEventListener('lifetime-xp-changed', onXp);
+
+		// Heavy cloud/bootstrap work after paint
+		const idle =
+			typeof requestIdleCallback === 'function'
+				? (cb: () => void) => requestIdleCallback(cb, { timeout: 1200 })
+				: (cb: () => void) => setTimeout(cb, 50);
+
+		idle(() => {
+			void (async () => {
+				try {
+					await whenHistoryReady();
+					await load();
+					await loadLifetime();
+					await loadPermanent();
+				} catch (e) {
+					console.warn('[stats] deferred load failed', e);
+				}
+			})();
+		});
+
 		return () => {
 			obs.disconnect();
+			mq.removeEventListener?.('change', onMq);
 			window.removeEventListener('history-changed', onChange);
 			window.removeEventListener('bookmarks-changed', onChange);
 			window.removeEventListener('activity-changed', onChange);
@@ -579,9 +617,9 @@
 		<div class="rounded-2xl border p-5 {cardSoft}">
 			<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold {textSub}">
 				<Activity class="h-4 w-4 text-sky-500" />
-				Activity — last 14 days
+				Activity — last {activityWindow} days
 			</h2>
-			<div class="relative w-full" style="height: {CHART_H + 22}px">
+			<div class="relative w-full" style="height: {CHART_H + 28}px">
 				<svg
 					viewBox="0 0 100 {CHART_H}"
 					preserveAspectRatio="none"
@@ -654,9 +692,12 @@
 					{/each}
 				</div>
 
-				<div class="absolute inset-x-0 bottom-0 flex">
+				<div class="absolute inset-x-0 bottom-0 flex gap-0.5 px-0.5">
 					{#each activityDays as day}
-						<span class="flex-1 text-center text-[9px] {textMuted} sm:text-[10px]">
+						<span
+							class="min-w-0 flex-1 truncate text-center text-[10px] leading-tight {textMuted} sm:text-[11px]"
+							title={day.key}
+						>
 							{day.label}
 						</span>
 					{/each}
