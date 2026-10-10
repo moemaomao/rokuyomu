@@ -3,13 +3,15 @@
  * - Title search (q) across sources
  * - Genre tags: filtered by series genres when available; MangaDex uses official tag UUIDs
  * - tags-only mode: also searches other sources using genre name as keyword query
+ * - supports higher limit + offset for Load more
  *
  * Query params:
- *   q        : title keyword (min 2 chars) — title only, never mixed with tags
+ *   q        : title keyword (min 2 chars)
  *   tags     : comma-separated genre names
  *   sources  : optional source ids
- *   limit    : default 72, max 200
- *   per      : max per source
+ *   limit    : default 72, max 300
+ *   per      : max per source (default 12, max 32)
+ *   offset   : skip N scored results (for load more aggregation)
  *   type     : all | manga | novel
  */
 import { json } from '@sveltejs/kit';
@@ -21,11 +23,11 @@ import { readCache } from '$lib/server/cache';
 import { NOVEL_SOURCE_IDS, isNovelSource } from '$lib/utils/novelSources';
 
 const DEFAULT_LIMIT = 72;
-const MAX_LIMIT = 200;
+const MAX_LIMIT = 300;
 const DEFAULT_PER = 12;
-const MAX_PER = 24;
+const MAX_PER = 32;
 const CONCURRENCY = 5;
-const FETCH_TIMEOUT_MS = 6000;
+const FETCH_TIMEOUT_MS = 7000;
 
 const MANGADEX_TAG_IDS: Record<string, string> = {
 	action: '391b0423-d847-456f-aff0-8b0cfc03066b',
@@ -198,17 +200,26 @@ function resolveMangaDexTagIds(tags: string[]): string[] {
 	return ids;
 }
 
+function resolveKind(m: Manga, sourceId: string): 'novel' | 'manga' {
+	const t = String(m.type || '').toLowerCase().trim();
+	if (t === 'novel' || t === 'light novel' || t === 'ln' || t === 'webnovel') return 'novel';
+	if (isNovelSource(sourceId) || isNovelSource(m.sourceId)) return 'novel';
+	return 'manga';
+}
+
 async function searchMangaDexByGenres(
 	tags: string[],
 	titleQuery: string,
-	limit: number
+	limit: number,
+	offset = 0
 ): Promise<Manga[]> {
 	const tagIds = resolveMangaDexTagIds(tags);
 	if (!tagIds.length && !titleQuery) return [];
 
+	const pageSize = Math.min(100, Math.max(limit, 20));
 	const params = new URLSearchParams();
-	params.set('limit', String(Math.min(32, Math.max(limit, 12))));
-	params.set('offset', '0');
+	params.set('limit', String(pageSize));
+	params.set('offset', String(Math.max(0, offset)));
 	params.set('order[relevance]', 'desc');
 	params.set('contentRating[]', 'safe');
 	params.append('contentRating[]', 'suggestive');
@@ -231,7 +242,7 @@ async function searchMangaDexByGenres(
 			FETCH_TIMEOUT_MS
 		);
 		if (!res.ok) return [];
-		const data = (await res.json()) as { data?: any[] };
+		const data = (await res.json()) as { data?: any[]; total?: number };
 		const out: Manga[] = [];
 		for (const item of data?.data || []) {
 			const attrs = item?.attributes || {};
@@ -270,7 +281,8 @@ async function searchOneSource(
 	sourceId: string,
 	query: string,
 	per: number,
-	kv: KVNamespace | null | undefined
+	kv: KVNamespace | null | undefined,
+	page = 1
 ): Promise<Manga[]> {
 	const q = query.trim();
 	const lang = 'all';
@@ -279,18 +291,18 @@ async function searchOneSource(
 	if (isWorkerSource(sourceId)) {
 		if (!kv) return [];
 		const candidateKeys = [
-			browseCacheKey(sourceId, 1, q, lang, type, per),
-			browseCacheKey(sourceId, 1, q, lang, type, 6),
-			browseCacheKey(sourceId, 1, q, lang, type, 8),
-			browseCacheKey(sourceId, 1, q, lang, type, 24),
-			browseCacheKey(sourceId, 1, q, 'all', 'all', per),
-			browseCacheKey(sourceId, 1, q, 'all', 'all', 24),
+			browseCacheKey(sourceId, page, q, lang, type, per),
+			browseCacheKey(sourceId, page, q, lang, type, 6),
+			browseCacheKey(sourceId, page, q, lang, type, 8),
+			browseCacheKey(sourceId, page, q, lang, type, 24),
+			browseCacheKey(sourceId, page, q, 'all', 'all', per),
+			browseCacheKey(sourceId, page, q, 'all', 'all', 24),
 			...(q
 				? []
 				: [
-						browseCacheKey(sourceId, 1, '', lang, type, 24),
-						browseCacheKey(sourceId, 1, '', 'all', 'all', 24),
-						browseCacheKey(sourceId, 1, '', 'all', 'all', 48)
+						browseCacheKey(sourceId, page, '', lang, type, 24),
+						browseCacheKey(sourceId, page, '', 'all', 'all', 24),
+						browseCacheKey(sourceId, page, '', 'all', 'all', 48)
 					])
 		];
 		for (const key of candidateKeys) {
@@ -299,7 +311,7 @@ async function searchOneSource(
 				return cached.slice(0, per).map((m) => ({
 					...m,
 					sourceId: m.sourceId || sourceId,
-					type: m.type || (isNovelSource(sourceId) ? 'novel' : m.type)
+					type: resolveKind(m, sourceId)
 				}));
 			}
 		}
@@ -308,14 +320,14 @@ async function searchOneSource(
 
 	try {
 		const result = await withTimeout(
-			remoteLatest(sourceId, 1, { q: q || undefined, lang, type }),
+			remoteLatest(sourceId, page, { q: q || undefined, lang, type }),
 			FETCH_TIMEOUT_MS
 		);
 		const list = Array.isArray(result) ? result : [];
 		return list.slice(0, per).map((m) => ({
 			...m,
 			sourceId: m.sourceId || sourceId,
-			type: m.type || (isNovelSource(sourceId) ? 'novel' : m.type || 'manga')
+			type: resolveKind(m, sourceId)
 		}));
 	} catch (e) {
 		console.warn(`[deep-search] ${sourceId}:`, e instanceof Error ? e.message : e);
@@ -336,6 +348,7 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 		MAX_PER,
 		Math.max(1, parseInt(url.searchParams.get('per') || String(DEFAULT_PER), 10) || DEFAULT_PER)
 	);
+	const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
 
 	if (qRaw.length < 2 && !tagsRaw) {
 		return json(
@@ -372,15 +385,15 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 			sourceIds = [
 				...new Set([
 					...mangaPreferred,
-					...workerIds.filter((id) => !isNovelSource(id)).slice(0, 10)
+					...workerIds.filter((id) => !isNovelSource(id)).slice(0, 12)
 				])
 			];
 		} else {
 			sourceIds = [
 				...new Set([
-					...novelPreferred.slice(0, 16),
-					...mangaPreferred.slice(0, 16),
-					...workerIds.slice(0, 10)
+					...novelPreferred.slice(0, 18),
+					...mangaPreferred.slice(0, 18),
+					...workerIds.slice(0, 12)
 				])
 			];
 		}
@@ -393,20 +406,26 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 
 	const lists: Manga[][] = [];
 
+	const fetchPer = Math.min(MAX_PER, Math.max(per, Math.ceil(limit / Math.max(sourceIds.length, 1)) + 4));
+	const mdOffset = Math.min(offset, 400);
+	const pagesToFetch = offset > 0 || limit > 80 ? 2 : 1;
+
 	if (tagParts.length > 0 && typeFilter !== 'novel') {
-		const md = await searchMangaDexByGenres(tagParts, query, limit);
+		const md = await searchMangaDexByGenres(tagParts, query, Math.min(100, limit + 20), mdOffset);
 		if (md.length) lists.push(md);
 	}
 
 	const searchQ = query || (tagsOnly ? tagParts.join(' ') : '');
 	if (searchQ || tagsOnly) {
 		const ids = sourceIds.filter((id) => id !== 'mangadex' || !tagParts.length);
-		for (let i = 0; i < ids.length; i += CONCURRENCY) {
-			const batch = ids.slice(i, i + CONCURRENCY);
-			const batchResults = await Promise.all(
-				batch.map((id) => searchOneSource(id, searchQ, per, kv))
-			);
-			lists.push(...batchResults);
+		for (let page = 1; page <= pagesToFetch; page++) {
+			for (let i = 0; i < ids.length; i += CONCURRENCY) {
+				const batch = ids.slice(i, i + CONCURRENCY);
+				const batchResults = await Promise.all(
+					batch.map((id) => searchOneSource(id, searchQ, fetchPer, kv, page))
+				);
+				lists.push(...batchResults);
+			}
 		}
 	}
 
@@ -415,11 +434,12 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 
 	for (const list of lists) {
 		for (const m of list) {
-			const key = `${m.sourceId ?? ''}:${m.id}`;
+			const sid = m.sourceId || '';
+			const key = `${sid}:${m.id}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
 
-			const kind = (m.type || (isNovelSource(m.sourceId) ? 'novel' : 'manga')).toLowerCase();
+			const kind = resolveKind(m, sid);
 			if (typeFilter === 'novel' && kind !== 'novel') continue;
 			if (typeFilter === 'manga' && kind === 'novel') continue;
 
@@ -442,19 +462,24 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 			const score =
 				genreScore +
 				titleScore +
-				(m.sourceId === 'mangadex' && genreScore > 0 ? 150 : 0) +
+				(sid === 'mangadex' && genreScore > 0 ? 150 : 0) +
 				(tagsOnly && genres.length === 0 ? -300 : 0);
 
 			scored.push({
 				...m,
-				type: kind === 'novel' ? 'novel' : m.type || 'manga',
+				sourceId: sid,
+				type: kind,
 				_score: score
 			});
 		}
 	}
 
 	scored.sort((a, b) => b._score - a._score || (a.title || '').localeCompare(b.title || ''));
-	const results: Manga[] = scored.slice(0, limit).map(({ _score, ...m }) => m);
+
+	const totalMatched = scored.length;
+	const sliced = scored.slice(offset, offset + limit);
+	const results: Manga[] = sliced.map(({ _score, ...m }) => m);
+	const hasMore = offset + results.length < totalMatched;
 
 	return json(
 		{
@@ -466,6 +491,9 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 				type: typeFilter,
 				sourcesTried: sourceIds.length,
 				returned: results.length,
+				totalMatched,
+				offset,
+				hasMore,
 				workerKvOnly: true
 			}
 		},

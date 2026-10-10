@@ -45,8 +45,14 @@
 	interface CachePayload {
 		key: string;
 		results: Manga[];
-		meta: { returned?: number; sourcesTried?: number; type?: string } | null;
-		limit: number;
+		meta: {
+			returned?: number;
+			sourcesTried?: number;
+			type?: string;
+			hasMore?: boolean;
+			totalMatched?: number;
+		} | null;
+		offset: number;
 		hasMore: boolean;
 		ts: number;
 	}
@@ -58,47 +64,51 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let error = $state('');
-	let meta = $state<{ returned?: number; sourcesTried?: number; type?: string } | null>(null);
+	let meta = $state<{
+		returned?: number;
+		sourcesTried?: number;
+		type?: string;
+		hasMore?: boolean;
+		totalMatched?: number;
+	} | null>(null);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let showTags = $state(true);
-	let currentLimit = $state(PAGE_SIZE);
+	let currentOffset = $state(0);
 	let hasMore = $state(false);
 	let searchSeq = 0;
 
-	function cacheKey(): string {
-		return [query.trim(), selectedTags.slice().sort().join(','), typeFilter, currentLimit].join('|');
+	function baseCacheKey(): string {
+		return [query.trim(), selectedTags.slice().sort().join(','), typeFilter].join('|');
 	}
 
 	function saveCache() {
 		if (!browser) return;
 		try {
 			const payload: CachePayload = {
-				key: cacheKey(),
+				key: baseCacheKey(),
 				results,
 				meta,
-				limit: currentLimit,
+				offset: currentOffset,
 				hasMore,
 				ts: Date.now()
 			};
 			sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
 		} catch {
-			/* ignore quota */
+			/* ignore */
 		}
 	}
 
-	function loadCache(expectedKey?: string): boolean {
+	function loadCache(): boolean {
 		if (!browser) return false;
 		try {
 			const raw = sessionStorage.getItem(CACHE_KEY);
 			if (!raw) return false;
 			const data = JSON.parse(raw) as CachePayload;
 			if (!data || Date.now() - (data.ts || 0) > 10 * 60 * 1000) return false;
-			const key = expectedKey ?? cacheKey();
-			const base = (k: string) => k.split('|').slice(0, 3).join('|');
-			if (base(data.key) !== base(key)) return false;
+			if (data.key !== baseCacheKey()) return false;
 			results = data.results || [];
 			meta = data.meta || null;
-			currentLimit = data.limit || PAGE_SIZE;
+			currentOffset = data.offset || 0;
 			hasMore = !!data.hasMore;
 			return results.length > 0;
 		} catch {
@@ -167,14 +177,14 @@
 		} else {
 			selectedTags = [...selectedTags, tag];
 		}
-		currentLimit = PAGE_SIZE;
+		currentOffset = 0;
 		syncUrl();
 		scheduleSearch();
 	}
 
 	function setType(t: TypeFilter) {
 		typeFilter = t;
-		currentLimit = PAGE_SIZE;
+		currentOffset = 0;
 		syncUrl();
 		scheduleSearch();
 	}
@@ -197,6 +207,7 @@
 		}
 
 		const seq = ++searchSeq;
+		const offset = isLoadMore ? currentOffset : 0;
 
 		if (isLoadMore) {
 			loadingMore = true;
@@ -205,6 +216,7 @@
 			results = [];
 			meta = null;
 			hasMore = false;
+			currentOffset = 0;
 		}
 		error = '';
 
@@ -212,8 +224,9 @@
 			const params = new URLSearchParams();
 			if (q) params.set('q', q);
 			if (selectedTags.length) params.set('tags', selectedTags.join(','));
-			params.set('limit', String(currentLimit));
-			params.set('per', '12');
+			params.set('limit', String(PAGE_SIZE));
+			params.set('per', '16');
+			params.set('offset', String(offset));
 			params.set('type', typeFilter);
 
 			const res = await fetch(`/api/deep-search?${params.toString()}`);
@@ -226,15 +239,31 @@
 			}
 			const data = (await res.json()) as {
 				results: Manga[];
-				meta?: { returned?: number; sourcesTried?: number; type?: string };
+				meta?: {
+					returned?: number;
+					sourcesTried?: number;
+					type?: string;
+					hasMore?: boolean;
+					totalMatched?: number;
+				};
 			};
 
 			if (seq !== searchSeq) return;
 
-			results = data.results || [];
+			const batch = data.results || [];
+			if (isLoadMore) {
+				const seen = new Set(results.map((m) => `${m.sourceId}:${m.id}`));
+				const extra = batch.filter((m) => !seen.has(`${m.sourceId}:${m.id}`));
+				results = [...results, ...extra];
+			} else {
+				results = batch;
+			}
+
 			meta = data.meta || null;
-			const returned = data.meta?.returned ?? results.length;
-			hasMore = returned >= currentLimit;
+			currentOffset = offset + batch.length;
+			hasMore =
+				data.meta?.hasMore === true ||
+				(batch.length >= PAGE_SIZE && (data.meta?.totalMatched ?? 0) > currentOffset);
 			saveCache();
 		} catch (e) {
 			if (seq !== searchSeq) return;
@@ -254,12 +283,11 @@
 
 	function loadMore() {
 		if (loading || loadingMore || !hasMore) return;
-		currentLimit += LOAD_MORE_STEP;
 		void runSearch(true);
 	}
 
 	function onInput() {
-		currentLimit = PAGE_SIZE;
+		currentOffset = 0;
 		scheduleSearch();
 	}
 
@@ -270,13 +298,12 @@
 		results = [];
 		meta = null;
 		error = '';
-		currentLimit = PAGE_SIZE;
+		currentOffset = 0;
 		hasMore = false;
 		if (browser) {
 			try {
 				sessionStorage.removeItem(CACHE_KEY);
 			} catch {
-				/* ignore */
 			}
 		}
 		syncUrl();
@@ -301,8 +328,8 @@
 	}
 
 	function itemType(m: Manga): 'novel' | 'manga' {
-		const t = String(m.type || '').toLowerCase();
-		if (t === 'novel') return 'novel';
+		const t = String(m.type || '').toLowerCase().trim();
+		if (t === 'novel' || t === 'light novel' || t === 'ln' || t === 'webnovel') return 'novel';
 		if (isNovelSource(m.sourceId)) return 'novel';
 		return 'manga';
 	}
@@ -398,19 +425,17 @@
 		{/if}
 	</div>
 
-	<!-- Error -->
 	{#if error}
 		<p class="mb-4 text-sm text-red-500 dark:text-red-400">{error}</p>
 	{/if}
 
-	<!-- Meta -->
 	{#if meta && !loading}
-		<p class="mb-4 text-xs text-zinc-500 dark:text-zinc-500">
-			{meta.returned ?? 0} results · {meta.sourcesTried ?? 0} sources
+		<p class="mb-4 text-xs text-zinc-500">
+			{results.length} shown{#if meta.totalMatched != null}
+				· {meta.totalMatched} matched{/if} · {meta.sourcesTried ?? 0} sources
 			{#if meta.type && meta.type !== 'all'}
 				· type: {meta.type}
 			{/if}
-			<span class="opacity-70">(worker = KV only)</span>
 		</p>
 	{/if}
 
@@ -493,6 +518,8 @@
 					{/if}
 				</button>
 			</div>
+		{:else if results.length > 0}
+			<p class="mt-6 text-center text-xs text-zinc-400">End of results</p>
 		{/if}
 	{:else if !loading && (query.length >= 2 || selectedTags.length)}
 		<p class="text-center text-sm text-zinc-500">
