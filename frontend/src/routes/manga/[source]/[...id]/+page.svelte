@@ -431,6 +431,13 @@
 		return { normal, female, male };
 	});
 
+	/** Link genre chip → Deep Search with that tag preselected */
+	function genreSearchHref(genre: string): string {
+		const g = String(genre || '').trim();
+		if (!g) return '/deep-search';
+		return `/deep-search?tags=${encodeURIComponent(g)}`;
+	}
+
 	function proxyImage(url: string, w?: number, h?: number): string {
 	if (!url) return '';
 	let u = String(url).trim();
@@ -981,10 +988,11 @@
 						class="mt-5 grid grid-cols-4 gap-2 md:mt-6 md:grid-cols-[repeat(auto-fit,minmax(110px,1fr))] md:gap-2.5"
 					>
 						{#each genreTags.normal as genre}
-							<span
-								class="detail-chip truncate rounded-lg border px-2 py-1.5 text-center text-[11px] font-medium capitalize"
-								>{genre}</span
-							>
+							<a
+								href={genreSearchHref(genre)}
+								class="detail-chip truncate rounded-lg border px-2 py-1.5 text-center text-[11px] font-medium capitalize transition hover:border-violet-500/50 hover:bg-violet-500/15 hover:text-violet-300"
+								title="Search genre: {genre}"
+							>{genre}</a>
 						{/each}
 					</div>
 				{/if}
@@ -998,10 +1006,11 @@
 								</div>
 								<div class="flex flex-wrap gap-1.5">
 									{#each genreTags.female as tag}
-										<span
-											class="rounded-lg border border-[rgba(255,77,141,0.5)] bg-[rgba(255,77,141,0.28)] px-2.5 py-1 text-[11.5px] font-semibold text-[#ffb2ce] capitalize"
-											>{tag}</span
-										>
+										<a
+											href={genreSearchHref(tag)}
+											class="rounded-lg border border-[rgba(255,77,141,0.5)] bg-[rgba(255,77,141,0.28)] px-2.5 py-1 text-[11.5px] font-semibold text-[#ffb2ce] capitalize transition hover:brightness-110"
+											title="Search genre: {tag}"
+										>{tag}</a>
 									{/each}
 								</div>
 							</div>
@@ -1013,10 +1022,11 @@
 								</div>
 								<div class="flex flex-wrap gap-1.5">
 									{#each genreTags.male as tag}
-										<span
-											class="rounded-lg border border-[rgba(77,125,255,0.5)] bg-[rgba(77,125,255,0.28)] px-2.5 py-1 text-[11.5px] font-semibold text-[#b5c9ff] capitalize"
-											>{tag}</span
-										>
+										<a
+											href={genreSearchHref(tag)}
+											class="rounded-lg border border-[rgba(77,125,255,0.5)] bg-[rgba(77,125,255,0.28)] px-2.5 py-1 text-[11.5px] font-semibold text-[#b5c9ff] capitalize transition hover:brightness-110"
+											title="Search genre: {tag}"
+										>{tag}</a>
 									{/each}
 								</div>
 							</div>
@@ -1484,6 +1494,12 @@
 		background: rgba(0, 0, 0, 0.35);
 		border-color: rgba(255, 255, 255, 0.1);
 		color: #f4f4f5;
+		text-decoration: none;
+		display: block;
+		cursor: pointer;
+	}
+	a.detail-chip:hover {
+		border-color: rgba(139, 92, 246, 0.55);
 	}
 	.detail-card {
 		background: rgba(26, 26, 46, 0.35);

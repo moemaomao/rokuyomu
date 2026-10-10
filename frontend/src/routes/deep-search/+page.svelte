@@ -1,5 +1,9 @@
 <script lang="ts">
     import { Search, Loader2, X, Tag } from 'lucide-svelte';
+    import { onMount } from 'svelte';
+    import { page } from '$app/stores';
+    import { get } from 'svelte/store';
+    import { browser } from '$app/environment';
     import type { Manga } from '$lib/server/sources/types';
     import { isNovelSource } from '$lib/utils/novelSources';
 
@@ -45,6 +49,44 @@
     let meta = $state<{ returned?: number; sourcesTried?: number; type?: string } | null>(null);
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let showTags = $state(true);
+
+
+    function normalizeTagName(raw: string): string {
+        const s = String(raw || '').trim();
+        if (!s) return '';
+        const lower = s.toLowerCase();
+        const found = TAG_OPTIONS.find((t) => t.toLowerCase() === lower);
+        if (found) return found;
+        return s
+            .split(/[\s_/]+/)
+            .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ''))
+            .join(' ');
+    }
+
+    function applySearchParams(sp: URLSearchParams) {
+        const q = (sp.get('q') || '').trim();
+        const tagsParam = (sp.get('tags') || '').trim();
+        const type = (sp.get('type') || 'all').toLowerCase();
+        if (q) query = q;
+        if (tagsParam) {
+            selectedTags = tagsParam
+                .split(',')
+                .map((t) => normalizeTagName(t.trim()))
+                .filter(Boolean);
+            selectedTags = [...new Set(selectedTags)];
+        }
+        if (type === 'manga' || type === 'novel' || type === 'all') {
+            typeFilter = type;
+        }
+    }
+
+    onMount(() => {
+        if (!browser) return;
+        applySearchParams(new URLSearchParams(get(page).url.searchParams));
+        if (query.length >= 2 || selectedTags.length > 0) {
+            void runSearch();
+        }
+    });
 
     function toggleTag(tag: string) {
         if (selectedTags.includes(tag)) {
