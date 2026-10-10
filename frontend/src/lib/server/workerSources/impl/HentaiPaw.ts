@@ -13,8 +13,8 @@
  *   chapter : "/articles/{id}"
  */
 
-import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types-manga';
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
 import * as cheerio from 'cheerio';
 
 export class HentaiPawSource extends BaseSource {
