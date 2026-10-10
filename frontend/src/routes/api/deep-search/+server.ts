@@ -275,8 +275,7 @@ async function searchOneSource(
 	const lang = 'all';
 	const type = isNovelSource(sourceId) ? 'novel' : 'all';
 
-	if (isWorkerSource(sourceId)) {
-		if (!kv) return [];
+	if (kv) {
 		const candidateKeys = [
 			browseCacheKey(sourceId, 1, q, lang, type, per),
 			browseCacheKey(sourceId, 1, q, lang, type, 6),
@@ -302,7 +301,6 @@ async function searchOneSource(
 				}));
 			}
 		}
-		return [];
 	}
 
 	try {
