@@ -15,9 +15,9 @@
  */
 
 import * as cheerio from 'cheerio';
-import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types-manga';
-import { fetchWithCf } from '../../../lib/fetchWithCf';
+import { BaseSource } from '../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
+import { fetchWithCf } from '../../fetchWithCf';
 
 export class ErisScansSource extends BaseSource {
 	id = 'erisscans';
@@ -298,7 +298,6 @@ export class ErisScansSource extends BaseSource {
 					number: number || 0,
 					date: dateStr,
 					cover,
-					isLocked
 				});
 			}
 		);
