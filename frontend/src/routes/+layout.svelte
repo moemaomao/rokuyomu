@@ -11,8 +11,8 @@
 	import { isMultiMode } from '$lib/stores/impl';
 	import { untrack } from 'svelte';
 	import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-    import { db } from '$lib/firebase';
-    import { syncBrokenFromReports } from '$lib/stores/brokenSources.svelte';
+	import { db } from '$lib/firebase';
+	import { syncBrokenFromReports } from '$lib/stores/brokenSources.svelte';
 
 	// Components
 	import Footer from '$lib/components/Footer.svelte';
@@ -91,9 +91,9 @@
 	let { data, children } = $props();
 
 	let isReaderPage = $derived(
-	$page.url.pathname.startsWith('/reader/') ||
-		$page.url.pathname.startsWith('/novel-reader/')
-    );
+		$page.url.pathname.startsWith('/reader/') ||
+			$page.url.pathname.startsWith('/novel-reader/')
+	);
 
 	// ── UI state ─────────────────────────────────────────────────────────────
 	let isDesktop = $state(true);
@@ -165,11 +165,11 @@
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	function toggleSidebar() {
-	isSidebarOpen = !isSidebarOpen;
-	if (browser && isDesktop) {
-		document.cookie = `sidebar_open=${isSidebarOpen ? 'true' : 'false'}; path=/; max-age=31536000; SameSite=Lax`;
-	    }
-    }
+		isSidebarOpen = !isSidebarOpen;
+		if (browser && isDesktop) {
+			document.cookie = `sidebar_open=${isSidebarOpen ? 'true' : 'false'}; path=/; max-age=31536000; SameSite=Lax`;
+		}
+	}
 
 	function closeOverlays() {
 		if (!isDesktop) isSidebarOpen = false;
@@ -209,28 +209,28 @@
 	const SYNC_DONE_KEY = 'rokuyomu_cloud_synced';
 
 	async function runCloudSyncOnce() {
-	if (!browser) return;
-	const user = getUser();
-	if (!user) return;
+		if (!browser) return;
+		const user = getUser();
+		if (!user) return;
 
-	const doneKey = `${SYNC_DONE_KEY}:${user.uid}`;
-	if (sessionStorage.getItem(doneKey) === '1') return;
+		const doneKey = `${SYNC_DONE_KEY}:${user.uid}`;
+		if (sessionStorage.getItem(doneKey) === '1') return;
 
-	sessionStorage.setItem(doneKey, '1');
-	try {
-		await Promise.all([
-			syncBookmarksOnLogin(),
-			syncHistoryOnLogin(),
-			syncNotificationsOnLogin(),
-			loadLifetimeStats()
-		]);
-		loadBookmarks();
-		loadNotifBadge();
-	} catch (e) {
-		sessionStorage.removeItem(doneKey);
-		console.warn('[cloud sync]', e);
+		sessionStorage.setItem(doneKey, '1');
+		try {
+			await Promise.all([
+				syncBookmarksOnLogin(),
+				syncHistoryOnLogin(),
+				syncNotificationsOnLogin(),
+				loadLifetimeStats()
+			]);
+			loadBookmarks();
+			loadNotifBadge();
+		} catch (e) {
+			sessionStorage.removeItem(doneKey);
+			console.warn('[cloud sync]', e);
+		}
 	}
-}
 
 	async function handleAuthSuccess() {
 		isAuthOpen = false;
@@ -281,29 +281,39 @@
 	}
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
-onMount(() => {
-	// Lifetime XP instant hydrate (works before auth resolves)
-	hydrateLifetimeFromLocalStorage();
+	onMount(() => {
+		// Lifetime XP instant hydrate (works before auth resolves)
+		hydrateLifetimeFromLocalStorage();
 
-	const mq = window.matchMedia('(min-width: 1024px)');
-	// ── Auto-retry Error 1102 ────────────────────────────────────────────────
-	const MAX_RETRY = 2;
-	const RETRY_KEY = 'rokuyomu_1102_retry';
-	const RETRY_DELAY = 1400;
+		// === PWA ===
+		if ('serviceWorker' in navigator) {
+			// @ts-expect-error virtual module from vite-plugin-pwa
+			import('virtual:pwa-register')
+				.then(({ registerSW }: { registerSW: (opts?: { immediate?: boolean }) => void }) => {
+					registerSW({ immediate: true });
+				})
+				.catch(() => {});
+		}
 
-	const isError1102 =
-		document.body.innerText.includes('Error 1102') ||
-		document.body.innerText.includes('Worker exceeded resource limits');
+		const mq = window.matchMedia('(min-width: 1024px)');
+		// ── Auto-retry Error 1102 ────────────────────────────────────────────────
+		const MAX_RETRY = 2;
+		const RETRY_KEY = 'rokuyomu_1102_retry';
+		const RETRY_DELAY = 1400;
 
-	if (isError1102) {
-		const currentRetry = parseInt(sessionStorage.getItem(RETRY_KEY) || '0', 10);
+		const isError1102 =
+			document.body.innerText.includes('Error 1102') ||
+			document.body.innerText.includes('Worker exceeded resource limits');
 
-		if (currentRetry < MAX_RETRY) {
-			sessionStorage.setItem(RETRY_KEY, String(currentRetry + 1));
+		if (isError1102) {
+			const currentRetry = parseInt(sessionStorage.getItem(RETRY_KEY) || '0', 10);
 
-			const overlay = document.createElement('div');
-			overlay.id = 'retry-overlay';
-			overlay.innerHTML = `
+			if (currentRetry < MAX_RETRY) {
+				sessionStorage.setItem(RETRY_KEY, String(currentRetry + 1));
+
+				const overlay = document.createElement('div');
+				overlay.id = 'retry-overlay';
+				overlay.innerHTML = `
 			<div style="
 				position:fixed;inset:0;z-index:99999;
 				display:flex;align-items:center;justify-content:center;
@@ -324,179 +334,180 @@ onMount(() => {
 			</div>
 			<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 		`;
-			document.body.appendChild(overlay);
+				document.body.appendChild(overlay);
 
-			setTimeout(() => {
-				window.location.reload();
-			}, RETRY_DELAY);
+				setTimeout(() => {
+					window.location.reload();
+				}, RETRY_DELAY);
 
-			return;
+				return;
+			} else {
+				sessionStorage.removeItem(RETRY_KEY);
+			}
 		} else {
 			sessionStorage.removeItem(RETRY_KEY);
 		}
-	} else {
-		sessionStorage.removeItem(RETRY_KEY);
-	}
 
-	try {
-		const path = window.location.pathname;
-		if (path === '/' || path === '') {
-			const url = new URL(window.location.href);
-			if (!url.searchParams.get('source') && !url.searchParams.get('q')?.trim()) {
-				if (!isMultiMode()) {
-					const last = getImpl();
-					if (last) {
-						const p = new URLSearchParams(url.searchParams);
-						p.set('source', last);
-						goto(`/?${p.toString()}`, {
-							replaceState: true,
-							invalidateAll: true,
-							noScroll: true
-						});
+		try {
+			const path = window.location.pathname;
+			if (path === '/' || path === '') {
+				const url = new URL(window.location.href);
+				if (!url.searchParams.get('source') && !url.searchParams.get('q')?.trim()) {
+					if (!isMultiMode()) {
+						const last = getImpl();
+						if (last) {
+							const p = new URLSearchParams(url.searchParams);
+							p.set('source', last);
+							goto(`/?${p.toString()}`, {
+								replaceState: true,
+								invalidateAll: true,
+								noScroll: true
+							});
+						}
 					}
 				}
 			}
-		}
-	} catch (e) {
-		console.warn('[layout restore source]', e);
-	}
-
-	const applyMq = () => {
-		isDesktop = mq.matches;
-
-		if (isDesktop) {
-			isSidebarOpen = data.sidebarOpen;
-		} else {
-			isSidebarOpen = false;
-		}
-	};
-
-	applyMq();
-	mq.addEventListener('change', applyMq);
-
-	requestAnimationFrame(() => {
-		hasHydrated = true;
-	});
-
-	const savedTheme = localStorage.getItem('darkMode');
-	applyTheme(savedTheme === null ? true : savedTheme === 'true');
-
-	const savedHistory = localStorage.getItem('history_widget_open');
-	if (savedHistory !== null) {
-		isHistoryOpen = savedHistory === 'true';
-	}
-
-	loadBookmarks();
-	window.addEventListener('bookmarks-changed', loadBookmarks);
-
-	loadNotifBadge();
-	window.addEventListener('notifications-changed', loadNotifBadge);
-	checkForNewChapters().then(loadNotifBadge);
-
-	const onDocClick = (e: MouseEvent) => {
-		const t = e.target as HTMLElement;
-		if (!t.closest('[data-dropdown]') && !t.closest('[data-dropdown-btn]')) {
-			isBookmarkOpen = false;
-			isAuthOpen = false;
-		}
-	};
-	document.addEventListener('click', onDocClick);
-
-	let lastScrollY = window.scrollY;
-
-	const handleScroll = () => {
-		const currentScrollY = window.scrollY;
-
-		if (currentScrollY <= 10) {
-			isHeaderHidden = false;
-			lastScrollY = currentScrollY;
-			return;
+		} catch (e) {
+			console.warn('[layout restore source]', e);
 		}
 
-		if (currentScrollY > lastScrollY) {
-			isHeaderHidden = true;
-		} else if (currentScrollY < lastScrollY) {
-			isHeaderHidden = false;
+		const applyMq = () => {
+			isDesktop = mq.matches;
+
+			if (isDesktop) {
+				isSidebarOpen = data.sidebarOpen;
+			} else {
+				isSidebarOpen = false;
+			}
+		};
+
+		applyMq();
+		mq.addEventListener('change', applyMq);
+
+		requestAnimationFrame(() => {
+			hasHydrated = true;
+		});
+
+		const savedTheme = localStorage.getItem('darkMode');
+		applyTheme(savedTheme === null ? true : savedTheme === 'true');
+
+		const savedHistory = localStorage.getItem('history_widget_open');
+		if (savedHistory !== null) {
+			isHistoryOpen = savedHistory === 'true';
 		}
 
-		lastScrollY = currentScrollY;
-	};
+		loadBookmarks();
+		window.addEventListener('bookmarks-changed', loadBookmarks);
 
-	window.addEventListener('scroll', handleScroll, { passive: true });
-const BROKEN_CACHE_KEY = 'rokuyomu_broken_sources_v1';
-const BROKEN_CACHE_TTL = 30 * 60 * 1000; // 30 menit
+		loadNotifBadge();
+		window.addEventListener('notifications-changed', loadNotifBadge);
+		checkForNewChapters().then(loadNotifBadge);
 
-async function loadBrokenSourcesOnce() {
-	if (!db) return;
+		const onDocClick = (e: MouseEvent) => {
+			const t = e.target as HTMLElement;
+			if (!t.closest('[data-dropdown]') && !t.closest('[data-dropdown-btn]')) {
+				isBookmarkOpen = false;
+				isAuthOpen = false;
+			}
+		};
+		document.addEventListener('click', onDocClick);
 
-	try {
-		const raw = sessionStorage.getItem(BROKEN_CACHE_KEY);
-		if (raw) {
-			const cached = JSON.parse(raw) as { ts: number; list: any[] };
-			if (cached?.ts && Date.now() - cached.ts < BROKEN_CACHE_TTL && Array.isArray(cached.list)) {
-				syncBrokenFromReports(cached.list);
+		let lastScrollY = window.scrollY;
+
+		const handleScroll = () => {
+			const currentScrollY = window.scrollY;
+
+			if (currentScrollY <= 10) {
+				isHeaderHidden = false;
+				lastScrollY = currentScrollY;
 				return;
 			}
-		}
-	} catch {
-	}
 
-	try {
-		const qBroken = query(
-			collection(db, 'reports'),
-			where('status', 'in', ['open', 'in_progress']),
-			limit(100)
-		);
-		const snap = await getDocs(qBroken);
-		const list = snap.docs.map(
-			(d) =>
-				d.data() as {
-					type?: string;
-					status?: string;
-					sourceId?: string;
-				}
-		);
-		syncBrokenFromReports(list);
-		try {
-			sessionStorage.setItem(BROKEN_CACHE_KEY, JSON.stringify({ ts: Date.now(), list }));
-		} catch {
-		}
-	} catch (e) {
-		console.warn('[brokenSources] one-shot failed', e);
-		try {
-			const snap = await getDocs(query(collection(db, 'reports'), limit(100)));
-			const list = snap.docs.map(
-				(d) =>
-					d.data() as {
-						type?: string;
-						status?: string;
-						sourceId?: string;
+			if (currentScrollY > lastScrollY) {
+				isHeaderHidden = true;
+			} else if (currentScrollY < lastScrollY) {
+				isHeaderHidden = false;
+			}
+
+			lastScrollY = currentScrollY;
+		};
+
+		window.addEventListener('scroll', handleScroll, { passive: true });
+		const BROKEN_CACHE_KEY = 'rokuyomu_broken_sources_v1';
+		const BROKEN_CACHE_TTL = 30 * 60 * 1000; // 30 menit
+
+		async function loadBrokenSourcesOnce() {
+			if (!db) return;
+
+			try {
+				const raw = sessionStorage.getItem(BROKEN_CACHE_KEY);
+				if (raw) {
+					const cached = JSON.parse(raw) as { ts: number; list: any[] };
+					if (cached?.ts && Date.now() - cached.ts < BROKEN_CACHE_TTL && Array.isArray(cached.list)) {
+						syncBrokenFromReports(cached.list);
+						return;
 					}
-			);
-			syncBrokenFromReports(list);
-		} catch (e2) {
-			console.warn('[brokenSources] fallback failed', e2);
+				}
+			} catch {
+			}
+
+			try {
+				const qBroken = query(
+					collection(db, 'reports'),
+					where('status', 'in', ['open', 'in_progress']),
+					limit(100)
+				);
+				const snap = await getDocs(qBroken);
+				const list = snap.docs.map(
+					(d) =>
+						d.data() as {
+							type?: string;
+							status?: string;
+							sourceId?: string;
+						}
+				);
+				syncBrokenFromReports(list);
+				try {
+					sessionStorage.setItem(BROKEN_CACHE_KEY, JSON.stringify({ ts: Date.now(), list }));
+				} catch {
+				}
+			} catch (e) {
+				console.warn('[brokenSources] one-shot failed', e);
+				try {
+					const snap = await getDocs(query(collection(db, 'reports'), limit(100)));
+					const list = snap.docs.map(
+						(d) =>
+							d.data() as {
+								type?: string;
+								status?: string;
+								sourceId?: string;
+							}
+					);
+					syncBrokenFromReports(list);
+				} catch (e2) {
+					console.warn('[brokenSources] fallback failed', e2);
+				}
+			}
 		}
-	}
-}
 
-loadBrokenSourcesOnce();
+		loadBrokenSourcesOnce();
 
-	setTimeout(() => {
-		runCloudSyncOnce();
-	}, 800);
+		setTimeout(() => {
+			runCloudSyncOnce();
+		}, 800);
 
-	return () => {
-		mq.removeEventListener('change', applyMq);
-		window.removeEventListener('bookmarks-changed', loadBookmarks);
-		window.removeEventListener('notifications-changed', loadNotifBadge);
-		document.removeEventListener('click', onDocClick);
-		window.removeEventListener('scroll', handleScroll);
-	};
-});
+		return () => {
+			mq.removeEventListener('change', applyMq);
+			window.removeEventListener('bookmarks-changed', loadBookmarks);
+			window.removeEventListener('notifications-changed', loadNotifBadge);
+			document.removeEventListener('click', onDocClick);
+			window.removeEventListener('scroll', handleScroll);
+		};
+	});
 </script>
 
 <svelte:head>
+	<link rel="manifest" href="/manifest.webmanifest" />
 	<link rel="icon" href={favicon} />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
@@ -521,7 +532,7 @@ loadBrokenSourcesOnce();
 		? 'bg-gradient-to-b from-violet-950/70 via-[#0c0910] to-[#0c0910] text-zinc-100'
 		: 'bg-[#f5f5f7] text-zinc-900'}"
 >
-		<!-- ========== LEFT SIDEBAR ========== -->
+	<!-- ========== LEFT SIDEBAR ========== -->
 	{#if isSidebarOpen && !isDesktop}
 		<button
 			onclick={closeOverlays}
@@ -604,19 +615,19 @@ loadBrokenSourcesOnce();
 				<History class="h-5 w-5 shrink-0" /> History
 			</a>
 			<a
-	            href="/report"
-	            onclick={(e) => handleNavigate(e, '/report')}
-	            class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
-            >
-	            <MessageSquarePlus class="h-5 w-5 shrink-0" /> Report & Request
-            </a>
+				href="/report"
+				onclick={(e) => handleNavigate(e, '/report')}
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<MessageSquarePlus class="h-5 w-5 shrink-0" /> Report & Request
+			</a>
 			<a
-                href="/community"
-                onclick={(e) => handleNavigate(e, '/community')}
-                class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
-             >
-                <MessagesSquare class="h-5 w-5 shrink-0" /> Community
-            </a>
+				href="/community"
+				onclick={(e) => handleNavigate(e, '/community')}
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<MessagesSquare class="h-5 w-5 shrink-0" /> Community
+			</a>
 			<a
 				href="/settings"
 				onclick={(e) => handleNavigate(e, '/settings')}
@@ -628,21 +639,23 @@ loadBrokenSourcesOnce();
 			<div class="my-2 border-t {isDarkMode ? 'border-zinc-800/80' : 'border-zinc-200'}"></div>
 
 			<a
-	            href="https://discord.gg/kkt669knaG"
-	            target="_blank"
-	            rel="noopener noreferrer"
-	            class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
->
-	         <svg
-		        class="h-5 w-5 shrink-0"
-		        viewBox="0 0 24 24"
-		        fill="currentColor"
-		        xmlns="http://www.w3.org/2000/svg"
-	>
-		     <path
-			   d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.635-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"
-		      /></svg> Discord
-           </a>
+				href="https://discord.gg/kkt669knaG"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<svg
+					class="h-5 w-5 shrink-0"
+					viewBox="0 0 24 24"
+					fill="currentColor"
+					xmlns="http://www.w3.org/2000/svg"
+				>
+					<path
+						d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.635-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"
+					/>
+				</svg>
+				Discord
+			</a>
 		</nav>
 	</aside>
 
@@ -656,213 +669,213 @@ loadBrokenSourcesOnce();
 		<!-- Left column -->
 		<div class="flex min-h-screen min-w-0 flex-1 flex-col">
 			<!-- Header -->
-<header
-	class="sticky top-0 z-40 w-full border-b backdrop-blur-xl
+			<header
+				class="sticky top-0 z-40 w-full border-b backdrop-blur-xl
 		transition-transform duration-300 ease-in-out
 		{isHeaderHidden ? '-translate-y-full' : 'translate-y-0'}
 		{isDarkMode
-		? 'border-zinc-800/50 bg-gradient-to-b from-violet-950/70 via-[#0c0910]/90 to-[#0c0910]/90'
-		: 'border-zinc-200/80 bg-white/90'}"
->
-	<div class="flex h-12 w-full items-center justify-between gap-1.5 px-2.5 sm:h-14 sm:gap-2 sm:px-4">
-		<!-- Left: menu + logo -->
-		<div class="flex min-w-0 shrink items-center gap-1.5">
-			{#if !isSidebarOpen}
-				<button
-					onclick={toggleSidebar}
-					class="rounded-lg p-1.5 transition {iconBtnClass()}"
-					aria-label="Toggle menu"
-				>
-					<Menu class="h-5 w-5" />
-				</button>
-			{/if}
-
-			{#if !isSidebarOpen}
-				<a href="/" onclick={goHome} class="flex min-w-0 items-center">
-					<img src={logo} alt="Rokuyomu" class="h-9 w-auto max-w-[110px] sm:h-10 sm:max-w-none" />
-				</a>
-			{/if}
-		</div>
-
-		<!-- Right: actions -->
-		<div class="relative flex shrink-0 items-center gap-0.5">
-			<a
-				href="/notification"
-				onclick={(e) => handleNavigate(e, '/notification')}
-				class="relative rounded-lg p-1.5 transition {iconBtnClass()}"
-				aria-label="Notifikasi"
-				title="Notifikasi chapter"
+					? 'border-zinc-800/50 bg-gradient-to-b from-violet-950/70 via-[#0c0910]/90 to-[#0c0910]/90'
+					: 'border-zinc-200/80 bg-white/90'}"
 			>
-				<Bell class="h-5 w-5" />
-				{#if notifUnread > 0}
-					<span
-						class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 text-white px-0.5 text-[9px] font-bold text-white"
-					>
-						{notifUnread > 99 ? '99+' : notifUnread}
-					</span>
-				{/if}
-			</a>
+				<div class="flex h-12 w-full items-center justify-between gap-1.5 px-2.5 sm:h-14 sm:gap-2 sm:px-4">
+					<!-- Left: menu + logo -->
+					<div class="flex min-w-0 shrink items-center gap-1.5">
+						{#if !isSidebarOpen}
+							<button
+								onclick={toggleSidebar}
+								class="rounded-lg p-1.5 transition {iconBtnClass()}"
+								aria-label="Toggle menu"
+							>
+								<Menu class="h-5 w-5" />
+							</button>
+						{/if}
 
-			<!-- Theme -->
-			<button
-				onclick={toggleDarkMode}
-				class="rounded-lg p-1.5 transition
+						{#if !isSidebarOpen}
+							<a href="/" onclick={goHome} class="flex min-w-0 items-center">
+								<img src={logo} alt="Rokuyomu" class="h-9 w-auto max-w-[110px] sm:h-10 sm:max-w-none" />
+							</a>
+						{/if}
+					</div>
+
+					<!-- Right: actions -->
+					<div class="relative flex shrink-0 items-center gap-0.5">
+						<a
+							href="/notification"
+							onclick={(e) => handleNavigate(e, '/notification')}
+							class="relative rounded-lg p-1.5 transition {iconBtnClass()}"
+							aria-label="Notifikasi"
+							title="Notifikasi chapter"
+						>
+							<Bell class="h-5 w-5" />
+							{#if notifUnread > 0}
+								<span
+									class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold text-white"
+								>
+									{notifUnread > 99 ? '99+' : notifUnread}
+								</span>
+							{/if}
+						</a>
+
+						<!-- Theme -->
+						<button
+							onclick={toggleDarkMode}
+							class="rounded-lg p-1.5 transition
 					{isDarkMode
-					? 'text-zinc-300 hover:bg-zinc-800/60 hover:text-amber-300'
-					: 'text-zinc-600 hover:bg-zinc-100 hover:text-indigo-600'}"
-				aria-label="Toggle theme"
-			>
-				{#if isDarkMode}
-					<Sun class="h-5 w-5" />
-				{:else}
-					<Moon class="h-5 w-5" />
-				{/if}
-			</button>
-
-			{#if !isReaderPage}
-				<button
-					onclick={toggleHistory}
-					class="hidden rounded-lg p-1.5 transition xl:flex {iconBtnClass(isHistoryOpen)}"
-					aria-label="Toggle history"
-					title="Reading History"
-				>
-					<History class="h-5 w-5" />
-				</button>
-			{/if}
-
-			<!-- Bookmark dropdown -->
-			<div class="relative" data-dropdown>
-				<button
-					data-dropdown-btn
-					onclick={toggleBookmarkPanel}
-					class="relative rounded-lg p-1.5 transition {iconBtnClass()}"
-					aria-label="Bookmarks"
-				>
-					<Bookmark class="h-5 w-5" />
-					{#if bookmarks.length > 0}
-						<span
-							class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-violet-500 text-white px-0.5 text-[9px] font-bold text-white"
+								? 'text-zinc-300 hover:bg-zinc-800/60 hover:text-amber-300'
+								: 'text-zinc-600 hover:bg-zinc-100 hover:text-indigo-600'}"
+							aria-label="Toggle theme"
 						>
-							{bookmarks.length > 99 ? '99+' : bookmarks.length}
-						</span>
-					{/if}
-				</button>
+							{#if isDarkMode}
+								<Sun class="h-5 w-5" />
+							{:else}
+								<Moon class="h-5 w-5" />
+							{/if}
+						</button>
 
-				{#if isBookmarkOpen}
-					<div
-						class="absolute right-0 z-50 mt-2 max-h-[70vh] w-[min(20rem,calc(100vw-1.25rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border shadow-2xl
+						{#if !isReaderPage}
+							<button
+								onclick={toggleHistory}
+								class="hidden rounded-lg p-1.5 transition xl:flex {iconBtnClass(isHistoryOpen)}"
+								aria-label="Toggle history"
+								title="Reading History"
+							>
+								<History class="h-5 w-5" />
+							</button>
+						{/if}
+
+						<!-- Bookmark dropdown -->
+						<div class="relative" data-dropdown>
+							<button
+								data-dropdown-btn
+								onclick={toggleBookmarkPanel}
+								class="relative rounded-lg p-1.5 transition {iconBtnClass()}"
+								aria-label="Bookmarks"
+							>
+								<Bookmark class="h-5 w-5" />
+								{#if bookmarks.length > 0}
+									<span
+										class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-violet-500 px-0.5 text-[9px] font-bold text-white"
+									>
+										{bookmarks.length > 99 ? '99+' : bookmarks.length}
+									</span>
+								{/if}
+							</button>
+
+							{#if isBookmarkOpen}
+								<div
+									class="absolute right-0 z-50 mt-2 max-h-[70vh] w-[min(20rem,calc(100vw-1.25rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border shadow-2xl
 							{isDarkMode ? 'border-zinc-800 bg-zinc-900' : 'border-zinc-200 bg-white'}"
-					>
-						<div
-							class="flex items-center justify-between border-b px-4 py-3
+								>
+									<div
+										class="flex items-center justify-between border-b px-4 py-3
 								{isDarkMode ? 'border-zinc-800' : 'border-zinc-200'}"
-						>
-							<p class="text-sm font-semibold">Bookmarks</p>
-							<span class="text-xs text-zinc-500">{bookmarks.length} item</span>
+									>
+										<p class="text-sm font-semibold">Bookmarks</p>
+										<span class="text-xs text-zinc-500">{bookmarks.length} item</span>
+									</div>
+
+									{#if bookmarks.length === 0}
+										<p class="px-4 py-8 text-center text-xs text-zinc-500">Belum ada bookmark.</p>
+									{:else}
+										<div class="max-h-[50vh] overflow-y-auto p-2">
+											{#each bookmarks as bm}
+												{@const mangaHref = formatMangaHref(bm.sourceId, bm.mangaId)}
+												<div
+													class="group flex items-center gap-3 rounded-lg p-2 transition
+											{isDarkMode ? 'hover:bg-zinc-800/80' : 'hover:bg-zinc-100'}"
+												>
+													<a
+														href={mangaHref}
+														onclick={(e) => handleNavigate(e, mangaHref)}
+														class="flex min-w-0 flex-1 items-center gap-3"
+													>
+														<div class="h-14 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
+															{#if bm.cover}
+																<img
+																	src={proxyCover(bm.cover, bm.sourceId)}
+																	data-original={bm.cover}
+																	data-source={bm.sourceId}
+																	alt={bm.mangaTitle}
+																	class="h-full w-full object-cover"
+																	loading="lazy"
+																	onerror={onCoverError}
+																/>
+															{/if}
+														</div>
+														<div class="min-w-0 flex-1">
+															<p class="line-clamp-2 text-xs font-medium">{bm.mangaTitle}</p>
+															<p class="mt-0.5 text-[10px] text-zinc-500 capitalize">{bm.sourceId}</p>
+														</div>
+													</a>
+													<button
+														onclick={() => handleRemoveBookmark(bm.mangaId)}
+														class="shrink-0 rounded-md p-1.5 text-zinc-500 opacity-0 transition
+												group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400"
+													>
+														<Trash2 class="h-3.5 w-3.5" />
+													</button>
+												</div>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
 						</div>
 
-						{#if bookmarks.length === 0}
-							<p class="px-4 py-8 text-center text-xs text-zinc-500">Belum ada bookmark.</p>
-						{:else}
-							<div class="max-h-[50vh] overflow-y-auto p-2">
-								{#each bookmarks as bm}
-									{@const mangaHref = formatMangaHref(bm.sourceId, bm.mangaId)}
-									<div
-										class="group flex items-center gap-3 rounded-lg p-2 transition
-											{isDarkMode ? 'hover:bg-zinc-800/80' : 'hover:bg-zinc-100'}"
-									>
-										<a
-											href={mangaHref}
-											onclick={(e) => handleNavigate(e, mangaHref)}
-											class="flex min-w-0 flex-1 items-center gap-3"
-										>
-											<div class="h-14 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
-												{#if bm.cover}
-													<img
-														src={proxyCover(bm.cover, bm.sourceId)}
-														data-original={bm.cover}
-														data-source={bm.sourceId}
-														alt={bm.mangaTitle}
-														class="h-full w-full object-cover"
-														loading="lazy"
-														onerror={onCoverError}
-													/>
-												{/if}
-											</div>
-											<div class="min-w-0 flex-1">
-												<p class="line-clamp-2 text-xs font-medium">{bm.mangaTitle}</p>
-												<p class="mt-0.5 text-[10px] text-zinc-500 capitalize">{bm.sourceId}</p>
-											</div>
-										</a>
-										<button
-											onclick={() => handleRemoveBookmark(bm.mangaId)}
-											class="shrink-0 rounded-md p-1.5 text-zinc-500 opacity-0 transition
-												group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400"
-										>
-											<Trash2 class="h-3.5 w-3.5" />
-										</button>
-									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/if}
-			</div>
-
-			<!-- Auth dropdown -->
-			<div class="relative" data-dropdown>
-				<button
-					data-dropdown-btn
-					onclick={toggleAuth}
-					class="rounded-lg p-1.5 transition {iconBtnClass()}"
-					aria-label="Account"
-				>
-					{#if isLoading()}
-						<span class="flex h-5 w-5 items-center justify-center text-xs opacity-60">...</span>
-					{:else if getUser()}
-						{#if getUser()?.photoURL}
-							<img
-								src={getUser()!.photoURL}
-								alt="avatar"
-								class="h-5 w-5 rounded-full object-cover ring-1 ring-white/20"
-							/>
-						{:else}
-							<span
-								class="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-[10px] font-bold text-white"
+						<!-- Auth dropdown -->
+						<div class="relative" data-dropdown>
+							<button
+								data-dropdown-btn
+								onclick={toggleAuth}
+								class="rounded-lg p-1.5 transition {iconBtnClass()}"
+								aria-label="Account"
 							>
-								{(getUser()?.displayName?.[0] || getUser()?.email?.[0] || 'U').toUpperCase()}
-							</span>
-						{/if}
-					{:else}
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-							<circle cx="12" cy="7" r="4" />
-						</svg>
-					{/if}
-				</button>
+								{#if isLoading()}
+									<span class="flex h-5 w-5 items-center justify-center text-xs opacity-60">...</span>
+								{:else if getUser()}
+									{#if getUser()?.photoURL}
+										<img
+											src={getUser()!.photoURL}
+											alt="avatar"
+											class="h-5 w-5 rounded-full object-cover ring-1 ring-white/20"
+										/>
+									{:else}
+										<span
+											class="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-[10px] font-bold text-white"
+										>
+											{(getUser()?.displayName?.[0] || getUser()?.email?.[0] || 'U').toUpperCase()}
+										</span>
+									{/if}
+								{:else}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-5 w-5"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									>
+										<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+										<circle cx="12" cy="7" r="4" />
+									</svg>
+								{/if}
+							</button>
 
-				{#if isAuthOpen}
-					<div class="absolute right-0 z-50 mt-2">
-						<AuthPanel
-							{isDarkMode}
-							onSuccess={handleAuthSuccess}
-							onLogout={handleLogout}
-						/>
+							{#if isAuthOpen}
+								<div class="absolute right-0 z-50 mt-2">
+									<AuthPanel
+										{isDarkMode}
+										onSuccess={handleAuthSuccess}
+										onLogout={handleLogout}
+									/>
+								</div>
+							{/if}
+						</div>
 					</div>
-				{/if}
-			</div>
-		</div>
-	</div>
-</header>
+				</div>
+			</header>
 
 			<!-- Page content -->
 			<main class="flex-1">
