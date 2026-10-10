@@ -17,6 +17,8 @@
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../../types-manga';
+import { fetchWithCf } from '../../../lib/fetchWithCf';
+import { isByparrEnabled } from '../../../lib/byparr';
 
 export class ErisScansSource extends BaseSource {
 	id = 'erisscans';
@@ -26,6 +28,20 @@ export class ErisScansSource extends BaseSource {
 	private readonly PER_PAGE = 24;
 	private readonly LIST_LANG = 'en';
 	private readonly CDN = 'https://cdn.meowing.org/uploads';
+
+	protected async fetchHtml(path: string): Promise<string> {
+		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+		if (isByparrEnabled()) {
+			console.log(`[erisscans] byparr enabled → ${url.slice(0, 80)}`);
+		}
+		return fetchWithCf(url, {
+			headers: {
+				...this.headers,
+				Referer: `${this.baseUrl}/`
+			}
+		});
+	}
+
 
 	private absUrl(u?: string | null): string {
 		if (!u) return '';
