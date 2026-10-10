@@ -309,7 +309,7 @@
         </p>
     {:else if !loading}
         <p class="text-center text-sm text-zinc-500">
-            Type at least 2 characters or select a genre to start searching.
+            Type a title (min 2 chars) and/or select genres. Genre filter matches series tags, not title text.
         </p>
     {/if}
 </div>

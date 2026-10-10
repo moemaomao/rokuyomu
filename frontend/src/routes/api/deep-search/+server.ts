@@ -4,8 +4,8 @@
  * - Worker sources  → KV cache ONLY (readCache), never scrape di Worker
  *
  * Query params:
- *   q        : judul / keyword (min 2 char, atau tags)
- *   tags     : comma-separated genre/tag
+ *   q        : judul / keyword (min 2 char) — title search only
+ *   tags     : comma-separated genre/tag — filtered against series genres, NOT title
  *   sources  : comma-separated source ids (opsional)
  *   limit    : max hasil total (default 48, max 100)
  *   per      : max per source (default 8, max 16)
@@ -132,6 +132,38 @@ function scoreTitle(title: string, query: string): number {
 	return Math.round(ratio * 400 + ordered * 20);
 }
 
+function normTag(s: string): string {
+	return String(s || '')
+		.toLowerCase()
+		.replace(/^female:\s*/i, '')
+		.replace(/^male:\s*/i, '')
+		.replace(/[^a-z0-9]+/g, ' ')
+		.trim();
+}
+
+function getItemGenres(m: Manga): string[] {
+	const any = m as Manga & { genres?: string[]; tags?: string[] };
+	const raw = [...(any.genres || []), ...(any.tags || [])];
+	return raw.map(normTag).filter(Boolean);
+}
+
+function matchesGenreTag(genres: string[], tag: string): boolean {
+	const t = normTag(tag);
+	if (!t || !genres.length) return false;
+	return genres.some((g) => g === t || g.includes(t) || t.includes(g));
+}
+
+function scoreGenres(genres: string[], tags: string[]): number {
+	if (!tags.length) return 0;
+	if (!genres.length) return 0;
+	let hits = 0;
+	for (const tag of tags) {
+		if (matchesGenreTag(genres, tag)) hits++;
+	}
+	const ratio = hits / tags.length;
+	return Math.round(ratio * 1200 + hits * 80);
+}
+
 async function searchOneSource(
 	sourceId: string,
 	query: string,
@@ -151,7 +183,14 @@ async function searchOneSource(
 			browseCacheKey(sourceId, 1, q, lang, type, 8),
 			browseCacheKey(sourceId, 1, q, lang, type, 24),
 			browseCacheKey(sourceId, 1, q, 'all', 'all', per),
-			browseCacheKey(sourceId, 1, q, 'all', 'all', 24)
+			browseCacheKey(sourceId, 1, q, 'all', 'all', 24),
+			...(q
+				? []
+				: [
+						browseCacheKey(sourceId, 1, '', lang, type, 24),
+						browseCacheKey(sourceId, 1, '', 'all', 'all', 24),
+						browseCacheKey(sourceId, 1, '', 'all', 'all', 48)
+					])
 		];
 
 		for (const key of candidateKeys) {
@@ -211,7 +250,8 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 				.map((t) => t.trim())
 				.filter(Boolean)
 		: [];
-	const query = [qRaw, ...tagParts].filter(Boolean).join(' ').trim();
+	const query = qRaw.trim();
+	const tagsOnly = !query && tagParts.length > 0;
 
 	const allIds = new Set(getSourceList().map((s) => s.id));
 	for (const id of NOVEL_SOURCE_IDS) allIds.add(id);
@@ -274,8 +314,25 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 			if (typeFilter === 'novel' && kind !== 'novel') continue;
 			if (typeFilter === 'manga' && kind === 'novel') continue;
 
-			const score = scoreTitle(m.title || '', qRaw || query);
-			if (qRaw.length >= 2 && score < 40) continue;
+			const genres = getItemGenres(m);
+			const genreScore = scoreGenres(genres, tagParts);
+			const titleScore = query ? scoreTitle(m.title || '', query) : 0;
+
+			if (tagParts.length > 0) {
+				if (genres.length > 0) {
+					const allMatch = tagParts.every((t) => matchesGenreTag(genres, t));
+					if (!allMatch) continue;
+				} else if (tagsOnly) {
+					continue;
+				}
+				else if (query.length >= 2 && titleScore < 200) {
+					continue;
+				}
+			}
+
+			if (query.length >= 2 && titleScore < 40 && genreScore === 0) continue;
+
+			const score = genreScore + titleScore + (tagsOnly && genreScore > 0 ? 200 : 0);
 
 			scored.push({
 				...m,
@@ -293,8 +350,9 @@ export const GET: RequestHandler = async ({ url, locals, platform }) => {
 		{
 			results,
 			meta: {
-				query,
+				query: query || (tagsOnly ? `(genre: ${tagParts.join(', ')})` : ''),
 				tags: tagParts,
+				tagsOnly,
 				type: typeFilter,
 				sourcesTried: sourceIds.length,
 				returned: results.length,
