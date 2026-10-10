@@ -40,6 +40,16 @@
 
 	const PAGE_SIZE = 72;
 	const LOAD_MORE_STEP = 48;
+	const CACHE_KEY = 'rokuyomu:deep-search:last';
+
+	interface CachePayload {
+		key: string;
+		results: Manga[];
+		meta: { returned?: number; sourcesTried?: number; type?: string } | null;
+		limit: number;
+		hasMore: boolean;
+		ts: number;
+	}
 
 	let query = $state('');
 	let selectedTags = $state<string[]>([]);
@@ -54,6 +64,47 @@
 	let currentLimit = $state(PAGE_SIZE);
 	let hasMore = $state(false);
 	let searchSeq = 0;
+
+	function cacheKey(): string {
+		return [query.trim(), selectedTags.slice().sort().join(','), typeFilter, currentLimit].join('|');
+	}
+
+	function saveCache() {
+		if (!browser) return;
+		try {
+			const payload: CachePayload = {
+				key: cacheKey(),
+				results,
+				meta,
+				limit: currentLimit,
+				hasMore,
+				ts: Date.now()
+			};
+			sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+		} catch {
+			/* ignore quota */
+		}
+	}
+
+	function loadCache(expectedKey?: string): boolean {
+		if (!browser) return false;
+		try {
+			const raw = sessionStorage.getItem(CACHE_KEY);
+			if (!raw) return false;
+			const data = JSON.parse(raw) as CachePayload;
+			if (!data || Date.now() - (data.ts || 0) > 10 * 60 * 1000) return false;
+			const key = expectedKey ?? cacheKey();
+			const base = (k: string) => k.split('|').slice(0, 3).join('|');
+			if (base(data.key) !== base(key)) return false;
+			results = data.results || [];
+			meta = data.meta || null;
+			currentLimit = data.limit || PAGE_SIZE;
+			hasMore = !!data.hasMore;
+			return results.length > 0;
+		} catch {
+			return false;
+		}
+	}
 
 	function normalizeTagName(raw: string): string {
 		const s = String(raw || '').trim();
@@ -103,7 +154,10 @@
 		if (!browser) return;
 		applySearchParams(new URLSearchParams(window.location.search));
 		if (query.length >= 2 || selectedTags.length > 0) {
-			void runSearch(false);
+			const restored = loadCache();
+			if (!restored) {
+				void runSearch(false);
+			}
 		}
 	});
 
@@ -181,6 +235,7 @@
 			meta = data.meta || null;
 			const returned = data.meta?.returned ?? results.length;
 			hasMore = returned >= currentLimit;
+			saveCache();
 		} catch (e) {
 			if (seq !== searchSeq) return;
 			error = e instanceof Error ? e.message : 'Search failed';
@@ -217,6 +272,13 @@
 		error = '';
 		currentLimit = PAGE_SIZE;
 		hasMore = false;
+		if (browser) {
+			try {
+				sessionStorage.removeItem(CACHE_KEY);
+			} catch {
+				/* ignore */
+			}
+		}
 		syncUrl();
 	}
 
@@ -250,15 +312,15 @@
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<div class="flex items-center gap-2">
-			<Search class="h-5 w-5 text-violet-400" />
-			<h1 class="text-xl font-bold">Deep Search</h1>
+			<Search class="h-5 w-5 text-violet-500 dark:text-violet-400" />
+			<h1 class="text-xl font-bold text-zinc-900 dark:text-zinc-100">Deep Search</h1>
 		</div>
 
 		{#if query || selectedTags.length || typeFilter !== 'all'}
 			<button
 				type="button"
 				onclick={clearAll}
-				class="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
+				class="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 			>
 				<X class="h-4 w-4" />
 				Clear
@@ -266,20 +328,21 @@
 		{/if}
 	</div>
 
+	<!-- Search Input -->
 	<div class="relative mb-4">
 		<input
 			type="search"
 			bind:value={query}
 			oninput={onInput}
 			placeholder="Search manga / novel title..."
-			class="theme-input w-full rounded-xl border border-zinc-700 bg-zinc-900/80 py-3 pr-12 pl-4 text-sm outline-none transition focus:border-violet-500"
+			class="theme-input w-full rounded-xl border border-zinc-300 bg-white py-3 pr-12 pl-4 text-sm text-zinc-900 outline-none transition focus:border-violet-500 dark:border-zinc-700 dark:bg-zinc-900/80 dark:text-zinc-100"
 		/>
 		{#if loading}
 			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2">
-				<Loader2 class="h-5 w-5 animate-spin text-violet-400" />
+				<Loader2 class="h-5 w-5 animate-spin text-violet-500 dark:text-violet-400" />
 			</span>
 		{:else}
-			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-zinc-500">
+			<span class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500">
 				<Search class="h-5 w-5" />
 			</span>
 		{/if}
@@ -293,8 +356,8 @@
 				onclick={() => setType(t)}
 				class="rounded-full border px-3 py-1 text-xs font-medium capitalize transition
 					{typeFilter === t
-					? 'border-violet-500 bg-violet-600/30 text-violet-200'
-					: 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}"
+					? 'border-violet-500 bg-violet-600/20 text-violet-700 dark:bg-violet-600/30 dark:text-violet-200'
+					: 'border-zinc-300 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500'}"
 			>
 				{t === 'all' ? 'All types' : t}
 			</button>
@@ -306,7 +369,7 @@
 		<button
 			type="button"
 			onclick={() => (showTags = !showTags)}
-			class="mb-2 flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200"
+			class="mb-2 flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
 		>
 			<Tag class="h-4 w-4" />
 			Genre / Tag
@@ -325,8 +388,8 @@
 						onclick={() => toggleTag(tag)}
 						class="rounded-full border px-3 py-1 text-xs transition
 							{selectedTags.includes(tag)
-							? 'border-violet-500 bg-violet-600/30 text-violet-200'
-							: 'border-zinc-700 text-zinc-400 hover:border-zinc-500'}"
+							? 'border-violet-500 bg-violet-600/20 text-violet-700 dark:bg-violet-600/30 dark:text-violet-200'
+							: 'border-zinc-300 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500'}"
 					>
 						{tag}
 					</button>
@@ -337,12 +400,12 @@
 
 	<!-- Error -->
 	{#if error}
-		<p class="mb-4 text-sm text-red-400">{error}</p>
+		<p class="mb-4 text-sm text-red-500 dark:text-red-400">{error}</p>
 	{/if}
 
 	<!-- Meta -->
 	{#if meta && !loading}
-		<p class="mb-4 text-xs text-zinc-500">
+		<p class="mb-4 text-xs text-zinc-500 dark:text-zinc-500">
 			{meta.returned ?? 0} results · {meta.sourcesTried ?? 0} sources
 			{#if meta.type && meta.type !== 'all'}
 				· type: {meta.type}
@@ -354,27 +417,26 @@
 	{#if loading && results.length === 0}
 		<div class="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each Array(12) as _}
-				<div class="overflow-hidden rounded-xl bg-zinc-900/40">
-					<div class="aspect-[2/3] animate-pulse bg-zinc-800"></div>
+				<div class="overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-transparent dark:bg-zinc-900/40">
+					<div class="aspect-[2/3] animate-pulse bg-zinc-200 dark:bg-zinc-800"></div>
 					<div class="space-y-2 p-2.5">
-						<div class="h-3 w-4/5 animate-pulse rounded bg-zinc-800"></div>
-						<div class="h-2 w-1/2 animate-pulse rounded bg-zinc-800"></div>
+						<div class="h-3 w-4/5 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800"></div>
+						<div class="h-2 w-1/2 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800"></div>
 					</div>
 				</div>
 			{/each}
 		</div>
 	{/if}
 
-	<!-- Results -->
 	{#if results.length > 0}
 		<div class="grid grid-cols-3 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 			{#each results as m (m.sourceId + ':' + m.id)}
 				{@const kind = itemType(m)}
 				<a
 					href={mangaHref(m)}
-					class="group overflow-hidden rounded-xl bg-zinc-900/10 transition hover:bg-zinc-800/80"
+					class="group overflow-hidden rounded-xl border border-zinc-200 bg-white transition hover:border-violet-300 hover:bg-zinc-50 dark:border-transparent dark:bg-zinc-900/10 dark:hover:bg-zinc-800/80"
 				>
-					<div class="relative aspect-[2/3] overflow-hidden bg-zinc-800">
+					<div class="relative aspect-[2/3] overflow-hidden bg-zinc-100 dark:bg-zinc-800">
 						{#if m.cover}
 							<img
 								src={proxyCover(m.cover, m.sourceId)}
@@ -386,7 +448,7 @@
 						{/if}
 
 						<span
-							class="absolute top-2 left-2 max-w-[70%] truncate rounded-md bg-violet-600/40 px-2 py-0.5 text-[10px] font-bold capitalize text-violet-100 backdrop-blur-md"
+							class="absolute top-2 left-2 max-w-[70%] truncate rounded-md bg-violet-600/70 px-2 py-0.5 text-[10px] font-bold capitalize text-white backdrop-blur-md dark:bg-violet-600/40 dark:text-violet-100"
 						>
 							{m.sourceId}
 						</span>
@@ -394,15 +456,15 @@
 						<span
 							class="absolute bottom-2 left-2 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase backdrop-blur-md
 								{kind === 'novel'
-								? 'bg-amber-500/50 text-amber-50'
-								: 'bg-emerald-600/50 text-emerald-50'}"
+								? 'bg-amber-500/80 text-white dark:bg-amber-500/50 dark:text-amber-50'
+								: 'bg-emerald-600/80 text-white dark:bg-emerald-600/50 dark:text-emerald-50'}"
 						>
 							{kind}
 						</span>
 					</div>
 
 					<div class="p-2.5">
-						<p class="line-clamp-2 text-sm font-medium leading-snug">
+						<p class="line-clamp-2 text-sm font-medium leading-snug text-zinc-900 dark:text-zinc-100">
 							{m.title}
 						</p>
 						{#if m.latestChapter}
@@ -415,14 +477,13 @@
 			{/each}
 		</div>
 
-		<!-- Load more -->
 		{#if hasMore}
 			<div class="mt-8 flex justify-center">
 				<button
 					type="button"
 					onclick={loadMore}
 					disabled={loadingMore}
-					class="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900/80 px-6 py-2.5 text-sm font-medium text-zinc-200 transition hover:border-violet-500 hover:bg-violet-600/20 disabled:cursor-not-allowed disabled:opacity-50"
+					class="flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-6 py-2.5 text-sm font-medium text-zinc-800 transition hover:border-violet-500 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900/80 dark:text-zinc-200 dark:hover:bg-violet-600/20"
 				>
 					{#if loadingMore}
 						<Loader2 class="h-4 w-4 animate-spin" />
