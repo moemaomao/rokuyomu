@@ -207,6 +207,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'rokaricomics', name: 'Rokari Comics' },
 	{ id: 'hentaicrot', name: 'HentaiCrot' },
 	{ id: 'hentaipaw', name: 'HentaiPaw' },
+	{ id: 'manta', name: 'Manta' },
 ];
 
 export function getSourceList(): SourceMeta[] {
