@@ -13,6 +13,12 @@
 	import { isNovelSource } from '$lib/utils/novelSources';
 	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
+	import {
+		getPreferences,
+		subscribePreferences,
+		type AppPreferences
+	} from '$lib/stores/preferences';
+	import { shouldHideR18Source } from '$lib/utils/preferencesUi';
 
 	type SourceItem = { id: string; name: string };
 	type ContentKind = 'comic' | 'novel';
@@ -84,6 +90,7 @@
 	// ── State ────────────────────────────────────────────────────────────────
 	let searchInput = $state('');
 	let sourceSearch = $state('');
+	let prefs = $state<AppPreferences>(getPreferences());
 	let activeDropdown = $state<'kind' | 'source' | 'lang' | 'type' | null>(null);
 	let sourceListEl = $state<HTMLDivElement | null>(null);
 	let sourceScrollTop = $state(0);
@@ -112,7 +119,10 @@
 	let filteredSources = $derived(
 		sources.filter((s) => {
 			const isNovel = isNovelSource(s.id);
-			return selectedKind === 'novel' ? isNovel : !isNovel;
+			const kindOk = selectedKind === 'novel' ? isNovel : !isNovel;
+			if (!kindOk) return false;
+			if (shouldHideR18Source(s.id, prefs)) return false;
+			return true;
 		})
 	);
 
@@ -153,9 +163,14 @@
 	});
 
 	onMount(() => {
+		prefs = getPreferences();
+		const unsub = subscribePreferences((p) => {
+			prefs = p;
+		});
 		if (currentSource && currentSource !== getImpl()) {
 			setImpl(currentSource);
 		}
+		return () => unsub();
 	});
 
 	// ── Helpers ──────────────────────────────────────────────────────────────

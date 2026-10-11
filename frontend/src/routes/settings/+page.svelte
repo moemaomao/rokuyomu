@@ -11,7 +11,13 @@
 		Database,
 		SlidersHorizontal,
 		Trash2,
-		RefreshCw
+		RefreshCw,
+		Palette,
+		EyeOff,
+		Shield,
+		Moon,
+		Sun,
+		Monitor
 	} from 'lucide-svelte';
 	import { exportBackupToFile, importBackupFromFile } from '$lib/utils/backup';
 	import {
@@ -22,6 +28,17 @@
 		idbClearHistory,
 		idbClearBookmarks
 	} from '$lib/db';
+	import {
+		getPreferences,
+		setPreferences,
+		subscribePreferences,
+		applyThemeFromPreferences,
+		type AppPreferences,
+		type ThemeMode,
+		type GridSize
+	} from '$lib/stores/preferences';
+	import { clearNsfwConfirmed, isNsfwConfirmed } from '$lib/utils/nsfw';
+	import { clearHistory } from '$lib/stores/history';
 
 	let isDark = $state(true);
 	let busy = $state(false);
@@ -29,6 +46,9 @@
 	let err = $state('');
 	let lastCounts = $state<Record<string, number> | null>(null);
 	let fileInput: HTMLInputElement | null = $state(null);
+
+	let prefs = $state<AppPreferences>(getPreferences());
+	let ageConfirmed = $state(false);
 
 	let storageBusy = $state(false);
 	let storageMsg = $state('');
@@ -45,14 +65,51 @@
 	} | null>(null);
 
 	onMount(() => {
+		prefs = getPreferences();
+		ageConfirmed = isNsfwConfirmed();
+
 		isDark = document.documentElement.classList.contains('dark');
 		const obs = new MutationObserver(() => {
 			isDark = document.documentElement.classList.contains('dark');
 		});
 		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 		refreshStorage();
-		return () => obs.disconnect();
+
+		const unsub = subscribePreferences((p) => {
+			prefs = p;
+		});
+
+		return () => {
+			obs.disconnect();
+			unsub();
+		};
 	});
+
+	function updatePref<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) {
+		prefs = setPreferences({ [key]: value });
+		if (key === 'theme') {
+			isDark = applyThemeFromPreferences(value as ThemeMode);
+		}
+	}
+
+	function updateBadge(key: 'status' | 'type' | 'source', value: boolean) {
+		prefs = setPreferences({
+			hideBadges: { ...prefs.hideBadges, [key]: value }
+		});
+	}
+
+	function resetAgeGate() {
+		clearNsfwConfirmed();
+		ageConfirmed = false;
+		msg = 'Age gate di-reset. Sumber R18 akan minta konfirmasi lagi.';
+	}
+
+	async function clearHistoryNow() {
+		if (!confirm('Hapus semua reading history di perangkat ini?')) return;
+		await clearHistory();
+		msg = 'History dibersihkan.';
+		await refreshStorage();
+	}
 
 	function formatBytes(n: number): string {
 		if (!n || n < 0) return '0 B';
@@ -244,12 +301,208 @@
 		</div>
 		<div>
 			<h1 class="text-xl font-bold text-zinc-900 dark:text-zinc-100">Settings</h1>
-			<p class="text-sm text-zinc-500">Backup, data, and app preferences</p>
+			<p class="text-sm text-zinc-500">Tampilan, NSFW, privacy, backup & data</p>
 		</div>
 	</div>
 
 	<!-- Backup -->
+	
+	<!-- Theme & tampilan -->
 	<section
+		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
+	>
+		<div class="mb-4 flex items-center gap-2">
+			<Palette class="h-4 w-4 text-violet-600 dark:text-violet-400" />
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Theme & tampilan</h2>
+		</div>
+
+		<div class="mb-5">
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Tema</p>
+			<div class="flex flex-wrap gap-2">
+				{#each [
+					{ id: 'dark' as ThemeMode, label: 'Dark', Icon: Moon },
+					{ id: 'light' as ThemeMode, label: 'Light', Icon: Sun },
+					{ id: 'system' as ThemeMode, label: 'System', Icon: Monitor }
+				] as opt}
+					<button
+						type="button"
+						onclick={() => updatePref('theme', opt.id)}
+						class="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition
+							{prefs.theme === opt.id
+							? 'border-violet-500 bg-violet-600/15 text-violet-700 dark:text-violet-300'
+							: 'border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700'}"
+					>
+						<opt.Icon class="h-3.5 w-3.5" />
+						{opt.label}
+					</button>
+				{/each}
+			</div>
+		</div>
+
+		<div class="mb-5">
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Ukuran grid homepage</p>
+			<div class="flex flex-wrap gap-2">
+				{#each [
+					{ id: 'compact' as GridSize, label: 'Compact' },
+					{ id: 'comfortable' as GridSize, label: 'Comfortable' }
+				] as opt}
+					<button
+						type="button"
+						onclick={() => updatePref('gridSize', opt.id)}
+						class="rounded-xl border px-3 py-2 text-xs font-semibold transition
+							{prefs.gridSize === opt.id
+							? 'border-violet-500 bg-violet-600/15 text-violet-700 dark:text-violet-300'
+							: 'border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700'}"
+					>
+						{opt.label}
+					</button>
+				{/each}
+			</div>
+			<p class="mt-1.5 text-[11px] text-zinc-500">
+				Compact = lebih banyak kartu per baris. Comfortable = kartu lebih besar.
+			</p>
+		</div>
+
+		<div>
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Sembunyikan badge</p>
+			<div class="space-y-2">
+				{#each [
+					{ key: 'status' as const, label: 'Status (Ongoing / Completed / …)' },
+					{ key: 'type' as const, label: 'Type (Manga / Manhwa / Doujin / …)' },
+					{ key: 'source' as const, label: 'Source name' }
+				] as item}
+					<label
+						class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200"
+					>
+						<input
+							type="checkbox"
+							class="h-4 w-4 rounded border-zinc-400 text-violet-600 focus:ring-violet-500"
+							checked={prefs.hideBadges[item.key]}
+							onchange={(e) =>
+								updateBadge(item.key, (e.currentTarget as HTMLInputElement).checked)}
+						/>
+						{item.label}
+					</label>
+				{/each}
+			</div>
+		</div>
+	</section>
+
+	<!-- NSFW -->
+	<section
+		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
+	>
+		<div class="mb-4 flex items-center gap-2">
+			<EyeOff class="h-4 w-4 text-rose-600 dark:text-rose-400" />
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">NSFW / konten dewasa</h2>
+		</div>
+
+		<div class="mb-4 space-y-3">
+			<label class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200">
+				<input
+					type="checkbox"
+					class="h-4 w-4 rounded border-zinc-400 text-violet-600 focus:ring-violet-500"
+					checked={prefs.hideR18Sources}
+					onchange={(e) =>
+						updatePref('hideR18Sources', (e.currentTarget as HTMLInputElement).checked)}
+				/>
+				Sembunyikan source R18 dari daftar
+			</label>
+			<label class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200">
+				<input
+					type="checkbox"
+					class="h-4 w-4 rounded border-zinc-400 text-violet-600 focus:ring-violet-500"
+					checked={prefs.blurR18Covers}
+					onchange={(e) =>
+						updatePref('blurR18Covers', (e.currentTarget as HTMLInputElement).checked)}
+				/>
+				Blur cover R18 di homepage
+			</label>
+		</div>
+
+		<div
+			class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50"
+		>
+			<p class="mb-2 text-xs text-zinc-500">
+				Konfirmasi umur saat ini:
+				<strong class="text-zinc-800 dark:text-zinc-200">
+					{ageConfirmed ? 'Sudah dikonfirmasi (18+)' : 'Belum / sudah di-reset'}
+				</strong>
+			</p>
+			<button
+				type="button"
+				onclick={resetAgeGate}
+				class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+			>
+				Reset age gate (minta konfirmasi lagi)
+			</button>
+		</div>
+	</section>
+
+	<!-- Privacy -->
+	<section
+		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
+	>
+		<div class="mb-4 flex items-center gap-2">
+			<Shield class="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Privacy</h2>
+		</div>
+
+		<div class="mb-4 space-y-3">
+			<label class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200">
+				<input
+					type="checkbox"
+					class="h-4 w-4 rounded border-zinc-400 text-violet-600 focus:ring-violet-500"
+					checked={prefs.dontSaveHistory}
+					onchange={(e) =>
+						updatePref('dontSaveHistory', (e.currentTarget as HTMLInputElement).checked)}
+				/>
+				Jangan simpan history
+			</label>
+			<label class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200">
+				<input
+					type="checkbox"
+					class="h-4 w-4 rounded border-zinc-400 text-violet-600 focus:ring-violet-500"
+					checked={prefs.incognitoSession}
+					onchange={(e) =>
+						updatePref('incognitoSession', (e.currentTarget as HTMLInputElement).checked)}
+				/>
+				Mode “incognito session” (history tidak ditulis di sesi ini)
+			</label>
+		</div>
+
+		<div class="mb-2">
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+				Clear history otomatis setelah
+			</p>
+			<div class="flex flex-wrap items-center gap-2">
+				<select
+					class="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+					value={String(prefs.autoClearHistoryDays)}
+					onchange={(e) =>
+						updatePref(
+							'autoClearHistoryDays',
+							parseInt((e.currentTarget as HTMLSelectElement).value, 10) || 0
+						)}
+				>
+					<option value="0">Off</option>
+					<option value="7">7 hari</option>
+					<option value="14">14 hari</option>
+					<option value="30">30 hari</option>
+					<option value="90">90 hari</option>
+				</select>
+				<button
+					type="button"
+					onclick={clearHistoryNow}
+					class="rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+				>
+					Clear history sekarang
+				</button>
+			</div>
+		</div>
+	</section>
+
+<section
 		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
 	>
 		<div class="mb-3 flex items-center gap-2">

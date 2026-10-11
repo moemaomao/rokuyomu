@@ -22,6 +22,7 @@ import {
 	type ReadingEntry,
 	type ActivityLogEntry
 } from '$lib/db';
+import { getPreferences, shouldSaveHistory } from '$lib/stores/preferences';
 
 export type { ReadingEntry, ActivityLogEntry };
 
@@ -186,6 +187,8 @@ export function whenHistoryReady(): Promise<void> {
 export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	if (!browser) return;
 
+	if (!shouldSaveHistory()) return;
+
 	const full = lightEntry({
 		...entry,
 		mangaId: normalizeMangaId(entry.mangaId) || entry.mangaId,
@@ -228,7 +231,6 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 		}
 	}
 
-	// Lifetime XP (permanent) — only increases
 	try {
 		await grantReadingXp({
 			mangaId: full.mangaId,
@@ -239,7 +241,6 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 		console.error('Failed to grant reading XP', e);
 	}
 
-	// Permanent aggregates (donuts / top sources) — survive history clear
 	try {
 		await recordPermanentReading({
 			mangaId: full.mangaId,
@@ -430,3 +431,17 @@ export async function clearActivityLog() {
 	window.dispatchEvent(new CustomEvent('activity-changed'));
 }
 
+export async function pruneOldHistory(): Promise<number> {
+	if (!browser) return 0;
+	const days = getPreferences().autoClearHistoryDays;
+	if (!days || days <= 0) return 0;
+	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+	const list = await idbGetHistory();
+	const kept = list.filter((h) => (h.timestamp || 0) >= cutoff);
+	const removed = list.length - kept.length;
+	if (removed <= 0) return 0;
+	await idbSetAllHistory(kept);
+	historyCache = kept;
+	window.dispatchEvent(new CustomEvent('history-changed'));
+	return removed;
+}

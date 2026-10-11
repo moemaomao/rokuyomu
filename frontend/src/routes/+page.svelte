@@ -10,6 +10,16 @@
 	import { getImpl, isMultiMode } from '$lib/stores/impl';
 	import { isNovelSource } from '$lib/utils/novelSources';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
+	import {
+		getPreferences,
+		subscribePreferences,
+		type AppPreferences
+	} from '$lib/stores/preferences';
+	import {
+		homepageGridClass,
+		shouldHideBadge,
+		r18CoverClass
+	} from '$lib/utils/preferencesUi';
 
 	type SectionItem = {
 		sourceId: string;
@@ -51,6 +61,7 @@
 
 	let selectedLang = $state($page.url.searchParams.get('lang') || 'all');
 	let selectedType = $state($page.url.searchParams.get('type') || 'all');
+	let prefs = $state<AppPreferences>(getPreferences());
 
 	$effect(() => {
 		selectedLang = $page.url.searchParams.get('lang') || 'all';
@@ -123,7 +134,14 @@
 			console.warn('[restore source]', e);
 		}
 
-		return () => observer.disconnect();
+		const unsubPrefs = subscribePreferences((p) => {
+			prefs = p;
+		});
+
+		return () => {
+			observer.disconnect();
+			unsubPrefs();
+		};
 	});
 
 	$effect(() => {
@@ -616,7 +634,7 @@
 						</p>
 					{:else}
 						<div
-							class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-8"
+							class={homepageGridClass(prefs.gridSize)}
 						>
 							{#each section.mangas as manga, i (`${manga.sourceId ?? 'x'}:${manga.id}:${i}`)}
 								<a
@@ -638,7 +656,7 @@
 													loading="lazy"
 													decoding="async"
 													onerror={onCoverError}
-													class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+													class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 {r18CoverClass(manga.sourceId || currentSource || '', prefs)}"
 												/>
 											{:else}
 												<img
@@ -654,9 +672,11 @@
 												</span>
 											{/if}
 
-											<span class="badge-stick badge-stick-tl absolute top-0 left-0 z-20 {statusClass(manga.status)}">
+											{#if !shouldHideBadge('status', prefs)}
+												<span class="badge-stick badge-stick-tl absolute top-0 left-0 z-20 {statusClass(manga.status)}">
 												{manga.status || 'ONGOING'}
 											</span>
+											{/if}
 
 											{#if manga.latestChapter || (manga as any).chapter}
 												<span class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]">
@@ -669,9 +689,11 @@
 												</span>
 											{/if}
 
-											<span class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {typeBadgeClass(manga.type)}">
+											{#if !shouldHideBadge('type', prefs)}
+												<span class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {typeBadgeClass(manga.type)}">
 												{manga.type || 'manga'}
 											</span>
+											{/if}
 
 											<div
 												class="absolute inset-x-0 bottom-0 z-10 max-h-14 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-1 pt-4 pb-12 transition-all duration-300 group-hover:max-h-full group-hover:from-black/90 group-hover:via-black/70 group-hover:pt-8 group-hover:pb-5 group-active:max-h-full group-active:from-black/90 group-active:via-black/70 group-active:pt-8 group-active:pb-5"
@@ -835,7 +857,7 @@
 		{:else}
 			{#key `${isMulti ? 'multi-' + preferredSources.join(',') : currentSource}-${currentPage}-${searchQuery}`}
 				<div
-					class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-8"
+					class={homepageGridClass(prefs.gridSize)}
 				>
 					{#each mangas as manga, i (`${manga.sourceId ?? 'x'}:${manga.id}:${i}`)}
 						<a
@@ -857,7 +879,7 @@
 											loading="lazy"
 											decoding="async"
 											onerror={onCoverError}
-											class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+											class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 {r18CoverClass(manga.sourceId || currentSource || '', prefs)}"
 										/>
 									{:else}
 										<img
@@ -873,9 +895,11 @@
 										</span>
 									{/if}
 
-									<span class="badge-stick badge-stick-tl absolute top-0 left-0 z-20 {statusClass(manga.status)}">
+									{#if !shouldHideBadge('status', prefs)}
+										<span class="badge-stick badge-stick-tl absolute top-0 left-0 z-20 {statusClass(manga.status)}">
 										{manga.status || 'ONGOING'}
 									</span>
+									{/if}
 
 									{#if manga.latestChapter || (manga as any).chapter}
 										<span class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]">
@@ -888,11 +912,13 @@
 										</span>
 									{/if}
 
-									<span class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {typeBadgeClass(manga.type)}">
+									{#if !shouldHideBadge('type', prefs)}
+										<span class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {typeBadgeClass(manga.type)}">
 										{manga.type || 'manga'}
 									</span>
+									{/if}
 
-									{#if isMulti && manga.sourceId}
+									{#if isMulti && manga.sourceId && !shouldHideBadge('source', prefs)}
 										<span class="badge-stick badge-stick-br badge-source absolute bottom-0 right-0 z-20">
 											{manga.sourceId}
 										</span>

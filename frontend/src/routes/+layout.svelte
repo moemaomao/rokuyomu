@@ -30,7 +30,14 @@
 
 	// Hybrid sync
 	import { syncBookmarksOnLogin } from '$lib/stores/bookmark.svelte';
-	import { syncHistoryOnLogin } from '$lib/stores/history';
+	import { syncHistoryOnLogin, pruneOldHistory } from '$lib/stores/history';
+	import {
+		getPreferences,
+		setPreferences,
+		applyThemeFromPreferences,
+		resolveIsDark,
+		subscribePreferences
+	} from '$lib/stores/preferences';
 	import { loadLifetimeStats, hydrateLifetimeFromLocalStorage } from '$lib/stores/lifetimeXp';
 	import { syncNotificationsOnLogin } from '$lib/stores/notification.svelte';
 
@@ -161,7 +168,10 @@
 	}
 
 	function toggleDarkMode() {
-		applyTheme(!isDarkMode);
+		// Flip between light/dark (explicit); clears pure "system" until user sets system in Settings
+		const next = resolveIsDark(getPreferences().theme) ? 'light' : 'dark';
+		setPreferences({ theme: next });
+		isDarkMode = applyThemeFromPreferences(next);
 	}
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
@@ -389,8 +399,23 @@
 			hasHydrated = true;
 		});
 
-		const savedTheme = localStorage.getItem('darkMode');
-		applyTheme(savedTheme === null ? true : savedTheme === 'true');
+		// Theme from AppPreferences (dark | light | system)
+		isDarkMode = applyThemeFromPreferences(getPreferences().theme);
+
+		const mqDark = window.matchMedia('(prefers-color-scheme: dark)');
+		const onSystemTheme = () => {
+			if (getPreferences().theme === 'system') {
+				isDarkMode = applyThemeFromPreferences('system');
+			}
+		};
+		mqDark.addEventListener('change', onSystemTheme);
+
+		const unsubPrefs = subscribePreferences((p) => {
+			isDarkMode = applyThemeFromPreferences(p.theme);
+		});
+
+		// Privacy: prune old history on load
+		pruneOldHistory().catch(() => {});
 
 		const savedHistory = localStorage.getItem('history_widget_open');
 		if (savedHistory !== null) {
@@ -498,6 +523,9 @@
 		}, 800);
 
 		return () => {
+			mqDark.removeEventListener('change', onSystemTheme);
+			unsubPrefs();
+
 			mq.removeEventListener('change', applyMq);
 			window.removeEventListener('bookmarks-changed', loadBookmarks);
 			window.removeEventListener('notifications-changed', loadNotifBadge);
