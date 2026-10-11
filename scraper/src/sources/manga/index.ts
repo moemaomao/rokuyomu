@@ -114,8 +114,10 @@ import { ValirScansSource } from '../impl/manga/ValirScans';
 import { DrakeComicSource } from '../impl/manga/DrakeComic';
 import { ErisScansSource } from '../impl/manga/ErisScans';
 import { KitsuneDawnSource } from '../impl/manga/KitsuneDawn';
+import { LunaToonsSource } from '../impl/manga/LunaToons';
 
 const mangaSources: Record<string, IMangaSource> = {
+	lunatoons: new LunaToonsSource(),
 	kitsunedawn: new KitsuneDawnSource(),
 	erisscans: new ErisScansSource(),
 	drakecomic: new DrakeComicSource(),
