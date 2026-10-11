@@ -280,6 +280,7 @@ $effect(() => {
 				source: String(source),
 				chapterId: String(chapterId),
 				pageUrls: pages?.length ? [...pages] : undefined,
+				useReaderDom: true,
 				concurrency: 6,
 				chapterTitle:
 					(currentChapter as { title?: string } | null)?.title ||

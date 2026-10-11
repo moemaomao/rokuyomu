@@ -16,6 +16,8 @@ export type DownloadProgress = {
 
 type ProgressCb = (p: DownloadProgress) => void;
 
+export type PageBlob = { blob: Blob; ext: string };
+
 function sanitizeFilename(name: string): string {
 	return (
 		String(name || 'chapter')
@@ -28,6 +30,35 @@ function sanitizeFilename(name: string): string {
 
 function pad(n: number, width = 3): string {
 	return String(n).padStart(width, '0');
+}
+
+function proxyFilename(url: string): string {
+	let filename = 'image.jpg';
+	try {
+		const path = new URL(url).pathname;
+		const last = path.split('/').pop() || '';
+		if (last) filename = decodeURIComponent(last);
+	} catch {
+	}
+	filename = filename.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'image.jpg';
+	if (!/\.[a-zA-Z0-9]{2,5}$/.test(filename)) filename += '.jpg';
+	return filename;
+}
+
+function normalizeRemoteUrl(url: string): string {
+	let u = String(url || '').trim();
+	if (!u) return '';
+	if (u.startsWith('//')) u = 'https:' + u;
+	return u;
+}
+
+function proxyUrl(url: string, source: string, withFilename = true): string {
+	if (!url) return '';
+	let u = normalizeRemoteUrl(url);
+	if (u.startsWith('/api/proxy') || /\/api\/proxy\?/i.test(u)) return u;
+	const base = `/api/proxy?url=${encodeURIComponent(u)}&source=${encodeURIComponent(source)}`;
+	if (!withFilename) return base;
+	return `${base}&filename=${encodeURIComponent(proxyFilename(u))}`;
 }
 
 async function fetchAllPageUrls(source: string, chapterId: string): Promise<string[]> {
@@ -43,22 +74,9 @@ async function fetchAllPageUrls(source: string, chapterId: string): Promise<stri
 			start: String(start),
 			count: String(count)
 		});
-		const res = await fetch(`/api/pages?${params}`, { cache: 'force-cache' });
-		if (!res.ok) {
-			const res2 = await fetch(`/api/pages?${params}`);
-			if (!res2.ok) throw new Error(`pages ${res2.status}`);
-			const json = (await res2.json()) as {
-				pages?: string[];
-				total?: number;
-				hasMore?: boolean;
-			};
-			const batch = Array.isArray(json.pages) ? json.pages : [];
-			if (typeof json.total === 'number') total = json.total;
-			all.push(...batch);
-			if (!json.hasMore || batch.length === 0) break;
-			start += batch.length;
-			continue;
-		}
+		let res = await fetch(`/api/pages?${params}`, { cache: 'force-cache' });
+		if (!res.ok) res = await fetch(`/api/pages?${params}`);
+		if (!res.ok) throw new Error(`pages ${res.status}`);
 		const json = (await res.json()) as {
 			pages?: string[];
 			total?: number;
@@ -74,41 +92,86 @@ async function fetchAllPageUrls(source: string, chapterId: string): Promise<stri
 	return all;
 }
 
-function proxyUrl(url: string, source: string): string {
-	if (!url) return '';
-	let u = String(url).trim();
-	if (u.startsWith('//')) u = 'https:' + u;
-	// already proxied
-	if (u.startsWith('/api/proxy')) return u;
-	if (/\/api\/proxy\?/i.test(u)) return u;
-	return `/api/proxy?url=${encodeURIComponent(u)}&source=${encodeURIComponent(source)}`;
+function extFromBlob(blob: Blob, url: string): string {
+	const ct = (blob.type || '').toLowerCase();
+	if (ct.includes('png')) return 'png';
+	if (ct.includes('webp')) return 'webp';
+	if (ct.includes('gif')) return 'gif';
+	if (ct.includes('avif')) return 'avif';
+	if (ct.includes('jpeg') || ct.includes('jpg')) return 'jpg';
+	const m = url.match(/\.(jpe?g|png|webp|gif|avif)(?:\?|$)/i);
+	if (m) return m[1].toLowerCase().replace('jpeg', 'jpg');
+	return 'jpg';
 }
 
-async function fetchImageBlob(
-	url: string,
-	source: string
-): Promise<{ blob: Blob; ext: string }> {
-	const proxy = proxyUrl(url, source);
+async function fetchImageBlob(url: string, source: string): Promise<PageBlob> {
+	const candidates = [
+		proxyUrl(url, source, true),
+		proxyUrl(url, source, false)
+	].filter(Boolean);
 
-	let res = await fetch(proxy, { cache: 'force-cache' });
-	if (!res.ok) {
-		res = await fetch(proxy, { cache: 'default' });
-	}
-	if (!res.ok) throw new Error(`image ${res.status}`);
+	// Deduplicate
+	const seen = new Set<string>();
+	const list = candidates.filter((u) => {
+		if (seen.has(u)) return false;
+		seen.add(u);
+		return true;
+	});
 
-	const blob = await res.blob();
-	const ct = (res.headers.get('content-type') || blob.type || '').toLowerCase();
-	let ext = 'jpg';
-	if (ct.includes('png')) ext = 'png';
-	else if (ct.includes('webp')) ext = 'webp';
-	else if (ct.includes('gif')) ext = 'gif';
-	else if (ct.includes('avif')) ext = 'avif';
-	else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
-	else {
-		const m = url.match(/\.(jpe?g|png|webp|gif|avif)(?:\?|$)/i);
-		if (m) ext = m[1].toLowerCase().replace('jpeg', 'jpg');
+	let lastErr: unknown;
+	for (const proxy of list) {
+		try {
+			let res = await fetch(proxy, { cache: 'force-cache' });
+			if (!res.ok) {
+				res = await fetch(proxy, { cache: 'default' });
+			}
+			if (!res.ok) {
+				lastErr = new Error(`image ${res.status}`);
+				continue;
+			}
+			const blob = await res.blob();
+			if (!blob.size) {
+				lastErr = new Error('empty image');
+				continue;
+			}
+			return { blob, ext: extFromBlob(blob, url) };
+		} catch (e) {
+			lastErr = e;
+		}
 	}
-	return { blob, ext };
+	throw lastErr instanceof Error ? lastErr : new Error('image fetch failed');
+}
+
+export async function blobsFromReaderImages(
+	selector = '#reader img'
+): Promise<(PageBlob | null)[]> {
+	if (typeof document === 'undefined') return [];
+	const imgs = Array.from(document.querySelectorAll(selector)) as HTMLImageElement[];
+	const out: (PageBlob | null)[] = [];
+
+	for (const img of imgs) {
+		const src = img.currentSrc || img.src;
+		if (!src || !img.complete || img.naturalWidth === 0) {
+			out.push(null);
+			continue;
+		}
+		try {
+			const res = await fetch(src, { cache: 'force-cache' });
+			if (!res.ok) {
+				out.push(null);
+				continue;
+			}
+			const blob = await res.blob();
+			if (!blob.size) {
+				out.push(null);
+				continue;
+			}
+			out.push({ blob, ext: extFromBlob(blob, src) });
+		} catch {
+			out.push(null);
+		}
+	}
+	return out;
 }
 
 async function mapPool<T, R>(
@@ -122,8 +185,9 @@ async function mapPool<T, R>(
 	let done = 0;
 
 	async function worker() {
-		while (next < items.length) {
+		while (true) {
 			const i = next++;
+			if (i >= items.length) break;
 			try {
 				results[i] = await fn(items[i], i);
 			} catch (e) {
@@ -157,6 +221,7 @@ async function tryLoadJSZip(): Promise<any | null> {
 		const mod = await import('jszip');
 		return (mod as any).default || mod;
 	} catch {
+		/* continue */
 	}
 	const g = globalThis as any;
 	if (g.JSZip) return g.JSZip;
@@ -178,6 +243,8 @@ export async function downloadChapter(opts: {
 	mangaId?: string;
 	cover?: string;
 	pageUrls?: string[];
+	pageBlobs?: (PageBlob | null)[];
+	useReaderDom?: boolean;
 	concurrency?: number;
 	forceZip?: boolean;
 	onProgress?: ProgressCb;
@@ -208,35 +275,72 @@ export async function downloadChapter(opts: {
 			? pageUrls.filter(Boolean)
 			: await fetchAllPageUrls(source, chapterId);
 
-	if (!urls.length) throw new Error('No pages found');
+	if (!urls.length && !(opts.pageBlobs && opts.pageBlobs.some(Boolean))) {
+		throw new Error('No pages found');
+	}
+
+	let prefetched: (PageBlob | null)[] = Array.isArray(opts.pageBlobs)
+		? [...opts.pageBlobs]
+		: [];
+
+	if (opts.useReaderDom) {
+		const fromDom = await blobsFromReaderImages('#reader img');
+		if (fromDom.length) {
+			const n = Math.max(urls.length, fromDom.length);
+			const merged: (PageBlob | null)[] = new Array(n).fill(null);
+			for (let i = 0; i < n; i++) {
+				merged[i] = fromDom[i] || prefetched[i] || null;
+			}
+			prefetched = merged;
+			if (!urls.length) {
+				urls = fromDom.map((_, i) => `page-${i + 1}`);
+			}
+		}
+	}
+
+	const total = Math.max(urls.length, prefetched.length);
+	if (!total) throw new Error('No pages found');
 
 	report({
 		phase: 'images',
 		current: 0,
-		total: urls.length,
-		message: `Downloading 0/${urls.length}`
+		total,
+		message: `Downloading 0/${total}`
 	});
 
-	const blobs = await mapPool(
-		urls,
+	const results = await mapPool(
+		Array.from({ length: total }, (_, i) => i),
 		concurrency,
-		async (url) => fetchImageBlob(url, source),
-		(done, total) => {
+		async (i) => {
+			if (prefetched[i]?.blob?.size) {
+				return prefetched[i] as PageBlob;
+			}
+			const url = urls[i];
+			if (!url || url.startsWith('page-')) {
+				throw new Error(`missing page ${i + 1}`);
+			}
+			return fetchImageBlob(url, source);
+		},
+		(done, t) => {
 			report({
 				phase: 'images',
 				current: done,
-				total,
-				message: `Downloading ${done}/${total}`
+				total: t,
+				message: `Downloading ${done}/${t}`
 			});
 		}
 	);
 
-	const pages: { blob: Blob; ext: string }[] = [];
-	for (const item of blobs) {
-		if (item) pages.push(item);
+	const pages: PageBlob[] = [];
+	for (const item of results) {
+		if (item?.blob?.size) pages.push(item);
 	}
 	if (!pages.length) throw new Error('No images downloaded');
 
+	const chapterSafe = sanitizePathSegment(chapterTitle);
+	const mangaSafe = sanitizePathSegment(mangaTitle || 'Manga');
+
+	// ── Disk (File System Access) ──────────────────────────────────────────
 	if (!forceZip && supportsFileSystemAccess()) {
 		const root = await ensureLibraryRoot();
 		if (root) {
@@ -248,30 +352,32 @@ export async function downloadChapter(opts: {
 			});
 			const path = await saveMangaChapterToDisk({
 				root,
-				mangaTitle: sanitizePathSegment(mangaTitle || 'Manga'),
-				chapterTitle: titleSafe,
+				mangaTitle: mangaSafe,
+				chapterTitle: chapterSafe,
 				pages,
 				meta: {
 					source,
 					mangaId: mangaId || '',
-					mangaTitle: mangaTitle || '',
+					mangaTitle: mangaTitle || mangaSafe,
 					chapterId,
 					chapterTitle,
 					savedAt: Date.now(),
 					pageCount: pages.length
 				}
 			});
+
+			void cacheLibraryCover({
+				mangaId: mangaId || chapterId,
+				sourceId: source,
+				coverUrl: cover || '',
+				title: mangaTitle || mangaSafe,
+				isNovel: false
+			});
+
 			try {
-				void cacheLibraryCover({
-					mangaId: mangaId || chapterId,
-					sourceId: source,
-					coverUrl: cover || '',
-					title: mangaTitle || titleSafe,
-					isNovel: false
-				});
 				await upsertLibraryEntry({
 					mangaId: mangaId || chapterId,
-					mangaTitle: mangaTitle || titleSafe,
+					mangaTitle: mangaTitle || mangaSafe,
 					cover: cover || '',
 					sourceId: source,
 					isNovel: false,
@@ -288,46 +394,48 @@ export async function downloadChapter(opts: {
 			} catch (e) {
 				console.warn('[library] upsert failed', e);
 			}
+
 			report({
 				phase: 'done',
 				current: pages.length,
 				total: pages.length,
-				message: path || 'Saved'
+				message: path
 			});
 			return;
 		}
 	}
 
-	// ZIP fallback
+	// ── ZIP fallback ───────────────────────────────────────────────────────
 	const JSZip = await tryLoadJSZip();
 	if (JSZip) {
-		report({
-			phase: 'zip',
-			current: pages.length,
-			total: pages.length,
-			message: 'Packing ZIP…'
-		});
 		const zip = new JSZip();
 		const folder = zip.folder(baseName) || zip;
 		for (let i = 0; i < pages.length; i++) {
 			folder.file(`${pad(i + 1)}.${pages[i].ext}`, pages[i].blob);
 		}
+		report({
+			phase: 'zip',
+			current: pages.length,
+			total: pages.length,
+			message: 'Packing…'
+		});
 		const out = await zip.generateAsync({
 			type: 'blob',
-			compression: 'STORE'
+			compression: 'DEFLATE',
+			compressionOptions: { level: 6 }
 		});
 		triggerDownload(out, `${baseName}.zip`);
+		void cacheLibraryCover({
+			mangaId: mangaId || chapterId,
+			sourceId: source,
+			coverUrl: cover || '',
+			title: mangaTitle || mangaSafe,
+			isNovel: false
+		});
 		try {
-			void cacheLibraryCover({
-				mangaId: mangaId || chapterId,
-				sourceId: source,
-				coverUrl: cover || '',
-				title: mangaTitle || titleSafe,
-				isNovel: false
-			});
 			await upsertLibraryEntry({
 				mangaId: mangaId || chapterId,
-				mangaTitle: mangaTitle || titleSafe,
+				mangaTitle: mangaTitle || mangaSafe,
 				cover: cover || '',
 				sourceId: source,
 				isNovel: false,
@@ -347,7 +455,7 @@ export async function downloadChapter(opts: {
 		return;
 	}
 
-	// Last resort: individual files
+	// ── Sequential single-file fallback ────────────────────────────────────
 	for (let i = 0; i < pages.length; i++) {
 		report({
 			phase: 'images',
@@ -356,19 +464,19 @@ export async function downloadChapter(opts: {
 			message: `Saving ${i + 1}/${pages.length}`
 		});
 		triggerDownload(pages[i].blob, `${baseName}_${pad(i + 1)}.${pages[i].ext}`);
-		await new Promise((r) => setTimeout(r, 80));
+		await new Promise((r) => setTimeout(r, 120));
 	}
+	void cacheLibraryCover({
+		mangaId: mangaId || chapterId,
+		sourceId: source,
+		coverUrl: cover || '',
+		title: mangaTitle || mangaSafe,
+		isNovel: false
+	});
 	try {
-		void cacheLibraryCover({
-			mangaId: mangaId || chapterId,
-			sourceId: source,
-			coverUrl: cover || '',
-			title: mangaTitle || titleSafe,
-			isNovel: false
-		});
 		await upsertLibraryEntry({
 			mangaId: mangaId || chapterId,
-			mangaTitle: mangaTitle || titleSafe,
+			mangaTitle: mangaTitle || mangaSafe,
 			cover: cover || '',
 			sourceId: source,
 			isNovel: false,
