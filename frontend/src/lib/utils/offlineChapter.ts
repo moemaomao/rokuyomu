@@ -227,22 +227,6 @@ export function mangaPagesToObjectUrls(chapter: OfflineMangaChapter): string[] {
 	return chapter.pages.map((p) => URL.createObjectURL(p.blob));
 }
 
-function pathHref(prefix: string, sourceId: string, chapterId: string): string {
-	const id = chapterId.startsWith('/') ? chapterId.slice(1) : chapterId;
-	return `${prefix}/${encodeURIComponent(sourceId)}/${id
-		.split('/')
-		.map(encodeURIComponent)
-		.join('/')}`;
-}
-
-export function offlineMangaReaderHref(sourceId: string, chapterId: string): string {
-	return pathHref('/offline/reader', sourceId, chapterId);
-}
-
-export function offlineNovelReaderHref(sourceId: string, chapterId: string): string {
-	return pathHref('/offline/novel', sourceId, chapterId);
-}
-
 export async function getFirstOfflineChapterHref(
 	sourceId: string,
 	mangaId: string,
