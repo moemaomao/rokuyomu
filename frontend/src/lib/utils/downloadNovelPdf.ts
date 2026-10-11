@@ -17,11 +17,41 @@ export type NovelDownloadProgress = {
 type ProgressCb = (p: NovelDownloadProgress) => void;
 
 function sanitizeFilename(name: string): string {
-	return String(name || 'chapter')
-		.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-		.replace(/\s+/g, ' ')
-		.trim()
-		.slice(0, 120) || 'chapter';
+	return (
+		String(name || 'chapter')
+			.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.slice(0, 120) || 'chapter'
+	);
+}
+
+function shortChapterFilename(chapterTitle: string, chapterId?: string): string {
+	const t = String(chapterTitle || '').trim();
+	const m =
+		t.match(/\b(?:chapter|ch\.?|bab|episode|ep\.?)\s*[-_.]?\s*(\d+(?:\.\d+)?)/i) ||
+		t.match(/^\s*(\d+(?:\.\d+)?)\s*$/);
+	if (m) return `Chapter ${m[1]}`;
+
+	const id = String(chapterId || '');
+	const fromId =
+		id.match(/(?:chapter|ch|bab|ep)[-_]?(\d+(?:\.\d+)?)/i) ||
+		id.match(/[-_](\d+(?:\.\d+)?)(?:p\d+)?\/?$/i);
+	if (fromId) return `Chapter ${fromId[1]}`;
+
+	const any = t.match(/(\d+(?:\.\d+)?)/);
+	if (any) return `Chapter ${any[1]}`;
+
+	return 'Chapter';
+}
+
+function looksLikeChapterTitle(s: string): boolean {
+	const t = String(s || '').trim();
+	if (!t) return true;
+	if (/^(chapter|ch\.?|bab|episode|ep\.?|part|arc)\s*[-_.]?\s*\d+/i.test(t)) return true;
+	if (/^\d+(\.\d+)?$/.test(t)) return true;
+	if (/^chapter\s+\d+/i.test(t)) return true;
+	return false;
 }
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -80,7 +110,7 @@ function buildSimplePdf(title: string, body: string): Blob {
 	};
 
 	addObj('<< /Type /Catalog /Pages 2 0 R >>');
-	addObj(''); 
+	addObj('');
 
 	const pageObjIds: number[] = [];
 	const contentObjIds: number[] = [];
@@ -89,12 +119,7 @@ function buildSimplePdf(title: string, body: string): Blob {
 		const contentId = objects.length + 2;
 		const pageId = objects.length + 1;
 
-		const streamLines: string[] = [
-			'BT',
-			'/F1 11 Tf',
-			'50 780 Td',
-			'14 TL'
-		];
+		const streamLines: string[] = ['BT', '/F1 11 Tf', '50 780 Td', '14 TL'];
 		if (p === 0 && title) {
 			streamLines.push(`/F1 14 Tf (${escapePdf(title.slice(0, 80))}) Tj`);
 			streamLines.push('0 -20 Td');
@@ -174,12 +199,13 @@ type NovelChapterJson = {
 	chapterTitle?: string;
 	content?: string;
 	text?: string;
+	novelInfo?: { title?: string; id?: string; cover?: string };
 };
 
 async function fetchNovelChapter(
 	source: string,
 	chapterId: string
-): Promise<{ title: string; content: string }> {
+): Promise<{ title: string; content: string; novelTitle?: string; novelId?: string }> {
 	const chapter = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 	const params = new URLSearchParams({ source, chapter });
 	const res = await fetch(`/api/novel-chapter?${params}`);
@@ -189,13 +215,64 @@ async function fetchNovelChapter(
 	}
 	const j = (await res.json()) as NovelChapterJson & Record<string, unknown>;
 	const title = String(j.title || j.chapterTitle || 'Chapter');
-	const raw = String(
-		j.content || j.text || (j as any).body || (j as any).html || ''
-	);
+	const raw = String(j.content || j.text || (j as any).body || (j as any).html || '');
 	const content = htmlToPlainText(raw);
 	if (!content.trim()) throw new Error('Empty novel content from API');
-	return { title, content };
+
+	const novelTitle = j.novelInfo?.title || (j as any).novelTitle || (j as any).mangaTitle;
+	const novelId = j.novelInfo?.id || (j as any).novelId || (j as any).mangaId;
+
+	return {
+		title,
+		content,
+		novelTitle: novelTitle ? String(novelTitle) : undefined,
+		novelId: novelId ? String(novelId) : undefined
+	};
 }
+
+function stripTrailingChapterIndex(title: string, chapterTitle: string, chapterId?: string): string {
+	let t = title.trim();
+	const chNum =
+		String(chapterId || '').match(/-(\d+(?:\.\d+)?)(?:p\d+)?\/?$/i)?.[1] ||
+		String(chapterTitle || '').match(
+			/\b(?:chapter|ch\.?|bab|episode|ep\.?)\s*[-_.]?\s*(\d+(?:\.\d+)?)/i
+		)?.[1];
+	if (chNum) {
+		const re = new RegExp(`\\s+${chNum.replace('.', '\\.')}\\s*$`);
+		const stripped = t.replace(re, '').trim();
+		if (stripped.length >= 2) t = stripped;
+	}
+	t = t.replace(/\s+-\s+\d+(?:\.\d+)?\s*$/, '').trim();
+	return t;
+}
+
+function resolveNovelTitle(
+	explicit: string | undefined,
+	fromApi: string | undefined,
+	chapterTitle: string,
+	fallbackId?: string,
+	chapterId?: string
+): string {
+	const candidates = [explicit, fromApi].filter(Boolean) as string[];
+	for (const c of candidates) {
+		if (!c || looksLikeChapterTitle(c)) continue;
+		const cleaned = stripTrailingChapterIndex(c, chapterTitle, chapterId);
+		if (cleaned && !looksLikeChapterTitle(cleaned)) return cleaned;
+	}
+	if (fallbackId) {
+		const slug = String(fallbackId)
+			.replace(/^\/+/, '')
+			.split('/')
+			.filter(Boolean)
+			.pop();
+		if (slug && !looksLikeChapterTitle(slug)) {
+			const base = slug.replace(/-\d+(?:\.\d+)?(?:p\d+)?$/i, '') || slug;
+			return base.replace(/[-_]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+		}
+	}
+	return 'Unknown Novel';
+}
+
 
 export async function downloadNovelChapterPdf(opts: {
 	source: string;
@@ -206,7 +283,7 @@ export async function downloadNovelChapterPdf(opts: {
 	cover?: string;
 	onProgress?: ProgressCb;
 }): Promise<void> {
-	const { source, chapterId, novelTitle, mangaId, cover, onProgress } = opts;
+	const { source, chapterId, cover, onProgress } = opts;
 	const report = (p: NovelDownloadProgress) => onProgress?.(p);
 
 	report({ phase: 'fetch', current: 0, total: 1, message: 'Fetching chapter…' });
@@ -215,12 +292,26 @@ export async function downloadNovelChapterPdf(opts: {
 	const content = htmlToPlainText(data.content || '');
 	if (!content) throw new Error('Empty novel content');
 
+	const novelTitle = resolveNovelTitle(
+		opts.novelTitle,
+		data.novelTitle,
+		title,
+		opts.mangaId || data.novelId,
+		chapterId
+	);
+
+	let mangaId = opts.mangaId || data.novelId || '';
+	if (mangaId) {
+		const mid = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
+		const stripped = mid.replace(/-(\d+(?:\.\d+)?)(?:p\d+)?\/?$/i, '');
+		if (stripped.length > 1 && stripped !== mid) mangaId = stripped;
+	}
+	const chapterFileLabel = shortChapterFilename(title, chapterId);
+
 	report({ phase: 'pdf', current: 0, total: 1, message: 'Building PDF…' });
 	const heading = [novelTitle, title].filter(Boolean).join(' — ');
 	const pdfBlob = buildSimplePdf(heading, content);
-	const fileName = sanitizeFilename(
-		[novelTitle, title].filter(Boolean).join(' - ')
-	) + '.pdf';
+	const fileName = sanitizeFilename(chapterFileLabel) + '.pdf';
 
 	let savedPath = '';
 	if (supportsFileSystemAccess()) {
@@ -229,13 +320,13 @@ export async function downloadNovelChapterPdf(opts: {
 			report({ phase: 'disk', current: 1, total: 1, message: 'Saving to local folder…' });
 			savedPath = await saveNovelPdfToDisk({
 				root,
-				novelTitle: sanitizePathSegment(novelTitle || 'Novel'),
-				chapterTitle: title,
+				novelTitle: sanitizePathSegment(novelTitle),
+				chapterTitle: chapterFileLabel,
 				pdfBlob,
 				meta: {
 					source,
 					mangaId: mangaId || '',
-					novelTitle: novelTitle || '',
+					novelTitle,
 					chapterId,
 					chapterTitle: title,
 					savedAt: Date.now(),
@@ -254,12 +345,12 @@ export async function downloadNovelChapterPdf(opts: {
 			mangaId: mangaId || chapterId,
 			sourceId: source,
 			coverUrl: cover || '',
-			title: novelTitle || title,
+			title: novelTitle,
 			isNovel: true
 		});
 		await upsertLibraryEntry({
 			mangaId: mangaId || chapterId,
-			mangaTitle: novelTitle || title,
+			mangaTitle: novelTitle,
 			cover: cover || '',
 			sourceId: source,
 			isNovel: true,

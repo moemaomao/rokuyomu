@@ -93,11 +93,22 @@ export function getOfflineChapterIds(sourceId: string, mangaId: string): Set<str
 	let entry = entries.find((e) => e.key === key);
 	if (!entry) {
 		const norm = normalizeMangaId(mangaId);
-		entry = entries.find(
-			(e) =>
-				e.sourceId === sourceId &&
-				(normalizeMangaId(e.mangaId) === norm || e.mangaId === mangaId)
-		);
+		const alts = new Set<string>([norm, mangaId]);
+		if (norm.includes('/series/')) {
+			alts.add(norm.replace(/\/series\//, '/'));
+		} else if (norm.split('/').filter(Boolean).length === 1) {
+			alts.add(`/series${norm.startsWith('/') ? norm : `/${norm}`}`);
+		}
+		entry = entries.find((e) => {
+			if (e.sourceId !== sourceId) return false;
+			const en = normalizeMangaId(e.mangaId);
+			if (alts.has(en) || alts.has(e.mangaId)) return true;
+			if (en.includes('/series/')) {
+				const bare = en.replace(/\/series\//, '/');
+				if (alts.has(bare)) return true;
+			}
+			return false;
+		});
 	}
 	if (!entry?.chapters?.length) return new Set();
 	const set = new Set<string>();

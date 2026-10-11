@@ -17,7 +17,7 @@ function novelIdFromChapter(chapterId: string): string {
 		) {
 			return '/' + parts.slice(0, -1).join('/');
 		}
-		
+
 		if (parts.length === 1 && /[-_]chapter[-_]?\d+/i.test(parts[0])) {
 			const slug = parts[0].replace(/[-_]chapter[-_]?\d+.*$/i, '');
 			if (slug) return '/' + slug;
@@ -29,6 +29,14 @@ function novelIdFromChapter(chapterId: string): string {
 	}
 	if (parts.length >= 2) return '/' + parts.slice(0, -1).join('/');
 	return path;
+}
+
+function looksLikeChapterTitle(s: string | undefined | null): boolean {
+	const t = String(s || '').trim();
+	if (!t) return true;
+	if (/^(chapter|ch\.?|bab|episode|ep\.?|part|arc)\s*[-_.]?\s*\d+/i.test(t)) return true;
+	if (/^\d+(\.\d+)?$/.test(t)) return true;
+	return false;
 }
 
 function normalizeCover(cover: string | undefined, sourceId: string): string {
@@ -44,7 +52,6 @@ function normalizeCover(cover: string | undefined, sourceId: string): string {
 			return '';
 		}
 	}
-	
 	if (u.startsWith('/')) return '';
 	return '';
 }
@@ -83,18 +90,40 @@ export const load: PageServerLoad = async ({ params }) => {
 		};
 		novelInfo.cover = normalizeCover(novelInfo.cover, source);
 
-		if (!novelInfo.cover && novelPath && novelPath !== '/') {
+		// Always try to fill missing title / cover from detail page
+		const needTitle = !novelInfo.title || looksLikeChapterTitle(novelInfo.title);
+		const needCover = !novelInfo.cover;
+
+		if ((needTitle || needCover) && novelPath && novelPath !== '/') {
 			try {
 				const details = await remoteMangaDetails(source, novelPath);
 				if (details) {
 					novelInfo = {
 						id: details.id || novelInfo.id || novelPath,
-						title: details.title || novelInfo.title,
-						cover: normalizeCover(details.cover, source)
+						title:
+							(details.title && !looksLikeChapterTitle(details.title)
+								? details.title
+								: novelInfo.title && !looksLikeChapterTitle(novelInfo.title)
+									? novelInfo.title
+									: details.title) || novelInfo.title,
+						cover: normalizeCover(details.cover, source) || novelInfo.cover
 					};
 				}
 			} catch (e) {
-				console.warn('[novel-reader] cover fetch failed', source, novelPath, e);
+				console.warn('[novel-reader] cover/title fetch failed', source, novelPath, e);
+			}
+		}
+
+		if (!novelInfo.title || looksLikeChapterTitle(novelInfo.title)) {
+			const slug = novelPath
+				.replace(/^\/+/, '')
+				.split('/')
+				.filter(Boolean)
+				.pop();
+			if (slug && !looksLikeChapterTitle(slug)) {
+				novelInfo.title = slug
+					.replace(/[-_]+/g, ' ')
+					.replace(/\b\w/g, (m) => m.toUpperCase());
 			}
 		}
 

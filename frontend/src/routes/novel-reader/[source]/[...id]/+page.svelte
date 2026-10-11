@@ -20,6 +20,10 @@
 		Download
 	} from 'lucide-svelte';
 	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
+	import {
+		getOfflineChapterIds,
+		ensureLibraryLoaded
+	} from '$lib/stores/library.svelte';
 
 	interface Chapter {
 		id?: string | number;
@@ -84,6 +88,54 @@
 	let isDownloading = $state(false);
 	let downloadProgress = $state(0);
 	let downloadLabel = $state('');
+	// Persist offline status from library store (survives reload)
+	let isDownloaded = $state(false);
+
+	function novelMangaId(): string {
+		const nid = (novelInfo as { id?: string } | null)?.id || '';
+		if (!nid) return '';
+		return String(nid).startsWith('/')
+			? String(nid)
+			: `/${String(nid).replace(/^\/+/, '')}`;
+	}
+
+	function isOfflineChapter(chId: string, offlineSet: Set<string>): boolean {
+		const n = String(chId || '');
+		if (!n) return false;
+		if (offlineSet.has(n)) return true;
+		const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
+		if (offlineSet.has(alt)) return true;
+		const seg = n.split('/').filter(Boolean).pop();
+		return !!(seg && offlineSet.has(seg));
+	}
+
+	async function refreshOfflineStatus() {
+		if (!browser || !source || !chapterId) {
+			isDownloaded = false;
+			return;
+		}
+		try {
+			await ensureLibraryLoaded();
+		} catch {
+			/* ignore */
+		}
+		const mid = novelMangaId();
+		if (!mid) {
+			isDownloaded = false;
+			return;
+		}
+		const set = getOfflineChapterIds(source, mid);
+		isDownloaded = isOfflineChapter(String(chapterId), set);
+	}
+
+	// Re-check when chapter / novel changes
+	$effect(() => {
+		source;
+		chapterId;
+		novelInfo;
+		if (browser) void refreshOfflineStatus();
+	});
+
 
 	const DEFAULT_PROMPTS: Record<string, string> = {
 		id: `Kamu adalah penerjemah profesional light novel.
@@ -448,6 +500,14 @@ Nội dung:
 	});
 
 
+	function looksLikeChapterTitle(s: string): boolean {
+		const t = String(s || '').trim();
+		if (!t) return true;
+		if (/^(chapter|ch\.?|bab|episode|ep\.?|part|arc)\s*[-_.]?\s*\d+/i.test(t)) return true;
+		if (/^\d+(\.\d+)?$/.test(t)) return true;
+		return false;
+	}
+
 	async function downloadChapterFile() {
 		if (isDownloading || !browser || !chapterId || !source) return;
 
@@ -457,9 +517,11 @@ Nội dung:
 		showTools = false;
 
 		try {
-			const novelTitle = (novelInfo as { title?: string } | null)?.title || title || 'Novel';
+			const rawNovelTitle = (novelInfo as { title?: string } | null)?.title || '';
 			const chTitle =
 				(currentChapter as { title?: string } | null)?.title || title || 'Chapter';
+			const novelTitle =
+				rawNovelTitle && !looksLikeChapterTitle(rawNovelTitle) ? rawNovelTitle : undefined;
 			const mangaId = (novelInfo as { id?: string } | null)?.id || '';
 			const cover = (novelInfo as { cover?: string } | null)?.cover || '';
 
@@ -489,6 +551,8 @@ Nội dung:
 				}
 			});
 
+			await refreshOfflineStatus();
+			isDownloaded = true;
 			await new Promise((r) => setTimeout(r, 600));
 		} catch (e) {
 			console.error('[novel download]', e);
@@ -582,9 +646,13 @@ Nội dung:
 				if (e.key === 'ArrowRight') goChapter(nextChapter);
 			};
 			window.addEventListener('keydown', onKey);
+			const onLibrary = () => void refreshOfflineStatus();
+			window.addEventListener('library-changed', onLibrary);
+			void refreshOfflineStatus();
 			return () => {
 				observer.disconnect();
 				window.removeEventListener('keydown', onKey);
+				window.removeEventListener('library-changed', onLibrary);
 			};
 		}
 	});
@@ -778,18 +846,26 @@ Nội dung:
 
 				<button
 					type="button"
-					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
+					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none border transition
 						{isDownloading
-							? 'bg-emerald-500/20 text-emerald-300'
-							: isDark
-								? 'text-emerald-400 active:bg-white/10'
-								: 'text-emerald-600 active:bg-zinc-100'}"
-					title={isDownloading ? downloadLabel || 'Downloading…' : 'Download to Offline Library (PDF)'}
+							? 'border-amber-400/50 bg-amber-500/20 text-amber-300'
+							: isDownloaded
+								? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+								: isDark
+									? 'border-transparent text-emerald-400 active:bg-white/10'
+									: 'border-transparent text-emerald-600 active:bg-zinc-100'}"
+					title={isDownloading
+						? downloadLabel || 'Downloading…'
+						: isDownloaded
+							? 'Sudah offline di library'
+							: 'Download to Offline Library (PDF)'}
 					disabled={isDownloading || !content}
 					onclick={downloadChapterFile}
 				>
 					{#if isDownloading}
 						<span class="text-[9px] font-bold tabular-nums">{downloadProgress}%</span>
+					{:else if isDownloaded}
+						<Check class="h-4 w-4 pointer-events-none" strokeWidth={3} />
 					{:else}
 						<Download class="h-4 w-4 pointer-events-none" />
 					{/if}
