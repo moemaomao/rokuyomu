@@ -1,8 +1,4 @@
 <script lang="ts">
-	/**
-	 * Fully offline novel reader + offline chapter list / prev-next.
-	 * Path: frontend/src/routes/offline/novel/[source]/[...id]/+page.svelte
-	 */
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
@@ -134,6 +130,7 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="fixed inset-0 z-50 bg-black/50" onclick={() => (showList = false)}>
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<aside
 				class="absolute top-0 left-0 flex h-full w-72 max-w-[85vw] flex-col border-r border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
 				onclick={(e) => e.stopPropagation()}

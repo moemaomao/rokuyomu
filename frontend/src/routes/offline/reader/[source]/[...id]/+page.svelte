@@ -1,8 +1,4 @@
 <script lang="ts">
-	/**
-	 * Fully offline manga reader + offline chapter list / prev-next.
-	 * Path: frontend/src/routes/offline/reader/[source]/[...id]/+page.svelte
-	 */
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
@@ -191,6 +187,7 @@
 			class="fixed inset-0 z-50 bg-black/60"
 			onclick={() => (showList = false)}
 		>
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<aside
 				class="absolute top-0 left-0 flex h-full w-72 max-w-[85vw] flex-col border-r border-zinc-800 bg-zinc-950 shadow-xl"
 				onclick={(e) => e.stopPropagation()}
