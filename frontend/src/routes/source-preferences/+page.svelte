@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Check, Settings, AlertTriangle, BookMarked, BookOpen } from 'lucide-svelte';
-	import { getPreferredSources, setPreferredSources } from '$lib/stores/preferredSources';
+	import { Check, Settings, AlertTriangle, BookMarked, BookOpen, LayoutGrid, Rows3 } from 'lucide-svelte';
+	import {
+		getPreferredSources,
+		setPreferredSources,
+		getHomeLayout,
+		setHomeLayout,
+		type HomeLayout
+	} from '$lib/stores/preferredSources';
+	import { setMultiMode } from '$lib/stores/impl';
 	import { getSourceMeta, groupSourcesByLang, LANG_LABELS } from '$lib/utils/sourceMeta';
 	import { isNovelSource } from '$lib/utils/novelSources';
 	import { isBrokenSource } from '$lib/stores/brokenSources.svelte';
@@ -15,6 +22,7 @@
 	type ContentKind = 'comic' | 'novel';
 
 	let preferred = $state<string[]>([]);
+	let homeLayout = $state<HomeLayout>('merged');
 	let isDarkMode = $state(true);
 	let saved = $state(false);
 	let showLimitToast = $state(false);
@@ -46,6 +54,7 @@
 	onMount(() => {
 		const savedPrefs = getPreferredSources().slice(0, MAX_PREFERRED);
 		preferred = savedPrefs;
+		homeLayout = getHomeLayout();
 		isDarkMode = document.documentElement.classList.contains('dark');
 		const obs = new MutationObserver(() => {
 			isDarkMode = document.documentElement.classList.contains('dark');
@@ -108,9 +117,17 @@
 
 	function save() {
 		setPreferredSources(preferred.slice(0, MAX_PREFERRED));
+		setHomeLayout(homeLayout);
+		// Force multi mode so homepage does not restore last single source
+		if (preferred.length > 0) {
+			setMultiMode();
+		}
 		saved = true;
 		setTimeout(() => {
-			window.location.href = selectedKind === 'novel' ? '/?kind=novel' : '/';
+			const params = new URLSearchParams();
+			if (selectedKind === 'novel') params.set('kind', 'novel');
+			// No ?source= → multi mode (merged or sectioned)
+			window.location.href = params.toString() ? `/?${params}` : '/';
 		}, 300);
 	}
 
@@ -127,7 +144,6 @@
 	}
 
 	function selectNone() {
-		// Hapus hanya preferred yang termasuk kind aktif
 		preferred = preferred.filter((id) => {
 			const isNovel = isNovelSource(id);
 			return selectedKind === 'novel' ? !isNovel : isNovel;
@@ -148,10 +164,61 @@
 		<div>
 			<h1 class="text-xl font-bold sm:text-2xl">Source Preferences</h1>
 			<p class="mt-0.5 text-sm {isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}">
-				Choose which sources appear on the homepage (max {MAX_PREFERRED}). Manga will be merged
-				and sorted from the latest updates. Leave empty to use the source dropdown instead.
+				Choose which sources appear on the homepage (max {MAX_PREFERRED}). Pick layout: merged
+				(mixed titles) or sectioned (one section per source, 24 titles each).
 			</p>
 		</div>
+	</div>
+
+	<!-- Homepage layout -->
+	<div class="mb-5">
+		<p class="mb-2 text-xs font-bold uppercase tracking-wider {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
+			Homepage layout
+		</p>
+		<div
+			class="flex w-full max-w-md overflow-hidden rounded-xl border p-1
+				{isDarkMode ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-200 bg-zinc-100'}"
+		>
+			<button
+				type="button"
+				onclick={() => {
+					homeLayout = 'merged';
+					saved = false;
+				}}
+				class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition
+					{homeLayout === 'merged'
+						? 'bg-red-600 text-white shadow'
+						: isDarkMode
+							? 'text-zinc-400 hover:text-zinc-200'
+							: 'text-zinc-500 hover:text-zinc-800'}"
+			>
+				<LayoutGrid class="h-4 w-4" />
+				Merged
+			</button>
+			<button
+				type="button"
+				onclick={() => {
+					homeLayout = 'sectioned';
+					saved = false;
+				}}
+				class="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition
+					{homeLayout === 'sectioned'
+						? 'bg-red-600 text-white shadow'
+						: isDarkMode
+							? 'text-zinc-400 hover:text-zinc-200'
+							: 'text-zinc-500 hover:text-zinc-800'}"
+			>
+				<Rows3 class="h-4 w-4" />
+				Sectioned
+			</button>
+		</div>
+		<p class="mt-1.5 text-xs {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
+			{#if homeLayout === 'sectioned'}
+				Each selected source gets its own section with up to 24 titles (source name as header).
+			{:else}
+				Titles from all selected sources are mixed and sorted by newest first.
+			{/if}
+		</p>
 	</div>
 
 	<!-- Switch Comic | Novel -->
@@ -217,7 +284,7 @@
 			{/if}
 		</span>
 	</div>
-	
+
 	<div class="space-y-5">
 		{#if filteredSources.length === 0}
 			<p class="py-10 text-center text-sm {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">
@@ -309,7 +376,7 @@
 				No sources selected — multi-source homepage will be empty. Use the source dropdown to
 				browse a single source.
 			{:else}
-				{preferred.length} source{preferred.length === 1 ? '' : 's'} will be shown on the homepage
+				{preferred.length} source{preferred.length === 1 ? '' : 's'} · layout: {homeLayout}
 				({selectedKind}).
 			{/if}
 		</p>
@@ -322,7 +389,6 @@
 		</button>
 	</div>
 
-	<!-- Limit toast overlay -->
 	{#if showLimitToast}
 		<div
 			class="pointer-events-none fixed inset-0 z-[200] flex items-end justify-center p-6 sm:items-center"
@@ -348,7 +414,6 @@
 		</div>
 	{/if}
 
-	<!-- Age Gate Modal (R18 preferred source) -->
 	{#if showAgeGate}
 		<div
 			class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"

@@ -2,8 +2,12 @@ import { browser } from '$app/environment';
 
 const STORAGE_KEY = 'mikoroku_preferred_sources';
 const COOKIE_KEY = 'preferred_sources';
+const LAYOUT_STORAGE_KEY = 'mikoroku_home_layout';
+const LAYOUT_COOKIE_KEY = 'home_layout';
 
 const DEFAULT_SOURCES: string[] = [];
+export type HomeLayout = 'merged' | 'sectioned';
+const DEFAULT_LAYOUT: HomeLayout = 'merged';
 
 export function getPreferredSources(): string[] {
 	if (!browser) return DEFAULT_SOURCES;
@@ -47,5 +51,36 @@ export function parsePreferredFromCookie(cookieHeader: string | null): string[] 
 			.filter(Boolean);
 	} catch {
 		return DEFAULT_SOURCES;
+	}
+}
+
+export function getHomeLayout(): HomeLayout {
+	if (!browser) return DEFAULT_LAYOUT;
+	try {
+		const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+		if (raw === 'sectioned' || raw === 'merged') return raw;
+		return DEFAULT_LAYOUT;
+	} catch {
+		return DEFAULT_LAYOUT;
+	}
+}
+
+export function setHomeLayout(layout: HomeLayout): void {
+	if (!browser) return;
+	const value = layout === 'sectioned' ? 'sectioned' : 'merged';
+	localStorage.setItem(LAYOUT_STORAGE_KEY, value);
+	document.cookie = `${LAYOUT_COOKIE_KEY}=${value}; path=/; max-age=31536000; SameSite=Lax`;
+	window.dispatchEvent(new CustomEvent('home-layout-changed'));
+}
+
+export function parseHomeLayoutFromCookie(cookieHeader: string | null): HomeLayout {
+	if (!cookieHeader) return DEFAULT_LAYOUT;
+	const match = cookieHeader.match(new RegExp(`${LAYOUT_COOKIE_KEY}=([^;]+)`));
+	if (!match) return DEFAULT_LAYOUT;
+	try {
+		const decoded = decodeURIComponent(match[1]).trim();
+		return decoded === 'sectioned' ? 'sectioned' : 'merged';
+	} catch {
+		return DEFAULT_LAYOUT;
 	}
 }

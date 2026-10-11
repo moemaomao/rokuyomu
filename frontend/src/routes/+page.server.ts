@@ -2,7 +2,11 @@ import { getSourceList, filterEnabledSources } from '$lib/server/sources';
 import { getDisabledSourceIds } from '$lib/server/sourceConfig';
 import { parseLastSourceFromCookie } from '$lib/stores/impl';
 import { remoteLatest } from '$lib/server/scraperClient';
-import { parsePreferredFromCookie } from '$lib/stores/preferredSources';
+import {
+	parsePreferredFromCookie,
+	parseHomeLayoutFromCookie,
+	type HomeLayout
+} from '$lib/stores/preferredSources';
 import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
 import { getCached } from '$lib/server/cache';
 import {
@@ -137,10 +141,14 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 	let currentSource: string | null = sourceParam;
 	let isMulti = false;
 	let preferredSources: string[] = [];
+	let homeLayout: HomeLayout = 'merged';
+	let sections: Array<{ sourceId: string; name: string; mangas: Manga[] }> = [];
 
 	// ── Multi mode ───────────────────────────────────────────────────────────
 	if (!sourceParam) {
-		preferredSources = parsePreferredFromCookie(request.headers.get('cookie'));
+		const cookie = request.headers.get('cookie');
+		preferredSources = parsePreferredFromCookie(cookie);
+		homeLayout = parseHomeLayoutFromCookie(cookie);
 		const validIds = new Set(sources.map((s) => s.id));
 		preferredSources = preferredSources
 			.filter((id) => validIds.has(id))
@@ -151,7 +159,56 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 
 		if (preferredSources.length === 0) {
 			mangas = [];
+			sections = [];
+		} else if (homeLayout === 'sectioned') {
+			// Sectioned: tiap source 24 judul, tidak digabung
+			const sortedSources = [...preferredSources].sort().join(',');
+			const cacheKey = `browse:sectioned:${sortedSources}:p${pageNum}:q${query}:l${lang}:t${type}:lim${MAX_MANGAS}`;
+
+			const sectionLists = await getCached(
+				cacheKey,
+				async () => {
+					const lists: Manga[][] = [];
+					const conc = pageNum <= 1 ? CONCURRENCY : 1;
+
+					for (let i = 0; i < preferredSources.length; i += conc) {
+						const batch = preferredSources.slice(i, i + conc);
+						const batchResults = await Promise.all(
+							batch.map((id) =>
+								fetchSourceList(id, pageNum, query, lang, type, locals.kv, MAX_MANGAS)
+							)
+						);
+						lists.push(...batchResults);
+					}
+					return lists;
+				},
+				LIST_CACHE_TTL,
+				locals.kv
+			);
+
+			const nameById = new Map(sources.map((s) => [s.id, s.name]));
+			sections = preferredSources.map((id, idx) => {
+				const list = sectionLists[idx] || [];
+				const seen = new Set<string>();
+				const seenTitle = new Set<string>();
+				const deduped = list.filter((m) => {
+					const key = `${m.sourceId ?? ''}:${m.id}`;
+					if (seen.has(key)) return false;
+					seen.add(key);
+					const titleKey = `${(m.sourceId ?? '').toLowerCase()}:${normalizeTitle(m.title)}`;
+					if (seenTitle.has(titleKey)) return false;
+					seenTitle.add(titleKey);
+					return true;
+				});
+				return {
+					sourceId: id,
+					name: nameById.get(id) || id,
+					mangas: deduped.slice(0, MAX_MANGAS)
+				};
+			});
+			mangas = [];
 		} else {
+			// Merged (default)
 			const perSourceLimit = Math.ceil(MAX_MANGAS / preferredSources.length);
 
 			const sortedSources = [...preferredSources].sort().join(',');
@@ -265,6 +322,8 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 		selectedType: type,
 		needsSource: false,
 		isMulti,
-		preferredSources
+		preferredSources,
+		homeLayout,
+		sections
 	};
 };
