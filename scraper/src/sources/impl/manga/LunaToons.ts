@@ -1,7 +1,7 @@
 /**
  * Luna Toons adapter (lunatoons.net)
  *
- * Custom PHP + HTMX site (not Themesia/Madara).
+ * Custom PHP + HTMX site.
  *
  * Latest   : GET /recently-updated?page=N  (~16–20 series / page)
  *            Homepage Featured + Recently Updated used as page-1 fallback (24)
@@ -139,6 +139,7 @@ export class LunaToonsSource extends BaseSource {
 		c = this.absUrl(c);
 		c = c.replace(/&amp;/g, '&');
 		if (/wsrv\.nl\/\?url=/i.test(c)) {
+			// strip tiny thumb params
 			c = c.replace(/&w=\d+/gi, '').replace(/&q=\d+/gi, '');
 		}
 		return c;
@@ -263,6 +264,7 @@ export class LunaToonsSource extends BaseSource {
 				.replace(/\s+/g, ' ')
 				.trim();
 			if (!title || title.length < 2 || /^(view all|read|more)$/i.test(title)) return;
+			// Skip long blurbs
 			if (title.length > 120) title = title.slice(0, 120).trim();
 
 			seen.add(id);
@@ -366,9 +368,12 @@ export class LunaToonsSource extends BaseSource {
 		mangaId: string,
 		_opts?: { lang?: string }
 	): Promise<MangaDetails> {
-		const slug = this.slugFromPath(mangaId);
+		let slug = this.slugFromPath(mangaId);
+		const fromChapter = this.seriesSlugFromChapterPath(mangaId);
+		if (fromChapter) slug = fromChapter;
+		slug = slug.replace(/-chapter-\d+(?:\.\d+)?$/i, '');
 		if (!this.isSeriesSlug(slug)) {
-			throw new Error(`Invalid lunatoons id: ${mangaId}`);
+			throw new Error(`Invalid lunatoons id: ${mangaId} (slug=${slug})`);
 		}
 
 		const path = this.toMangaId(slug);
@@ -416,7 +421,7 @@ export class LunaToonsSource extends BaseSource {
 				if (m) typeRaw = m[1];
 			}
 		});
-		
+
 		const bodyText = $('body').text();
 		const st = bodyText.match(/\bStatus\s+(Ongoing|Completed|Hiatus)\b/i);
 		if (st) statusRaw = st[1];

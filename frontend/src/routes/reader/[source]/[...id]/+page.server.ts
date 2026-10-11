@@ -78,7 +78,6 @@ async function resolveMangaId(
 		return hierarchical;
 	}
 
-	// Shinigami: JSON API
 	if (source === 'shinigami' || chapterId.startsWith('/chapter/')) {
 		const cid = chapterId.replace(/^\/chapter\//, '').replace(/^\//, '');
 		if (cid && /^[a-f0-9-]{36}$/i.test(cid)) {
@@ -112,6 +111,11 @@ async function resolveMangaId(
 	) {
 		const resolved = await remoteMangaFromChapter(source, chapterId);
 		if (resolved) return resolved;
+	}
+
+	const rootParsed = parseRootChapter(chapterId);
+	if (rootParsed?.slug) {
+		return `/${rootParsed.slug}`;
 	}
 
 	return hierarchical.length > 1 ? hierarchical : chapterId;
@@ -158,7 +162,6 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 		throw error(404, { message: 'Source not found' });
 	}
 
-	// Novel → novel-reader (bukan image reader)
 	if (isNovelSource(source)) {
 		const path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 		throw redirect(302, `/novel-reader/${source}${path}`);
@@ -185,15 +188,48 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 			(a, b) => (a.number ?? 0) - (b.number ?? 0)
 		);
 
-		const currentChapterIndex = findChapterIndex(chapters, chapterId);
-		const currentChapter =
+		let currentChapterIndex = findChapterIndex(chapters, chapterId);
+		let currentChapter =
 			currentChapterIndex >= 0 ? chapters[currentChapterIndex] : null;
-		const prevChapter =
+		let prevChapter =
 			currentChapterIndex > 0 ? chapters[currentChapterIndex - 1] : null;
-		const nextChapter =
+		let nextChapter =
 			currentChapterIndex >= 0 && currentChapterIndex < chapters.length - 1
 				? chapters[currentChapterIndex + 1]
 				: null;
+
+		if ((!prevChapter && !nextChapter) || currentChapterIndex < 0) {
+			const parsed = parseRootChapter(chapterId);
+			if (parsed) {
+				const { slug, num } = parsed;
+				if (!currentChapter) {
+					currentChapter = {
+						id: chapterId,
+						title: `Chapter ${num}`,
+						number: num
+					};
+				}
+				if (!prevChapter && num > 1) {
+					const prevNum = Number.isInteger(num) ? num - 1 : Math.floor(num);
+					const p = num - 1;
+					if (p >= 1) {
+						prevChapter = {
+							id: `/${slug}-chapter-${p}`,
+							title: `Chapter ${p}`,
+							number: p
+						};
+					}
+				}
+				if (!nextChapter) {
+					const n = num + 1;
+					nextChapter = {
+						id: `/${slug}-chapter-${n}`,
+						title: `Chapter ${n}`,
+						number: n
+					};
+				}
+			}
+		}
 
 		setHeaders({
 			'Cache-Control':
