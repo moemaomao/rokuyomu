@@ -243,7 +243,6 @@ $effect(() => {
 		}, 12000);
 	}
 
-	// ── Download → Offline Library (cached + parallel) ───────────────────────
 	async function refreshOfflineStatus() {
 		if (!browser || !source || !mangaInfo?.id) {
 			isOfflineChapter = false;
@@ -325,7 +324,6 @@ $effect(() => {
 		}, 1500);
 	}
 
-	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(() => {
 		if (typeof window !== 'undefined') {
 			const u = new URL(window.location.href);
@@ -371,7 +369,6 @@ $effect(() => {
 		});
 	});
 	
-	// ── SEO / share card ─────────────────────────────────────────────────────
 	let pageTitle = $derived(
 		mangaInfo?.title
 			? `${mangaInfo.title} - ${currentChapter?.title || 'Chapter'} | RokuYomu`

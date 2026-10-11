@@ -6,6 +6,7 @@ import {
 } from '$lib/utils/localFs';
 import { upsertLibraryEntry } from '$lib/stores/library.svelte';
 import { cacheLibraryCover } from '$lib/utils/cacheCover';
+import { saveOfflineMangaChapter } from '$lib/utils/offlineChapter';
 
 export type DownloadProgress = {
 	phase: 'pages' | 'images' | 'zip' | 'disk' | 'fetch' | 'pdf' | 'done' | 'error';
@@ -32,6 +33,7 @@ function pad(n: number, width = 3): string {
 	return String(n).padStart(width, '0');
 }
 
+/** Same filename derivation as the reader so cache keys match. */
 function proxyFilename(url: string): string {
 	let filename = 'image.jpg';
 	try {
@@ -39,6 +41,7 @@ function proxyFilename(url: string): string {
 		const last = path.split('/').pop() || '';
 		if (last) filename = decodeURIComponent(last);
 	} catch {
+		/* ignore */
 	}
 	filename = filename.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'image.jpg';
 	if (!/\.[a-zA-Z0-9]{2,5}$/.test(filename)) filename += '.jpg';
@@ -110,7 +113,6 @@ async function fetchImageBlob(url: string, source: string): Promise<PageBlob> {
 		proxyUrl(url, source, false)
 	].filter(Boolean);
 
-	// Deduplicate
 	const seen = new Set<string>();
 	const list = candidates.filter((u) => {
 		if (seen.has(u)) return false;
@@ -336,6 +338,19 @@ export async function downloadChapter(opts: {
 		if (item?.blob?.size) pages.push(item);
 	}
 	if (!pages.length) throw new Error('No images downloaded');
+
+	try {
+		await saveOfflineMangaChapter({
+			sourceId: source,
+			mangaId: mangaId || chapterId,
+			chapterId: String(chapterId),
+			mangaTitle: mangaTitle || 'Manga',
+			chapterTitle,
+			pages
+		});
+	} catch (e) {
+		console.warn('[offline] save manga chapter failed', e);
+	}
 
 	const chapterSafe = sanitizePathSegment(chapterTitle);
 	const mangaSafe = sanitizePathSegment(mangaTitle || 'Manga');

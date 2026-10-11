@@ -6,6 +6,7 @@ import {
 } from '$lib/utils/localFs';
 import { upsertLibraryEntry } from '$lib/stores/library.svelte';
 import { cacheLibraryCover } from '$lib/utils/cacheCover';
+import { saveOfflineNovelChapter } from '$lib/utils/offlineChapter';
 
 export type NovelDownloadProgress = {
 	phase: 'fetch' | 'pdf' | 'disk' | 'done' | 'error';
@@ -311,6 +312,19 @@ export async function downloadNovelChapterPdf(opts: {
 	report({ phase: 'pdf', current: 0, total: 1, message: 'Building PDF…' });
 	const heading = [novelTitle, title].filter(Boolean).join(' — ');
 	const pdfBlob = buildSimplePdf(heading, content);
+	try {
+		await saveOfflineNovelChapter({
+			sourceId: source,
+			mangaId: mangaId || chapterId,
+			chapterId: String(chapterId),
+			novelTitle,
+			chapterTitle: title,
+			content: (data.content && String(data.content).trim()) || content,
+			pdfBlob
+		});
+	} catch (e) {
+		console.warn('[offline] save novel+pdf failed', e);
+	}
 	const fileName = sanitizeFilename(chapterFileLabel) + '.pdf';
 
 	let savedPath = '';
