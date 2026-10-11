@@ -55,9 +55,11 @@
 		} | null;
 		offset: number;
 		hasMore: boolean;
+		scrollY?: number;
 		ts: number;
 	}
 
+	let memoryCache: CachePayload | null = null;
 	let query = $state('');
 	let selectedTags = $state<string[]>([]);
 	let typeFilter = $state<TypeFilter>('all');
@@ -83,40 +85,69 @@
 		return [query.trim(), selectedTags.slice().sort().join(','), typeFilter].join('|');
 	}
 
-	function saveCache() {
+	function saveCache(scrollY?: number) {
 		if (!browser) return;
+		const payload: CachePayload = {
+			key: baseCacheKey(),
+			results,
+			meta,
+			offset: currentOffset,
+			hasMore,
+			scrollY: typeof scrollY === 'number' ? scrollY : (typeof window !== 'undefined' ? window.scrollY : 0),
+			ts: Date.now()
+		};
+		memoryCache = payload;
 		try {
-			const payload: CachePayload = {
-				key: baseCacheKey(),
-				results,
-				meta,
-				offset: currentOffset,
-				hasMore,
-				ts: Date.now()
-			};
 			sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
 		} catch {
-			/* ignore */
 		}
+	}
+
+	function applyPayload(data: CachePayload): boolean {
+		if (!data?.results?.length) return false;
+		results = data.results;
+		meta = data.meta || null;
+		currentOffset = data.offset || 0;
+		hasMore = !!data.hasMore;
+		return true;
 	}
 
 	function loadCache(): boolean {
 		if (!browser) return false;
+		const key = baseCacheKey();
+		if (memoryCache && memoryCache.key === key && Date.now() - (memoryCache.ts || 0) < 30 * 60 * 1000) {
+			if (applyPayload(memoryCache)) {
+				const y = memoryCache.scrollY || 0;
+				requestAnimationFrame(() => {
+					requestAnimationFrame(() => window.scrollTo(0, y));
+				});
+				return true;
+			}
+		}
+	
 		try {
 			const raw = sessionStorage.getItem(CACHE_KEY);
 			if (!raw) return false;
 			const data = JSON.parse(raw) as CachePayload;
-			if (!data || Date.now() - (data.ts || 0) > 10 * 60 * 1000) return false;
-			if (data.key !== baseCacheKey()) return false;
-			results = data.results || [];
-			meta = data.meta || null;
-			currentOffset = data.offset || 0;
-			hasMore = !!data.hasMore;
-			return results.length > 0;
+			if (!data || Date.now() - (data.ts || 0) > 30 * 60 * 1000) return false;
+			if (data.key !== key) return false;
+			memoryCache = data;
+			if (applyPayload(data)) {
+				const y = data.scrollY || 0;
+				requestAnimationFrame(() => {
+					requestAnimationFrame(() => window.scrollTo(0, y));
+				});
+				return true;
+			}
 		} catch {
-			return false;
 		}
+		return false;
 	}
+
+	function persistBeforeLeave() {
+		saveCache(typeof window !== 'undefined' ? window.scrollY : 0);
+	}
+
 
 	function normalizeTagName(raw: string): string {
 		const s = String(raw || '').trim();
@@ -169,15 +200,15 @@
 		applySearchParams(new URLSearchParams(window.location.search));
 		if (query.length >= 2 || selectedTags.length > 0) {
 			const restored = loadCache();
-			if (!restored) {
-				void runSearch(false);
-			}
+			if (restored) return;
+			void runSearch(false);
 		} else {
 			results = [];
 			meta = null;
 			hasMore = false;
 		}
 	}
+
 
 	onMount(() => {
 		bootstrapFromUrl();
@@ -190,7 +221,10 @@
 		if (from && from.url.pathname !== '/deep-search') {
 			applySearchParams(new URLSearchParams(to.url.search));
 			const restored = loadCache();
-			if (!restored && (query.length >= 2 || selectedTags.length > 0)) {
+			if (restored) {
+				return;
+			}
+			if (query.length >= 2 || selectedTags.length > 0) {
 				void runSearch(false);
 			}
 		}
@@ -490,6 +524,7 @@
 				<a
 					href={mangaHref(m)}
 					data-sveltekit-preload-data="hover"
+				onclick={persistBeforeLeave}
 					class="group overflow-hidden rounded-xl border border-zinc-200 bg-white transition hover:border-violet-300 hover:bg-zinc-50 dark:border-transparent dark:bg-zinc-900/10 dark:hover:bg-zinc-800/80"
 				>
 					<div class="relative aspect-[2/3] overflow-hidden bg-zinc-100 dark:bg-zinc-800">
