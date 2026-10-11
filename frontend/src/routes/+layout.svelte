@@ -55,6 +55,7 @@
 		LogOut,
 		Github,
 		Settings,
+		SlidersHorizontal,
 		Search,
 		Bell
 	} from 'lucide-svelte';
@@ -627,6 +628,13 @@
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
 			>
 				<MessagesSquare class="h-5 w-5 shrink-0" /> Community
+			</a>
+			<a
+				href="/source-preferences"
+				onclick={(e) => handleNavigate(e, '/source-preferences')}
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
+			>
+				<SlidersHorizontal class="h-5 w-5 shrink-0" /> Source Preferences
 			</a>
 			<a
 				href="/settings"

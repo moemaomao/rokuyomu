@@ -514,7 +514,7 @@
 					{sourceName(sid)}
 				</span>
 			{/each}
-			<a href="/settings" class="ml-1 font-medium text-red-500 hover:underline">
+			<a href="/source-preferences" class="ml-1 font-medium text-red-500 hover:underline">
 				Edit
 			</a>
 		</div>
@@ -549,8 +549,8 @@
 			<p>No manga found matching the selected filters.</p>
 			{#if isMulti}
 				<p class="mt-2 text-sm">
-					Silakan <a href="/settings" class="text-red-500 hover:underline">ubah preferred sources</a>
-					atau pilih source spesifik dari dropdown.
+					Please <a href="/source-preferences" class="text-red-500 hover:underline">update your preferred sources</a>
+					or select a specific source from the dropdown.
 				</p>
 			{/if}
 		</div>
