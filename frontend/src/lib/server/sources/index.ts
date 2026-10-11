@@ -203,6 +203,7 @@ const SOURCES: SourceMeta[] = [
 	{ id: 'comix', name: 'Comix' },
 	{ id: 'qimanga', name: 'QiManga' },
 	{ id: 'artlapsa', name: 'Art Lapsa' },
+	{ id: 'kitsunedawn', name: 'Kitsune Dawn' },
 	{ id: 'luacomic', name: 'Lua Comic' },
 	{ id: 'rokaricomics', name: 'Rokari Comics' },
 	{ id: 'hentaicrot', name: 'HentaiCrot' },
