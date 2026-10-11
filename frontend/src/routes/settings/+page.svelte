@@ -101,13 +101,13 @@
 	function resetAgeGate() {
 		clearNsfwConfirmed();
 		ageConfirmed = false;
-		msg = 'Age gate di-reset. Sumber R18 akan minta konfirmasi lagi.';
+		msg = 'Age gate reset. R18 sources will ask for confirmation again.';
 	}
 
 	async function clearHistoryNow() {
-		if (!confirm('Hapus semua reading history di perangkat ini?')) return;
+		if (!confirm('Delete all reading history on this device?')) return;
 		await clearHistory();
-		msg = 'History dibersihkan.';
+		msg = 'History cleared.';
 		await refreshStorage();
 	}
 
@@ -301,23 +301,23 @@
 		</div>
 		<div>
 			<h1 class="text-xl font-bold text-zinc-900 dark:text-zinc-100">Settings</h1>
-			<p class="text-sm text-zinc-500">Tampilan, NSFW, privacy, backup & data</p>
+			<p class="text-sm text-zinc-500">Appearance, NSFW, privacy, backup & data</p>
 		</div>
 	</div>
 
 	<!-- Backup -->
 	
-	<!-- Theme & tampilan -->
+	<!-- Theme & appearance -->
 	<section
 		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
 	>
 		<div class="mb-4 flex items-center gap-2">
 			<Palette class="h-4 w-4 text-violet-600 dark:text-violet-400" />
-			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Theme & tampilan</h2>
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Theme & appearance</h2>
 		</div>
 
 		<div class="mb-5">
-			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Tema</p>
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Theme</p>
 			<div class="flex flex-wrap gap-2">
 				{#each [
 					{ id: 'dark' as ThemeMode, label: 'Dark', Icon: Moon },
@@ -340,7 +340,7 @@
 		</div>
 
 		<div class="mb-5">
-			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Ukuran grid homepage</p>
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Homepage grid size</p>
 			<div class="flex flex-wrap gap-2">
 				{#each [
 					{ id: 'compact' as GridSize, label: 'Compact' },
@@ -359,12 +359,12 @@
 				{/each}
 			</div>
 			<p class="mt-1.5 text-[11px] text-zinc-500">
-				Compact = lebih banyak kartu per baris. Comfortable = kartu lebih besar.
+				Compact = more cards per row. Comfortable = larger cards.
 			</p>
 		</div>
 
 		<div>
-			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Sembunyikan badge</p>
+			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Hide badges</p>
 			<div class="space-y-2">
 				{#each [
 					{ key: 'status' as const, label: 'Status (Ongoing / Completed / …)' },
@@ -394,7 +394,7 @@
 	>
 		<div class="mb-4 flex items-center gap-2">
 			<EyeOff class="h-4 w-4 text-rose-600 dark:text-rose-400" />
-			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">NSFW / konten dewasa</h2>
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">NSFW / adult content</h2>
 		</div>
 
 		<div class="mb-4 space-y-3">
@@ -406,7 +406,7 @@
 					onchange={(e) =>
 						updatePref('hideR18Sources', (e.currentTarget as HTMLInputElement).checked)}
 				/>
-				Sembunyikan source R18 dari daftar
+				Hide R18 sources from lists
 			</label>
 			<label class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200">
 				<input
@@ -416,7 +416,7 @@
 					onchange={(e) =>
 						updatePref('blurR18Covers', (e.currentTarget as HTMLInputElement).checked)}
 				/>
-				Blur cover R18 di homepage
+				Blur R18 covers on homepage
 			</label>
 		</div>
 
@@ -424,9 +424,9 @@
 			class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50"
 		>
 			<p class="mb-2 text-xs text-zinc-500">
-				Konfirmasi umur saat ini:
+				Age confirmation status:
 				<strong class="text-zinc-800 dark:text-zinc-200">
-					{ageConfirmed ? 'Sudah dikonfirmasi (18+)' : 'Belum / sudah di-reset'}
+					{ageConfirmed ? 'Confirmed (18+)' : 'Not confirmed / reset'}
 				</strong>
 			</p>
 			<button
@@ -434,7 +434,7 @@
 				onclick={resetAgeGate}
 				class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
 			>
-				Reset age gate (minta konfirmasi lagi)
+				Reset age gate (ask again)
 			</button>
 		</div>
 	</section>
@@ -457,7 +457,7 @@
 					onchange={(e) =>
 						updatePref('dontSaveHistory', (e.currentTarget as HTMLInputElement).checked)}
 				/>
-				Jangan simpan history
+				Don't save reading history
 			</label>
 			<label class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200">
 				<input
@@ -467,13 +467,13 @@
 					onchange={(e) =>
 						updatePref('incognitoSession', (e.currentTarget as HTMLInputElement).checked)}
 				/>
-				Mode “incognito session” (history tidak ditulis di sesi ini)
+				Incognito session (history is not written during this session)
 			</label>
 		</div>
 
 		<div class="mb-2">
 			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-				Clear history otomatis setelah
+				Auto-clear history after
 			</p>
 			<div class="flex flex-wrap items-center gap-2">
 				<select
@@ -486,17 +486,17 @@
 						)}
 				>
 					<option value="0">Off</option>
-					<option value="7">7 hari</option>
-					<option value="14">14 hari</option>
-					<option value="30">30 hari</option>
-					<option value="90">90 hari</option>
+					<option value="7">7 days</option>
+					<option value="14">14 days</option>
+					<option value="30">30 days</option>
+					<option value="90">90 days</option>
 				</select>
 				<button
 					type="button"
 					onclick={clearHistoryNow}
 					class="rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
 				>
-					Clear history sekarang
+					Clear history now
 				</button>
 			</div>
 		</div>

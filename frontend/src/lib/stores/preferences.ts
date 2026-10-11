@@ -22,7 +22,7 @@ const STORAGE_KEY = 'rokuyomu_preferences';
 
 const DEFAULTS: AppPreferences = {
 	theme: 'dark',
-	gridSize: 'comfortable',
+	gridSize: 'compact',
 	hideBadges: { status: false, type: false, source: false },
 	hideR18Sources: false,
 	blurR18Covers: false,

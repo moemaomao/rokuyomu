@@ -121,6 +121,7 @@
 			const isNovel = isNovelSource(s.id);
 			const kindOk = selectedKind === 'novel' ? isNovel : !isNovel;
 			if (!kindOk) return false;
+			// Hide R18 sources when preference is on
 			if (shouldHideR18Source(s.id, prefs)) return false;
 			return true;
 		})

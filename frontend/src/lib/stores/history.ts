@@ -186,7 +186,7 @@ export function whenHistoryReady(): Promise<void> {
 
 export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	if (!browser) return;
-
+	
 	if (!shouldSaveHistory()) return;
 
 	const full = lightEntry({
