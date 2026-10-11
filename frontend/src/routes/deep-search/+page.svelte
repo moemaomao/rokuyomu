@@ -5,6 +5,13 @@
 	import { goto, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import type { Manga } from '$lib/server/sources/types';
+	import {
+		type DeepSearchCachePayload,
+		getDeepSearchMemory,
+		persistDeepSearchToSession,
+		readDeepSearchFromSession,
+		clearDeepSearchMemory
+	} from '$lib/utils/deepSearchCache';
 	import { isNovelSource } from '$lib/utils/novelSources';
 
 	const TAG_OPTIONS = [
@@ -41,25 +48,7 @@
 	type TypeFilter = 'all' | 'manga' | 'novel';
 
 	const PAGE_SIZE = 72;
-	const CACHE_KEY = 'rokuyomu:deep-search:last';
-
-	interface CachePayload {
-		key: string;
-		results: Manga[];
-		meta: {
-			returned?: number;
-			sourcesTried?: number;
-			type?: string;
-			hasMore?: boolean;
-			totalMatched?: number;
-		} | null;
-		offset: number;
-		hasMore: boolean;
-		scrollY?: number;
-		ts: number;
-	}
-
-	let memoryCache: CachePayload | null = null;
+	type CachePayload = DeepSearchCachePayload;
 	let query = $state('');
 	let selectedTags = $state<string[]>([]);
 	let typeFilter = $state<TypeFilter>('all');
@@ -93,15 +82,21 @@
 			meta,
 			offset: currentOffset,
 			hasMore,
-			scrollY: typeof scrollY === 'number' ? scrollY : (typeof window !== 'undefined' ? window.scrollY : 0),
+			scrollY:
+				typeof scrollY === 'number'
+					? scrollY
+					: typeof window !== 'undefined'
+						? window.scrollY
+						: 0,
+			urlSearch: typeof window !== 'undefined' ? window.location.search : '',
+			query: query.trim(),
+			tags: selectedTags.slice(),
+			typeFilter,
 			ts: Date.now()
 		};
-		memoryCache = payload;
-		try {
-			sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-		} catch {
-		}
+		persistDeepSearchToSession(payload);
 	}
+
 
 	function applyPayload(data: CachePayload): boolean {
 		if (!data?.results?.length) return false;
@@ -115,34 +110,28 @@
 	function loadCache(): boolean {
 		if (!browser) return false;
 		const key = baseCacheKey();
-		if (memoryCache && memoryCache.key === key && Date.now() - (memoryCache.ts || 0) < 30 * 60 * 1000) {
-			if (applyPayload(memoryCache)) {
-				const y = memoryCache.scrollY || 0;
-				requestAnimationFrame(() => {
-					requestAnimationFrame(() => window.scrollTo(0, y));
-				});
-				return true;
-			}
+		const mem = getDeepSearchMemory() || readDeepSearchFromSession();
+		if (!mem || Date.now() - (mem.ts || 0) >= 30 * 60 * 1000 || !mem.results?.length) {
+			return false;
 		}
-	
-		try {
-			const raw = sessionStorage.getItem(CACHE_KEY);
-			if (!raw) return false;
-			const data = JSON.parse(raw) as CachePayload;
-			if (!data || Date.now() - (data.ts || 0) > 30 * 60 * 1000) return false;
-			if (data.key !== key) return false;
-			memoryCache = data;
-			if (applyPayload(data)) {
-				const y = data.scrollY || 0;
-				requestAnimationFrame(() => {
-					requestAnimationFrame(() => window.scrollTo(0, y));
-				});
-				return true;
-			}
-		} catch {
+		const keyMatch = mem.key === key;
+		const emptyQuery = !query.trim() && selectedTags.length === 0;
+		const queryMatch = !!(mem.query && mem.query === query.trim());
+		if (!(keyMatch || emptyQuery || queryMatch)) return false;
+
+		if (!applyPayload(mem)) return false;
+		if (mem.query && !query.trim()) query = mem.query;
+		if (mem.tags?.length && selectedTags.length === 0) selectedTags = mem.tags.slice();
+		if (mem.typeFilter && typeFilter === 'all' && mem.typeFilter !== 'all') {
+			typeFilter = mem.typeFilter as TypeFilter;
 		}
-		return false;
+		const y = mem.scrollY || 0;
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => window.scrollTo(0, y));
+		});
+		return true;
 	}
+
 
 	function persistBeforeLeave() {
 		saveCache(typeof window !== 'undefined' ? window.scrollY : 0);
@@ -198,9 +187,12 @@
 	function bootstrapFromUrl() {
 		if (!browser) return;
 		applySearchParams(new URLSearchParams(window.location.search));
+		const restored = loadCache();
+		if (restored) {
+			syncUrl();
+			return;
+		}
 		if (query.length >= 2 || selectedTags.length > 0) {
-			const restored = loadCache();
-			if (restored) return;
 			void runSearch(false);
 		} else {
 			results = [];
@@ -210,18 +202,20 @@
 	}
 
 
+
 	onMount(() => {
 		bootstrapFromUrl();
 		initialized = true;
 	});
 
-	afterNavigate(({ to, from, type }) => {
+	afterNavigate(({ to, from }) => {
 		if (!browser) return;
 		if (to?.url.pathname !== '/deep-search') return;
 		if (from && from.url.pathname !== '/deep-search') {
 			applySearchParams(new URLSearchParams(to.url.search));
 			const restored = loadCache();
 			if (restored) {
+				syncUrl();
 				return;
 			}
 			if (query.length >= 2 || selectedTags.length > 0) {
@@ -229,6 +223,7 @@
 			}
 		}
 	});
+
 
 	function toggleTag(tag: string) {
 		if (selectedTags.includes(tag)) {
@@ -347,6 +342,7 @@
 
 	function onInput() {
 		currentOffset = 0;
+		syncUrl();
 		scheduleSearch();
 	}
 
@@ -359,13 +355,7 @@
 		error = '';
 		currentOffset = 0;
 		hasMore = false;
-		if (browser) {
-			try {
-				sessionStorage.removeItem(CACHE_KEY);
-			} catch {
-				/* ignore */
-			}
-		}
+		clearDeepSearchMemory();
 		syncUrl();
 	}
 
