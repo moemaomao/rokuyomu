@@ -14,6 +14,10 @@
 	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/library.svelte';
 	import { Bell, BellOff, Check } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
+	import {
+		offlineMangaReaderHref,
+		offlineNovelReaderHref
+	} from '$lib/utils/offlineChapter';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
 
 	const { data }: { data: PageData } = $props();
@@ -65,6 +69,25 @@
 		if (offlineIds.has(n)) return true;
 		const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
 		return offlineIds.has(alt);
+	}
+
+	function offlineChapterHref(chapterId: string | number | undefined): string {
+		const id = String(chapterId ?? '');
+		if (!id || !source) return '#';
+		return isNovel
+			? offlineNovelReaderHref(String(source), id)
+			: offlineMangaReaderHref(String(source), id);
+	}
+
+	function onChapterAction(e: MouseEvent, chapter: any) {
+		if (isOffline(chapter?.id)) {
+			e.preventDefault();
+			e.stopPropagation();
+			const href = offlineChapterHref(chapter.id);
+			if (href && href !== '#') window.location.href = href;
+			return;
+		}
+		void handleDownloadChapter(e, chapter);
 	}
 
 	function dlLabel(chapterId: string): string {
@@ -1168,10 +1191,10 @@
 										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded border transition disabled:opacity-50 {isOffline(chapter.id)
 											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
 											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
-										title={isOffline(chapter.id) ? "Sudah offline di library" : "Download chapter"}
-										aria-label={isOffline(chapter.id) ? `Offline ${chapter.title}` : `Download ${chapter.title}`}
+										title={isOffline(chapter.id) ? "Read offline" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Read offline ${chapter.title}` : `Download ${chapter.title}`}
 										disabled={isDownloading(chapter.id)}
-										onclick={(e) => handleDownloadChapter(e, chapter)}
+										onclick={(e) => onChapterAction(e, chapter)}
 									>
 										{#if isDownloading(chapter.id)}
 										<span class="text-[8px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
@@ -1254,10 +1277,10 @@
 										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-50 {isOffline(chapter.id)
 											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
 											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
-										title={isOffline(chapter.id) ? "Sudah offline di library" : "Download chapter"}
-										aria-label={isOffline(chapter.id) ? `Offline ${chapter.title}` : `Download ${chapter.title}`}
+										title={isOffline(chapter.id) ? "Read offline" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Read offline ${chapter.title}` : `Download ${chapter.title}`}
 										disabled={isDownloading(chapter.id)}
-										onclick={(e) => handleDownloadChapter(e, chapter)}
+										onclick={(e) => onChapterAction(e, chapter)}
 									>
 										{#if isDownloading(chapter.id)}
 										<span class="text-[9px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
@@ -1328,10 +1351,10 @@
 										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-50 {isOffline(chapter.id)
 											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_10px_rgba(139,92,246,0.45)]'
 											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
-										title={isOffline(chapter.id) ? "Sudah offline di library" : "Download chapter"}
-										aria-label={isOffline(chapter.id) ? `Offline ${chapter.title}` : `Download ${chapter.title}`}
+										title={isOffline(chapter.id) ? "Read offline" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Read offline ${chapter.title}` : `Download ${chapter.title}`}
 										disabled={isDownloading(chapter.id)}
-										onclick={(e) => handleDownloadChapter(e, chapter)}
+										onclick={(e) => onChapterAction(e, chapter)}
 									>
 										{#if isDownloading(chapter.id)}
 										<span class="text-[10px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>

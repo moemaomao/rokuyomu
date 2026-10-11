@@ -24,6 +24,7 @@
 		BookOpen,
 		Download
 	} from 'lucide-svelte';
+	import { getFirstOfflineChapterHref } from '$lib/utils/offlineChapter';
 	import { proxyImage } from '$lib/utils/image';
 	import { getOfflineCoverObjectUrl } from '$lib/utils/cacheCover';
 
@@ -31,6 +32,8 @@
 	let busy = $state(false);
 	let msg = $state('');
 	let diskOk = $state(false);
+	/** Read-offline links keyed by entry.key */
+	let offlineHrefs = $state<Record<string, string>>({});
 	let coverUrls = $state<Record<string, string>>({});
 
 	let batch = $state<{
@@ -64,6 +67,7 @@
 			items = sortedItems(getLibrary());
 		}
 		void loadCovers(items);
+		void resolveOfflineHrefs(items);
 	}
 
 	async function loadCovers(list: LibraryEntry[]) {
@@ -77,6 +81,20 @@
 			}
 		}
 		coverUrls = next;
+	}
+
+	async function resolveOfflineHrefs(list: LibraryEntry[]) {
+		const next: Record<string, string> = { ...offlineHrefs };
+		for (const e of list) {
+			try {
+				const href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, e.isNovel);
+				if (href) next[e.key] = href;
+				else delete next[e.key];
+			} catch {
+				delete next[e.key];
+			}
+		}
+		offlineHrefs = next;
 	}
 
 	function coverSrc(e: LibraryEntry): string {
@@ -829,6 +847,16 @@
 							</p>
 						{/if}
 						<div class="mt-3 flex items-center justify-center gap-2">
+							{#if offlineHrefs[e.key]}
+								<a
+									href={offlineHrefs[e.key]}
+									class="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 transition hover:bg-sky-500 hover:text-white dark:text-sky-400"
+									title="Read offline"
+									aria-label="Read offline"
+								>
+									<BookOpen class="h-4 w-4" />
+								</a>
+							{/if}
 							<button
 								type="button"
 								onclick={() => openBatchWarn(e)}
