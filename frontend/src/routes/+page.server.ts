@@ -76,6 +76,19 @@ function normalizeTitle(title: string): string {
 		.trim();
 }
 
+function parseSectionPages(raw: string | null): Record<string, number> {
+	const out: Record<string, number> = {};
+	if (!raw) return out;
+	for (const part of raw.split(',')) {
+		const idx = part.lastIndexOf(':');
+		if (idx <= 0) continue;
+		const id = part.slice(0, idx).trim();
+		const p = parseInt(part.slice(idx + 1), 10);
+		if (id && !isNaN(p) && p >= 1) out[id] = p;
+	}
+	return out;
+}
+
 async function fetchSourceList(
 	id: string,
 	pageNum: number,
@@ -134,6 +147,7 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 	const query = (url.searchParams.get('q') || '').trim();
 	const lang = (url.searchParams.get('lang') || 'all').toLowerCase();
 	const type = (url.searchParams.get('type') || 'all').toLowerCase();
+	const sectionPages = parseSectionPages(url.searchParams.get('sp'));
 
 	const disabledIds = await getDisabledSourceIds(locals.kv);
 	const sources = filterEnabledSources(getSourceList(), disabledIds);
@@ -142,7 +156,13 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 	let isMulti = false;
 	let preferredSources: string[] = [];
 	let homeLayout: HomeLayout = 'merged';
-	let sections: Array<{ sourceId: string; name: string; mangas: Manga[] }> = [];
+	let sections: Array<{
+		sourceId: string;
+		name: string;
+		mangas: Manga[];
+		page: number;
+		hasMore: boolean;
+	}> = [];
 
 	// ── Multi mode ───────────────────────────────────────────────────────────
 	if (!sourceParam) {
@@ -161,22 +181,24 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 			mangas = [];
 			sections = [];
 		} else if (homeLayout === 'sectioned') {
-			// Sectioned: tiap source 24 judul, tidak digabung
-			const sortedSources = [...preferredSources].sort().join(',');
-			const cacheKey = `browse:sectioned:${sortedSources}:p${pageNum}:q${query}:l${lang}:t${type}:lim${MAX_MANGAS}`;
+			const pageKey = preferredSources
+				.map((id) => `${id}:${sectionPages[id] || 1}`)
+				.join(',');
+			const cacheKey = `browse:sectioned:${pageKey}:q${query}:l${lang}:t${type}:lim${MAX_MANGAS}`;
 
 			const sectionLists = await getCached(
 				cacheKey,
 				async () => {
 					const lists: Manga[][] = [];
-					const conc = pageNum <= 1 ? CONCURRENCY : 1;
+					const conc = CONCURRENCY;
 
 					for (let i = 0; i < preferredSources.length; i += conc) {
 						const batch = preferredSources.slice(i, i + conc);
 						const batchResults = await Promise.all(
-							batch.map((id) =>
-								fetchSourceList(id, pageNum, query, lang, type, locals.kv, MAX_MANGAS)
-							)
+							batch.map((id) => {
+								const p = sectionPages[id] || 1;
+								return fetchSourceList(id, p, query, lang, type, locals.kv, MAX_MANGAS);
+							})
 						);
 						lists.push(...batchResults);
 					}
@@ -200,10 +222,14 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 					seenTitle.add(titleKey);
 					return true;
 				});
+				const sliced = deduped.slice(0, MAX_MANGAS);
+				const p = sectionPages[id] || 1;
 				return {
 					sourceId: id,
 					name: nameById.get(id) || id,
-					mangas: deduped.slice(0, MAX_MANGAS)
+					mangas: sliced,
+					page: p,
+					hasMore: sliced.length >= MAX_MANGAS
 				};
 			});
 			mangas = [];

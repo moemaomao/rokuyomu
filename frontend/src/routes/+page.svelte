@@ -11,6 +11,14 @@
 	import { isNovelSource } from '$lib/utils/novelSources';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
 
+	type SectionItem = {
+		sourceId: string;
+		name: string;
+		mangas: PageData['mangas'];
+		page?: number;
+		hasMore?: boolean;
+	};
+
 	const { data }: { data: PageData } = $props();
 
 	const pageData = $derived(
@@ -18,7 +26,7 @@
 			isMulti?: boolean;
 			preferredSources?: string[];
 			homeLayout?: 'merged' | 'sectioned';
-			sections?: Array<{ sourceId: string; name: string; mangas: typeof data.mangas }>;
+			sections?: SectionItem[];
 		}
 	);
 
@@ -35,6 +43,8 @@
 	let loading = $state(false);
 	let isDarkMode = $state(true);
 	let jumpPageInput = $state('');
+	let sectionJumpInputs = $state<Record<string, string>>({});
+	let scrollToSourceId = $state<string | null>(null);
 
 	let showAgeGate = $state(false);
 	let nsfwBlocked = $state(false);
@@ -154,7 +164,8 @@
 	async function navigate(params: URLSearchParams) {
 		loading = true;
 		try {
-			await goto(`/?${params.toString()}`, {
+			const qs = params.toString();
+			await goto(qs ? `/?${qs}` : '/', {
 				invalidateAll: true,
 				keepFocus: true,
 				noScroll: false
@@ -175,13 +186,57 @@
 		if (searchQuery) params.set('q', searchQuery);
 		if (selectedLang !== 'all') params.set('lang', selectedLang);
 		if (selectedType !== 'all') params.set('type', selectedType);
+		const kind = $page.url.searchParams.get('kind');
+		if (kind) params.set('kind', kind);
 		navigate(params);
+	}
+
+	function buildSpParam(overrideId: string, overridePage: number): string {
+		const parts: string[] = [];
+		for (const s of sections) {
+			const p = s.sourceId === overrideId ? overridePage : (s.page || 1);
+			if (p > 1) parts.push(`${s.sourceId}:${p}`);
+		}
+		return parts.join(',');
+	}
+
+	async function goToSectionPage(sourceId: string, p: number) {
+		if (p < 1 || loading) return;
+		const section = sections.find((s) => s.sourceId === sourceId);
+		if (section && p === (section.page || 1)) return;
+
+		const params = new URLSearchParams();
+		if (searchQuery) params.set('q', searchQuery);
+		if (selectedLang !== 'all') params.set('lang', selectedLang);
+		if (selectedType !== 'all') params.set('type', selectedType);
+		const kind = $page.url.searchParams.get('kind');
+		if (kind) params.set('kind', kind);
+
+		const sp = buildSpParam(sourceId, p);
+		if (sp) params.set('sp', sp);
+
+		scrollToSourceId = sourceId;
+		await navigate(params);
+		requestAnimationFrame(() => {
+			const el = document.getElementById('section-' + sourceId);
+			if (el) {
+				el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			}
+			scrollToSourceId = null;
+		});
 	}
 
 	function handleJumpPage(e: SubmitEvent) {
 		e.preventDefault();
 		const target = parseInt(jumpPageInput, 10);
 		if (!isNaN(target) && target > 0) goToPage(target);
+	}
+
+	function handleSectionJump(e: SubmitEvent, sourceId: string) {
+		e.preventDefault();
+		const raw = sectionJumpInputs[sourceId] || '';
+		const target = parseInt(raw, 10);
+		if (!isNaN(target) && target > 0) goToSectionPage(sourceId, target);
 	}
 
 	function getPaginationRange(current: number) {
@@ -266,7 +321,6 @@
 		return sources.find((s) => s.id === id)?.name || id;
 	}
 
-	// ── SEO / share card ─────────────────────────────────────────────────────
 	let siteUrl = $derived($page.url.origin);
 	let pageTitle = $derived(
 		isMulti
@@ -301,7 +355,7 @@
 
 	<link rel="canonical" href={$page.url.href} />
 
-	<style>
+<style>
 		.badge-stick {
 			display: inline-flex;
 			align-items: center;
@@ -347,7 +401,6 @@
 			border-radius: 0.3rem 0 0 0;
 		}
 
-		/* ── Transparent modern colors ─────────────────────────────────────── */
 		.badge-status-ongoing {
 			background: rgba(22, 163, 74, 0.78);
 			border-color: rgba(74, 222, 128, 0.35);
@@ -441,7 +494,6 @@
 		}
 	</style>
 </svelte:head>
-
 <div class="mx-auto w-full max-w-none px-2 py-3 sm:px-3 sm:py-4 lg:px-4">
 	<!-- HEADER / FILTER -->
 	<BrowseHeader
@@ -541,7 +593,9 @@
 			</div>
 		{:else}
 			{#each sections as section (section.sourceId)}
-				<div class="mb-10">
+				{@const secPage = section.page || 1}
+				{@const secHasMore = section.hasMore || secPage > 1}
+				<div class="mb-10 scroll-mt-20" id="section-{section.sourceId}">
 					<div class="mb-3 flex items-center gap-0">
 						<div class="h-px flex-1 {isDarkMode ? 'bg-zinc-800' : 'bg-zinc-300'}"></div>
 						<a
@@ -632,6 +686,88 @@
 									</div>
 								</a>
 							{/each}
+						</div>
+					{/if}
+
+					<!-- Per-source pagination -->
+					{#if secHasMore || section.mangas.length > 0}
+						<div
+							class="mt-4 flex flex-wrap items-center justify-center gap-2 sm:gap-3"
+						>
+							<button
+								onclick={() => goToSectionPage(section.sourceId, secPage - 1)}
+								disabled={secPage <= 1 || loading}
+								aria-label="Previous page for {section.name}"
+								class="flex h-8 w-8 items-center justify-center rounded-lg border transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40
+									{isDarkMode
+									? 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800'
+									: 'border-zinc-200 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50'}"
+							>
+								<ChevronLeft class="h-3.5 w-3.5" />
+							</button>
+
+							{#each getPaginationRange(secPage) as item}
+								{#if item === '...'}
+									<span class="px-1 text-xs font-semibold {isDarkMode ? 'text-zinc-600' : 'text-zinc-400'}">•••</span>
+								{:else}
+									<button
+										onclick={() => goToSectionPage(section.sourceId, Number(item))}
+										disabled={loading}
+										class="h-8 min-w-[32px] rounded-lg px-2 text-xs font-semibold transition active:scale-95
+											{secPage === item
+											? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+											: isDarkMode
+												? 'border border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800'
+												: 'border border-zinc-200 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50'}"
+									>
+										{item}
+									</button>
+								{/if}
+							{/each}
+
+							<button
+								onclick={() => goToSectionPage(section.sourceId, secPage + 1)}
+								disabled={loading || !(section.hasMore)}
+								aria-label="Next page for {section.name}"
+								class="flex h-8 w-8 items-center justify-center rounded-lg border transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40
+									{isDarkMode
+									? 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800'
+									: 'border-zinc-200 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50'}"
+							>
+								<ChevronRight class="h-3.5 w-3.5" />
+							</button>
+
+							<form
+								onsubmit={(e) => handleSectionJump(e, section.sourceId)}
+								class="ml-1 flex items-center gap-1.5"
+							>
+								<span class="text-[10px] font-medium {isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}">Page</span>
+								<input
+									type="number"
+									min="1"
+									placeholder={String(secPage)}
+									value={sectionJumpInputs[section.sourceId] ?? ''}
+									oninput={(e) => {
+										sectionJumpInputs = {
+											...sectionJumpInputs,
+											[section.sourceId]: (e.currentTarget as HTMLInputElement).value
+										};
+									}}
+									class="h-8 w-12 rounded-lg border px-1.5 text-center text-[11px] font-semibold transition-all focus:outline-none focus:ring-1 focus:ring-red-500
+										[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none
+										{isDarkMode
+										? 'border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-600'
+										: 'border-zinc-200 bg-white text-zinc-800 shadow-sm placeholder:text-zinc-400'}"
+								/>
+								<button
+									type="submit"
+									disabled={loading}
+									aria-label="Go to page"
+									class="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white transition hover:bg-red-500 active:scale-95 disabled:opacity-40"
+								>
+									<ArrowRight class="h-3.5 w-3.5" />
+								</button>
+							</form>
 						</div>
 					{/if}
 				</div>
@@ -762,7 +898,6 @@
 										</span>
 									{/if}
 
-									<!-- TITLE -->
 									<div
 										class="absolute inset-x-0 bottom-0 z-10 max-h-14 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-1 pt-4 pb-12 transition-all duration-300 group-hover:max-h-full group-hover:from-black/90 group-hover:via-black/70 group-hover:pt-8 group-hover:pb-5 group-active:max-h-full group-active:from-black/90 group-active:via-black/70 group-active:pt-8 group-active:pb-5"
 									>
