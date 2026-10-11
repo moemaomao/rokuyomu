@@ -129,10 +129,13 @@ export async function ensureLibraryRoot(): Promise<FileSystemDirectoryHandle | n
 export function sanitizePathSegment(name: string): string {
 	return (
 		String(name || 'untitled')
-			.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+			.replace(/[<>:"/\\|?*\x00-\x1f~'’`]/g, '_')
+			.replace(/[\u200B-\u200D\uFEFF]/g, '')
 			.replace(/\s+/g, ' ')
 			.trim()
-			.slice(0, 100) || 'untitled'
+			.replace(/^\.+|\.+$/g, '')
+			.replace(/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i, '_$1')
+			.slice(0, 80) || 'untitled'
 	);
 }
 

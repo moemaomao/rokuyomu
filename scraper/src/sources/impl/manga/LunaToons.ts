@@ -264,7 +264,6 @@ export class LunaToonsSource extends BaseSource {
 				.replace(/\s+/g, ' ')
 				.trim();
 			if (!title || title.length < 2 || /^(view all|read|more)$/i.test(title)) return;
-			// Skip long blurbs
 			if (title.length > 120) title = title.slice(0, 120).trim();
 
 			seen.add(id);
