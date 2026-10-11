@@ -259,8 +259,27 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 			nextChapter
 		};
 	} catch (e) {
-		if (e && typeof e === 'object' && 'status' in e) throw e;
+		if (e && typeof e === 'object' && 'status' in e) {
+			const st = (e as { status?: number }).status;
+			if (st === 302 || st === 301 || st === 307 || st === 308) throw e;
+		}
 		debug.error(`Failed to fetch chapter ${chapterId} from ${source}:`, e);
-		throw error(404, { message: 'Chapter not found' });
+		const id = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
+		return {
+			pages: [] as string[],
+			source,
+			chapterId: id,
+			mangaInfo: {
+				id: '',
+				title: 'Offline / unavailable',
+				cover: '',
+				slug: ''
+			},
+			chapters: [],
+			currentChapter: { id, title: 'Chapter', number: 0 },
+			prevChapter: null,
+			nextChapter: null,
+			allowOfflineClient: true
+		};
 	}
 };

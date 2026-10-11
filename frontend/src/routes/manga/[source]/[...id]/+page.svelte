@@ -14,10 +14,6 @@
 	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/library.svelte';
 	import { Bell, BellOff, Check } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
-	import {
-		offlineMangaReaderHref,
-		offlineNovelReaderHref
-	} from '$lib/utils/offlineChapter';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
 
 	const { data }: { data: PageData } = $props();
@@ -71,20 +67,12 @@
 		return offlineIds.has(alt);
 	}
 
-	function offlineChapterHref(chapterId: string | number | undefined): string {
-		const id = String(chapterId ?? '');
-		if (!id || !source) return '#';
-		return isNovel
-			? offlineNovelReaderHref(String(source), id)
-			: offlineMangaReaderHref(String(source), id);
-	}
-
 	function onChapterAction(e: MouseEvent, chapter: any) {
 		if (isOffline(chapter?.id)) {
 			e.preventDefault();
 			e.stopPropagation();
-			const href = offlineChapterHref(chapter.id);
-			if (href && href !== '#') window.location.href = href;
+			const href = chapterHref(String(source), String(chapter.id));
+			if (href) window.location.href = href;
 			return;
 		}
 		void handleDownloadChapter(e, chapter);

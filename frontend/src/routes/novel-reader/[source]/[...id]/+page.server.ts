@@ -143,9 +143,23 @@ export const load: PageServerLoad = async ({ params }) => {
 				: data.nextChapter ?? null
 		};
 	} catch (e: unknown) {
-		if (e && typeof e === 'object' && 'status' in e) throw e;
+		if (e && typeof e === 'object' && 'status' in e) {
+			const st = (e as { status?: number }).status;
+			if (st === 302 || st === 301 || st === 307 || st === 308) throw e;
+		}
 		const msg = e instanceof Error ? e.message : 'Novel chapter load failed';
 		console.error('[novel-reader]', source, chapterId, msg);
-		throw error(404, msg);
+		return {
+			content: '',
+			title: 'Offline / unavailable',
+			source,
+			chapterId,
+			novelInfo: { title: '', id: '', cover: '' },
+			chapters: [],
+			currentChapter: null,
+			prevChapter: null,
+			nextChapter: null,
+			allowOfflineClient: true
+		};
 	}
 };

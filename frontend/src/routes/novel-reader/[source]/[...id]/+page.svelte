@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { saveReading } from '$lib/stores/history';
 	import { markChapterRead } from '$lib/utils/readChapters';
 	import { browser } from '$app/environment';
@@ -20,6 +20,7 @@
 		Download
 	} from 'lucide-svelte';
 	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
+	import { getOfflineNovelChapter } from '$lib/utils/offlineChapter';
 	import {
 		getOfflineChapterIds,
 		ensureLibraryLoaded
@@ -46,6 +47,10 @@
 	}
 
 	let { data = {} }: Props = $props();
+
+	let offlineNovelMode = $state(false);
+	let offlineContent = $state<string | null>(null);
+
 
 	let {
 		content = '',
@@ -88,7 +93,6 @@
 	let isDownloading = $state(false);
 	let downloadProgress = $state(0);
 	let downloadLabel = $state('');
-	// Persist offline status from library store (survives reload)
 	let isDownloaded = $state(false);
 
 	function novelMangaId(): string {
@@ -117,7 +121,6 @@
 		try {
 			await ensureLibraryLoaded();
 		} catch {
-			/* ignore */
 		}
 		const mid = novelMangaId();
 		if (!mid) {
@@ -128,7 +131,6 @@
 		isDownloaded = isOfflineChapter(String(chapterId), set);
 	}
 
-	// Re-check when chapter / novel changes
 	$effect(() => {
 		source;
 		chapterId;
@@ -321,6 +323,7 @@ Nội dung:
 	function toggleAutoScroll() {
 		if (autoScroll) stopAutoScroll();
 		else startAutoScroll();
+		showTools = false;
 	}
 
 	function getPlainText(): string {
@@ -381,6 +384,7 @@ Nội dung:
 		e?.stopPropagation();
 		if (isSpeaking) stopTTS();
 		else speak();
+		showTools = false;
 	}
 
 
@@ -388,10 +392,12 @@ Nội dung:
 		if (!content || isTranslating) return;
 		if (translatedContent && showTranslated) {
 			showTranslated = false;
+			showTools = false;
 			return;
 		}
 		if (translatedContent && !showTranslated) {
 			showTranslated = true;
+			showTools = false;
 			return;
 		}
 		promptDraft = translatePrompt;
@@ -514,7 +520,6 @@ Nội dung:
 		isDownloading = true;
 		downloadProgress = 5;
 		downloadLabel = 'Preparing…';
-		showTools = false;
 
 		try {
 			const rawNovelTitle = (novelInfo as { title?: string } | null)?.title || '';
@@ -621,7 +626,38 @@ Nội dung:
 		}
 	});
 
-	onMount(() => {
+	
+	$effect(() => {
+		if (!browser) return;
+		const src = String(source || '');
+		const cid = String(chapterId || '');
+		if (!src || !cid) return;
+		let cancelled = false;
+		(async () => {
+			try {
+				const row = await getOfflineNovelChapter(src, cid);
+				if (cancelled) return;
+				if (row?.content) {
+					offlineContent = row.content;
+					offlineNovelMode = true;
+					if (row.chapterTitle) {
+					}
+					return;
+				}
+			} catch (e) {
+				console.warn('[novel-reader] offline', e);
+			}
+			if (!cancelled) {
+				offlineContent = null;
+				offlineNovelMode = false;
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
+onMount(() => {
 		loadSettings();
 		settingsReady = true;
 		if (browser) {
@@ -706,17 +742,17 @@ Nội dung:
 		{#if showTranslated && translatedContent}
 			{@html translatedContent.replace(/\n/g, '<br>')}
 		{:else}
-			{@html content || '<p>No content</p>'}
+			{@html (offlineContent ?? content) || '<p>No content</p>'}
 		{/if}
 	</article>
 
 	<div
-		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] px-5 py-3 bg-transparent border-0 pointer-events-none"
+		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-3 px-5 py-3 bg-transparent border-0 pointer-events-none"
 		style="padding-bottom: max(0.75rem, env(safe-area-inset-bottom));"
 	>
 		<button
 			type="button"
-			class="pointer-events-auto touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark
+			class="pointer-events-auto touch-manipulation flex min-w-[72px] items-center justify-center gap-1 rounded-[14px] border px-3.5 py-2 text-[0.88em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark
 				? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70'
 				: 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
 			disabled={!prevChapter}
@@ -725,8 +761,7 @@ Nội dung:
 		>
 			<svg
 				viewBox="0 0 24 24"
-				width="20"
-				height="20"
+				width="18" height="18"
 				fill="none"
 				stroke="currentColor"
 				stroke-width="2"
@@ -737,9 +772,18 @@ Nội dung:
 			</svg>
 		</button>
 
+		{#if offlineNovelMode}
+			<span
+				class="pointer-events-auto flex min-w-[64px] items-center justify-center self-center rounded-full bg-emerald-600/90 px-2.5 py-1.5 text-[10px] font-bold tracking-wide text-white shadow-sm"
+				title="Reading from offline storage"
+			>
+				OFFLINE
+			</span>
+		{/if}
+
 		<button
 			type="button"
-			class="pointer-events-auto touch-manipulation flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[10px] text-[0.92em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark
+			class="pointer-events-auto touch-manipulation flex min-w-[72px] items-center justify-center gap-1 rounded-[14px] border px-3.5 py-2 text-[0.88em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark
 				? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70'
 				: 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
 			disabled={!nextChapter}
@@ -748,8 +792,7 @@ Nội dung:
 		>
 			<svg
 				viewBox="0 0 24 24"
-				width="20"
-				height="20"
+				width="18" height="18"
 				fill="none"
 				stroke="currentColor"
 				stroke-width="2"
@@ -766,9 +809,19 @@ Nội dung:
 		style="bottom: max(5.5rem, calc(env(safe-area-inset-bottom) + 4.5rem));"
 	>
 		{#if showTools}
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="flex flex-col items-center gap-2 rounded-2xl border p-2 shadow-xl
+				class="fixed inset-0 z-[490] bg-transparent"
+				onclick={() => (showTools = false)}
+				aria-hidden="true"
+			></div>
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="relative z-[510] flex flex-col items-center gap-2 rounded-2xl border p-2 shadow-xl
 					{isDark ? 'border-white/10 bg-zinc-900/95' : 'border-zinc-200 bg-white/95'}"
+				onclick={(e) => e.stopPropagation()}
 			>
 				<button
 					type="button"
@@ -875,7 +928,10 @@ Nội dung:
 					class="touch-manipulation h-8 w-11 rounded-lg border-0 text-[10px] text-center outline-none cursor-pointer appearance-none
 						{isDark ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-700'}"
 					value={targetLang}
-					onchange={(e) => changeLang((e.currentTarget as HTMLSelectElement).value)}
+					onchange={(e) => {
+						changeLang((e.currentTarget as HTMLSelectElement).value);
+						showTools = false;
+					}}
 					title="Target language"
 				>
 					{#each LANG_OPTIONS as lang}
@@ -901,7 +957,7 @@ Nội dung:
 		<!-- Main FAB toggle -->
 		<button
 			type="button"
-			class="touch-manipulation flex h-12 w-12 items-center justify-center rounded-full shadow-lg active:scale-95 transition select-none
+			class="relative z-[510] touch-manipulation flex h-12 w-12 items-center justify-center rounded-full shadow-lg active:scale-95 transition select-none
 				{showTools
 				? isDark
 					? 'bg-zinc-700 text-white'

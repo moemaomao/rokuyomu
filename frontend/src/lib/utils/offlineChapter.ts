@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
+import { chapterHref } from '$lib/utils/novelSources';
 
 const DB_NAME = 'rokuyomu-offline-chapters';
 const DB_VERSION = 1;
@@ -250,11 +251,11 @@ export async function getFirstOfflineChapterHref(
 	if (isNovel) {
 		const list = await listOfflineNovelChapters(sourceId, mangaId);
 		if (!list.length) return null;
-		return offlineNovelReaderHref(sourceId, list[0].chapterId);
+		return chapterHref(sourceId, list[0].chapterId);
 	}
 	const list = await listOfflineMangaChapters(sourceId, mangaId);
 	if (!list.length) return null;
-	return offlineMangaReaderHref(sourceId, list[0].chapterId);
+	return chapterHref(sourceId, list[0].chapterId);
 }
 
 export async function countOfflineChapters(
