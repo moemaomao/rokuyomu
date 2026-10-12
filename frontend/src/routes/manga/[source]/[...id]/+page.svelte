@@ -1048,7 +1048,7 @@
 				{#if synopsis}
 					<section
 						class="detail-card mt-4 rounded-[14px] border p-4 md:mt-5 md:p-5"
-						style="background: color-mix(in srgb, var(--accent) 14%, transparent) !important; background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important; background-image: none !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;"
+						style="background: color-mix(in srgb, var(--accent) 1%, transparent) !important; background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important; background-image: none !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;"
 					>
 						<h2 class="detail-title mb-3.5 text-lg font-semibold">Synopsis</h2>
 						<p class="detail-value text-[13px] leading-relaxed whitespace-pre-line">{synopsis}</p>
