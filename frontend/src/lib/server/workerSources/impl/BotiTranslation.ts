@@ -403,12 +403,12 @@ export class BotiTranslationSource extends BaseSource {
 					headers: { ...this.headers, Accept: 'application/json' }
 				});
 				if (!res.ok) continue;
-				const data = await res.json();
+				const data: any = await res.json();
 				const arr =
 					(Array.isArray(data) && data) ||
-					data?.data ||
-					data?.chapters ||
-					data?.results ||
+					(data && typeof data === 'object' && 'data' in data ? data.data : undefined) ||
+					(data && typeof data === 'object' && 'chapters' in data ? data.chapters : undefined) ||
+					(data && typeof data === 'object' && 'results' in data ? data.results : undefined) ||
 					[];
 				if (!Array.isArray(arr) || !arr.length) continue;
 				const out: Chapter[] = [];

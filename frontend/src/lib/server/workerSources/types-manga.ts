@@ -17,6 +17,7 @@ export interface Chapter {
 	date?: string;
 	cover?: string;
 	lang?: string;
+	isLocked?: boolean;
 }
 
 export interface MangaDetails extends Manga {

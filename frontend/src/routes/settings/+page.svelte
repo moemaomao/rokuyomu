@@ -17,7 +17,13 @@
 		Shield,
 		Moon,
 		Sun,
-		Monitor
+		Monitor,
+		Mic2,
+		Music2,
+		Star,
+		Snowflake,
+		Flame,
+		Leaf
 	} from 'lucide-svelte';
 	import { exportBackupToFile, importBackupFromFile } from '$lib/utils/backup';
 	import {
@@ -318,7 +324,7 @@
 
 		<div class="mb-5">
 			<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Theme</p>
-			<div class="flex flex-wrap gap-2">
+			<div class="mb-5 flex flex-wrap gap-2">
 				{#each [
 					{ id: 'dark' as ThemeMode, label: 'Dark', Icon: Moon },
 					{ id: 'light' as ThemeMode, label: 'Light', Icon: Sun },
@@ -335,6 +341,63 @@
 						<opt.Icon class="h-3.5 w-3.5" />
 						{opt.label}
 					</button>
+				{/each}
+			</div>
+
+			<p class="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Vocaloid theme</p>
+			<p class="mb-3 text-[11px] text-zinc-500">Left = Light · Right = Dark</p>
+			<div class="space-y-2">
+				{#each [
+					{ name: 'Miku', Icon: Mic2, light: 'miku-light' as ThemeMode, dark: 'miku' as ThemeMode, accent: '#00b7e0' },
+					{ name: 'Luka', Icon: Music2, light: 'luka' as ThemeMode, dark: 'luka-dark' as ThemeMode, accent: '#ff7ccc' },
+					{ name: 'Kagamine', Icon: Star, light: 'kagamine' as ThemeMode, dark: 'kagamine-dark' as ThemeMode, accent: '#f59e0b' },
+					{ name: 'KAITO', Icon: Snowflake, light: 'kaito-light' as ThemeMode, dark: 'kaito' as ThemeMode, accent: '#3b82f6' },
+					{ name: 'MEIKO', Icon: Flame, light: 'meiko-light' as ThemeMode, dark: 'meiko' as ThemeMode, accent: '#ef4444' },
+					{ name: 'GUMI', Icon: Leaf, light: 'gumi-light' as ThemeMode, dark: 'gumi' as ThemeMode, accent: '#22c55e' }
+				] as row}
+					{@const activeLight = prefs.theme === row.light}
+					{@const activeDark = prefs.theme === row.dark}
+					{@const active = activeLight || activeDark}
+					<div
+						class="flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition
+							{active
+								? 'border-violet-500/60 bg-violet-600/10'
+								: 'border-zinc-200 bg-zinc-50/80 dark:border-zinc-700 dark:bg-zinc-800/40'}"
+					>
+						<div class="flex min-w-0 items-center gap-2">
+							<row.Icon class="h-4 w-4 shrink-0" style="color: {row.accent}" />
+							<span class="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">{row.name}</span>
+						</div>
+						<!-- switch: left Light, right Dark -->
+						<div
+							class="relative flex h-8 w-[7.5rem] shrink-0 items-center rounded-full border border-zinc-300 bg-zinc-200/80 p-0.5 dark:border-zinc-600 dark:bg-zinc-900/80"
+							role="group"
+							aria-label="{row.name} light/dark"
+						>
+							<button
+								type="button"
+								onclick={() => updatePref('theme', row.light)}
+								class="z-10 flex h-full flex-1 items-center justify-center rounded-full text-[11px] font-bold transition
+									{activeLight ? 'text-white' : 'text-zinc-600 dark:text-zinc-400'}"
+							>
+								Light
+							</button>
+							<button
+								type="button"
+								onclick={() => updatePref('theme', row.dark)}
+								class="z-10 flex h-full flex-1 items-center justify-center rounded-full text-[11px] font-bold transition
+									{activeDark ? 'text-white' : 'text-zinc-600 dark:text-zinc-400'}"
+							>
+								Dark
+							</button>
+							<!-- sliding pill -->
+							<span
+								class="pointer-events-none absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-full shadow transition-all duration-200
+									{activeDark ? 'left-[calc(50%+1px)]' : activeLight ? 'left-0.5' : 'left-0.5 opacity-40'}"
+								style="background-color: {active ? row.accent : '#a1a1aa'}"
+							></span>
+						</div>
+					</div>
 				{/each}
 			</div>
 		</div>
