@@ -1046,7 +1046,10 @@
 				{/if}
 
 				{#if synopsis}
-					<section class="detail-card mt-4 rounded-[14px] border p-4 md:mt-5 md:p-5">
+					<section
+						class="detail-card mt-4 rounded-[14px] border p-4 md:mt-5 md:p-5"
+						style="background: color-mix(in srgb, var(--accent) 14%, transparent) !important; background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important; background-image: none !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;"
+					>
 						<h2 class="detail-title mb-3.5 text-lg font-semibold">Synopsis</h2>
 						<p class="detail-value text-[13px] leading-relaxed whitespace-pre-line">{synopsis}</p>
 					</section>
@@ -1513,8 +1516,13 @@
 		border-color: rgba(139, 92, 246, 0.55);
 	}
 	.detail-card {
-		background: rgba(26, 26, 46, 0.35);
-		border-color: rgba(255, 255, 255, 0.1);
+		background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+		background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+		background-image: none !important;
+		border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+		backdrop-filter: none !important;
+		-webkit-backdrop-filter: none !important;
+		box-shadow: none !important;
 	}
 	.detail-chapter-thumb {
 		background: rgba(0, 0, 0, 0.25);
@@ -1605,8 +1613,22 @@
 		color: #18181b;
 	}
 	:global(html.light) .detail-card {
-		background: rgba(184, 174, 174, 0.25);
-		border-color: rgba(0, 0, 0, 0.1);
+		background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+		background-color: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+		background-image: none !important;
+		border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+		backdrop-filter: none !important;
+		-webkit-backdrop-filter: none !important;
+		box-shadow: none !important;
+	}
+	:global(html.dark) .detail-card {
+		background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+		background-color: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+		background-image: none !important;
+		border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+		backdrop-filter: none !important;
+		-webkit-backdrop-filter: none !important;
+		box-shadow: none !important;
 	}
 	:global(html.light) .detail-chapter-thumb {
 		background: rgba(0, 0, 0, 0.06);
