@@ -71,8 +71,7 @@ html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-th
     color: var(--text-color);
 }
 
-html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="bg-violet"],
-html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="bg-purple"],
+/* Jangan timpa tombol purple di reader (bg-purple-600, bg-purple-800, dll) */
 html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="from-violet"],
 html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="via-violet"],
 html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="to-violet"],
@@ -561,4 +560,50 @@ section.detail-card {
 	-webkit-backdrop-filter: none !important;
 	border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
 	color: var(--text-color) !important;
+}
+
+html[data-theme] main .reader-menu-btn,
+html[data-theme] main .reader-nav-btn {
+	background-color: var(--accent) !important;
+	background-image: none !important;
+	color: #fff !important;
+}
+html[data-theme] main .reader-nav-btn {
+	background-color: color-mix(in srgb, var(--accent) 85%, transparent) !important;
+}
+html[data-theme] main .reader-gear {
+	color: var(--accent) !important;
+}
+
+html[data-theme] main button.fixed[class*="text-"] {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+html[data-theme] main .fixed.right-0.bottom-0.left-0 {
+	background-color: rgba(255, 255, 255, 0.75) !important;
+	border-color: rgba(0, 0, 0, 0.12) !important;
+}
+html.dark[data-theme] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="miku"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="luka-dark"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="kagamine-dark"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="kaito"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="meiko"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="gumi"] main .fixed.right-0.bottom-0.left-0 {
+	background-color: transparent !important;
+	border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html[data-theme="light"] section.detail-card,
+html[data-theme="dark"] section.detail-card,
+html[data-theme="system"] section.detail-card,
+html[data-theme="light"] .detail-card,
+html[data-theme="dark"] .detail-card,
+html[data-theme="system"] .detail-card {
+	background: rgba(0, 0, 0, 0.2) !important;
+	background-color: rgba(0, 0, 0, 0.2) !important;
+	background-image: none !important;
+	backdrop-filter: none !important;
+	box-shadow: none !important;
 }

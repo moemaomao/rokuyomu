@@ -753,8 +753,8 @@ onMount(() => {
 		<button
 			type="button"
 			class="pointer-events-auto touch-manipulation flex min-w-[72px] items-center justify-center gap-1 rounded-[14px] border px-3.5 py-2 text-[0.88em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark
-				? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70'
-				: 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
+				? 'reader-nav-btn reader-nav-btn-dark'
+				: 'reader-nav-btn reader-nav-btn-light'}"
 			disabled={!prevChapter}
 			aria-label="Previous chapter"
 			onclick={() => goChapter(prevChapter)}
@@ -784,8 +784,8 @@ onMount(() => {
 		<button
 			type="button"
 			class="pointer-events-auto touch-manipulation flex min-w-[72px] items-center justify-center gap-1 rounded-[14px] border px-3.5 py-2 text-[0.88em] transition disabled:cursor-not-allowed disabled:opacity-30 {isDark
-				? 'border-white/15 bg-purple-600/50 text-white/85 active:bg-purple-600/70'
-				: 'border-zinc-300 bg-purple-600/85 text-white active:bg-purple-600'}"
+				? 'reader-nav-btn reader-nav-btn-dark'
+				: 'reader-nav-btn reader-nav-btn-light'}"
 			disabled={!nextChapter}
 			aria-label="Next chapter"
 			onclick={() => goChapter(nextChapter)}
@@ -856,7 +856,7 @@ onMount(() => {
 					type="button"
 					class="touch-manipulation flex h-11 w-11 items-center justify-center rounded-full active:scale-95 select-none
 						{autoScroll
-							? 'bg-purple-600/30 text-purple-300'
+							? 'reader-chapter-active'
 							: isDark
 								? 'text-purple-400 active:bg-white/10'
 								: 'text-purple-600 active:bg-zinc-100'}"
@@ -962,7 +962,7 @@ onMount(() => {
 				? isDark
 					? 'bg-zinc-700 text-white'
 					: 'bg-zinc-300 text-zinc-800'
-				: 'bg-purple-600 text-white'}"
+				: 'reader-fab text-white'}"
 			title={showTools ? 'Tutup menu' : 'Menu tools'}
 			onclick={() => (showTools = !showTools)}
 		>
@@ -999,7 +999,7 @@ onMount(() => {
 					: 'bg-white'}"
 			>
 				<div
-					class="h-10 w-10 animate-spin rounded-full border-4 border-purple-500 border-t-transparent"
+					class="reader-spinner h-10 w-10 animate-spin rounded-full border-4 border-t-transparent"
 				></div>
 				<p class="text-sm font-medium">Translating chapter...</p>
 				<p class="text-xs opacity-60">
@@ -1078,7 +1078,7 @@ onMount(() => {
 									aria-selected={targetLang === lang.code}
 									class="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm text-left transition
 										{targetLang === lang.code
-										? 'bg-violet-600 text-white font-medium'
+										? 'reader-menu-btn text-white font-medium'
 										: isDark
 											? 'text-zinc-200 hover:bg-white/5'
 											: 'text-zinc-800 hover:bg-zinc-100'}"
@@ -1115,7 +1115,7 @@ onMount(() => {
 				<div class="mt-4 flex flex-wrap gap-2">
 					<button
 						type="button"
-						class="touch-manipulation flex-1 min-w-[120px] py-2.5 rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-500 active:scale-[0.98] transition shadow-lg shadow-violet-600/20"
+						class="reader-menu-btn touch-manipulation flex-1 min-w-[120px] py-2.5 rounded-xl text-white font-medium active:scale-[0.98] transition"
 						onclick={confirmTranslate}
 					>
 						Translate
@@ -1176,7 +1176,7 @@ onMount(() => {
 							type="button"
 							class="touch-manipulation py-2 px-3 rounded-lg border text-sm capitalize transition {fontFamily ===
 							f
-								? 'border-purple-500 bg-purple-500/20 text-purple-400 font-medium'
+								? 'reader-chapter-active font-medium'
 								: isDark
 									? 'border-white/15 active:bg-white/5'
 									: 'border-zinc-300 active:bg-zinc-50'}"
@@ -1195,7 +1195,7 @@ onMount(() => {
 					min="14"
 					max="32"
 					bind:value={fontSize}
-					class="w-full mb-4 accent-purple-600"
+					class="reader-accent-input w-full mb-4"
 				/>
 
 				<label class="block text-sm mb-1 opacity-70" for="line-height">
@@ -1208,7 +1208,7 @@ onMount(() => {
 					max="2.4"
 					step="0.1"
 					bind:value={lineHeight}
-					class="w-full mb-4 accent-purple-600"
+					class="reader-accent-input w-full mb-4"
 				/>
 
 				<label class="block text-sm mb-1 opacity-70" for="max-width">Max width: {maxWidth}px</label>
@@ -1219,7 +1219,7 @@ onMount(() => {
 					max="960"
 					step="20"
 					bind:value={maxWidth}
-					class="w-full mb-4 accent-purple-600"
+					class="reader-accent-input w-full mb-4"
 				/>
 
 				<label class="block text-sm mb-1 opacity-70" for="scroll-speed">
@@ -1231,7 +1231,7 @@ onMount(() => {
 					min="10"
 					max="120"
 					bind:value={scrollSpeed}
-					class="w-full mb-4 accent-purple-600"
+					class="reader-accent-input w-full mb-4"
 				/>
 
 				<label class="block text-sm mb-1 opacity-70" for="tts-rate">
@@ -1244,7 +1244,7 @@ onMount(() => {
 					max="2"
 					step="0.1"
 					bind:value={ttsRate}
-					class="w-full mb-4 accent-purple-600"
+					class="reader-accent-input w-full mb-4"
 				/>
 
 				<div class="relative mb-4">
@@ -1277,7 +1277,7 @@ onMount(() => {
 							{:else}
 								{#each Object.entries(groupedVoices()) as [lang, langVoices]}
 									<div
-										class="px-3 py-1.5 text-xs font-bold uppercase tracking-wider opacity-50 bg-purple-500/10 rounded-md my-1"
+										class="reader-section-label px-3 py-1.5 text-xs font-bold uppercase tracking-wider opacity-50 rounded-md my-1"
 									>
 										🌍 Language: {lang}
 									</div>
@@ -1286,7 +1286,7 @@ onMount(() => {
 											type="button"
 											class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg text-left transition {ttsVoiceURI ===
 											v.voiceURI
-												? 'bg-purple-600 text-white font-medium'
+												? 'reader-menu-btn text-white font-medium'
 												: isDark
 													? 'hover:bg-white/5'
 													: 'hover:bg-zinc-100'}"
@@ -1328,7 +1328,7 @@ onMount(() => {
 				</div>
 				<button
 					type="button"
-					class="touch-manipulation w-full py-2.5 rounded-xl bg-purple-600 text-white font-medium active:bg-purple-500 transition shadow-lg shadow-purple-600/20"
+					class="reader-menu-btn touch-manipulation w-full py-2.5 rounded-xl text-white font-medium transition"
 					onclick={() => (showSettings = false)}
 				>
 					Done
@@ -1350,5 +1350,53 @@ onMount(() => {
 	:global(.touch-manipulation) {
 		touch-action: manipulation;
 		-webkit-tap-highlight-color: transparent;
+	}
+
+	.reader-nav-btn {
+		background-color: color-mix(in srgb, var(--accent, #9333ea) 85%, transparent) !important;
+		border-color: color-mix(in srgb, var(--accent, #9333ea) 40%, transparent) !important;
+		color: #fff !important;
+	}
+	.reader-nav-btn:hover:not(:disabled),
+	.reader-nav-btn:active:not(:disabled) {
+		background-color: var(--accent, #9333ea) !important;
+	}
+	.reader-nav-btn-dark {
+		background-color: color-mix(in srgb, var(--accent, #9333ea) 50%, transparent) !important;
+		border-color: rgba(255, 255, 255, 0.15) !important;
+		color: rgba(255, 255, 255, 0.9) !important;
+	}
+	.reader-nav-btn-dark:hover:not(:disabled),
+	.reader-nav-btn-dark:active:not(:disabled) {
+		background-color: color-mix(in srgb, var(--accent, #9333ea) 70%, transparent) !important;
+	}
+	.reader-menu-btn {
+		background-color: var(--accent, #7c3aed) !important;
+		color: #fff !important;
+		border-color: transparent !important;
+		box-shadow: 0 4px 14px color-mix(in srgb, var(--accent, #7c3aed) 25%, transparent);
+	}
+	.reader-menu-btn:hover,
+	.reader-menu-btn:active {
+		filter: brightness(1.08);
+	}
+	.reader-fab {
+		background-color: var(--accent, #9333ea) !important;
+		color: #fff !important;
+	}
+	.reader-chapter-active {
+		background-color: color-mix(in srgb, var(--accent, #a855f7) 25%, transparent) !important;
+		border-color: var(--accent, #a855f7) !important;
+		color: var(--accent, #a855f7) !important;
+	}
+	.reader-link-dark { color: color-mix(in srgb, var(--accent, #c4b5fd) 90%, white) !important; }
+	.reader-link-light { color: var(--accent, #7c3aed) !important; }
+	.reader-accent-input { accent-color: var(--accent, #9333ea); }
+	.reader-spinner {
+		border-color: var(--accent, #8b5cf6);
+		border-top-color: transparent;
+	}
+	.reader-section-label {
+		background-color: color-mix(in srgb, var(--accent, #a855f7) 12%, transparent) !important;
 	}
 </style>

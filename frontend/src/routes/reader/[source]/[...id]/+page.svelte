@@ -526,7 +526,7 @@ $effect(() => {
 					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
 			>
 				<div
-					class="h-9 w-9 animate-spin rounded-full border-2 border-violet-500 border-t-transparent"
+					class="reader-spinner h-9 w-9 animate-spin rounded-full border-2 border-t-transparent"
 				></div>
 				<p class="text-sm">Loading chapter…</p>
 			</div>
@@ -599,8 +599,8 @@ $effect(() => {
 			title="Previous chapter"
 			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
 				{isDarkMode
-					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
-					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
+					? 'reader-nav-btn reader-nav-btn-dark'
+					: 'reader-nav-btn reader-nav-btn-light'}"
 		>
 			<svg
 				viewBox="0 0 24 24"
@@ -632,8 +632,8 @@ $effect(() => {
 			title="Next chapter"
 			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
 				{isDarkMode
-					? 'border-white/15 bg-purple-600/50 text-white/85 hover:bg-purple-600/70'
-					: 'border-zinc-300 bg-purple-600/85 text-white hover:bg-purple-600'}"
+					? 'reader-nav-btn reader-nav-btn-dark'
+					: 'reader-nav-btn reader-nav-btn-light'}"
 		>
 			<svg
 				viewBox="0 0 24 24"
@@ -683,7 +683,7 @@ $effect(() => {
 				isMenuOpen = !isMenuOpen;
 				if (!isMenuOpen) showChapterList = false;
 			}}
-			class="flex h-[42px] w-[42px] items-center justify-center rounded-full border-0 bg-transparent text-[21px] text-purple-500 transition hover:rotate-90"
+			class="reader-gear flex h-[42px] w-[42px] items-center justify-center rounded-full border-0 bg-transparent text-[21px] transition hover:rotate-90"
 			title="Settings"
 		>
 			<Settings class="h-6 w-6" strokeWidth={2} />
@@ -698,13 +698,13 @@ $effect(() => {
 			>
 				<button
 					onclick={toggleMode}
-					class="w-full rounded-lg border-0 bg-purple-800 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition hover:bg-purple-700"
+					class="reader-menu-btn w-full rounded-lg border-0 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition"
 				>
 					Mode: {currentMode === 'webtoon' ? 'Webtoon' : 'Page'}
 				</button>
 
 				<select
-					class="w-full cursor-pointer rounded-lg border-0 bg-purple-800 px-3 py-2.5 text-[0.87em] text-white outline-none"
+					class="reader-menu-btn w-full cursor-pointer rounded-lg border-0 px-3 py-2.5 text-[0.87em] text-white outline-none"
 					value={currentPageIndex}
 					onchange={onPageSelect}
 				>
@@ -717,7 +717,7 @@ $effect(() => {
 
 				<button
 					onclick={() => (showChapterList = !showChapterList)}
-					class="w-full rounded-lg border-0 bg-purple-800 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition hover:bg-purple-700"
+					class="reader-menu-btn w-full rounded-lg border-0 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition"
 				>
 					Chapter List
 				</button>
@@ -735,7 +735,7 @@ $effect(() => {
 						? 'border-zinc-600/80 text-white hover:bg-white/10'
 						: 'border-zinc-200 text-zinc-800 hover:bg-zinc-200/80'}
 					{chapter.id === chapterId || chapter.id === currentChapter?.id
-						? 'bg-purple-500/25 font-medium'
+						? 'reader-chapter-active font-medium'
 						: ''}"
 			>
 				{chapter.title}
@@ -761,7 +761,7 @@ $effect(() => {
 						type="checkbox"
 						checked={dataSaver}
 						onchange={toggleDataSaver}
-						class="h-4 w-4 cursor-pointer accent-purple-600"
+						class="reader-accent-input h-4 w-4 cursor-pointer"
 					/>
 				</div>
 
@@ -782,7 +782,7 @@ $effect(() => {
 							step="100"
 							value={imageQuality}
 							oninput={updateQuality}
-							class="w-full cursor-pointer accent-purple-600"
+							class="reader-accent-input w-full cursor-pointer"
 						/>
 					</div>
 				{/if}
@@ -791,3 +791,43 @@ $effect(() => {
 	</div>
   </div>
 </div>
+
+<style>
+	.reader-nav-btn {
+		background-color: color-mix(in srgb, var(--accent, #9333ea) 85%, transparent) !important;
+		border-color: color-mix(in srgb, var(--accent, #9333ea) 40%, transparent) !important;
+		color: #fff !important;
+	}
+	.reader-nav-btn:hover:not(:disabled) {
+		background-color: var(--accent, #9333ea) !important;
+		filter: brightness(1.05);
+	}
+	.reader-nav-btn-dark {
+		background-color: color-mix(in srgb, var(--accent, #9333ea) 50%, transparent) !important;
+		border-color: rgba(255, 255, 255, 0.15) !important;
+		color: rgba(255, 255, 255, 0.9) !important;
+	}
+	.reader-nav-btn-dark:hover:not(:disabled) {
+		background-color: color-mix(in srgb, var(--accent, #9333ea) 70%, transparent) !important;
+	}
+	.reader-menu-btn {
+		background-color: var(--accent, #6b21a8) !important;
+		color: #fff !important;
+	}
+	.reader-menu-btn:hover {
+		filter: brightness(1.1);
+	}
+	.reader-gear {
+		color: var(--accent, #a855f7) !important;
+	}
+	.reader-chapter-active {
+		background-color: color-mix(in srgb, var(--accent, #a855f7) 25%, transparent) !important;
+	}
+	.reader-accent-input {
+		accent-color: var(--accent, #9333ea);
+	}
+	.reader-spinner {
+		border-color: var(--accent, #8b5cf6);
+		border-top-color: transparent;
+	}
+</style>
