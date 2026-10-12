@@ -312,6 +312,7 @@ html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-th
     filter: brightness(1.08);
 }
 
+/* Jump-to-page input */
 html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main input[type="number"] {
     background-color: var(--bg-card) !important;
     border-color: var(--border-color) !important;
@@ -363,4 +364,171 @@ html[data-theme] main [class*="from-black"] .text-white,
 html[data-theme] main [class*="from-black"] span,
 html[data-theme] main [class*="bg-gradient"] .text-white {
     color: #fff !important;
+}
+
+html[data-theme="miku-light"] main section,
+html[data-theme="luka"] main section,
+html[data-theme="kagamine"] main section,
+html[data-theme="kaito-light"] main section,
+html[data-theme="meiko-light"] main section,
+html[data-theme="gumi-light"] main section,
+html[data-theme="miku-light"] main [class*="rounded-2xl"],
+html[data-theme="luka"] main [class*="rounded-2xl"],
+html[data-theme="kagamine"] main [class*="rounded-2xl"],
+html[data-theme="kaito-light"] main [class*="rounded-2xl"],
+html[data-theme="meiko-light"] main [class*="rounded-2xl"],
+html[data-theme="gumi-light"] main [class*="rounded-2xl"],
+html[data-theme="miku-light"] main [class*="rounded-xl"],
+html[data-theme="luka"] main [class*="rounded-xl"],
+html[data-theme="kagamine"] main [class*="rounded-xl"],
+html[data-theme="kaito-light"] main [class*="rounded-xl"],
+html[data-theme="meiko-light"] main [class*="rounded-xl"],
+html[data-theme="gumi-light"] main [class*="rounded-xl"] {
+    background-color: color-mix(in srgb, var(--bg-subtle) 55%, transparent) !important;
+    border-color: color-mix(in srgb, var(--border-color) 80%, transparent) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--text-color) !important;
+}
+
+html[data-theme="miku-light"] main button.rounded-xl,
+html[data-theme="luka"] main button.rounded-xl,
+html[data-theme="kagamine"] main button.rounded-xl,
+html[data-theme="kaito-light"] main button.rounded-xl,
+html[data-theme="meiko-light"] main button.rounded-xl,
+html[data-theme="gumi-light"] main button.rounded-xl {
+    background-color: color-mix(in srgb, var(--bg-subtle) 70%, transparent) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme="miku"] main section,
+html[data-theme="luka-dark"] main section,
+html[data-theme="kagamine-dark"] main section,
+html[data-theme="kaito"] main section,
+html[data-theme="meiko"] main section,
+html[data-theme="gumi"] main section,
+html[data-theme="miku"] main [class*="rounded-2xl"],
+html[data-theme="luka-dark"] main [class*="rounded-2xl"],
+html[data-theme="kagamine-dark"] main [class*="rounded-2xl"],
+html[data-theme="kaito"] main [class*="rounded-2xl"],
+html[data-theme="meiko"] main [class*="rounded-2xl"],
+html[data-theme="gumi"] main [class*="rounded-2xl"] {
+    background-color: color-mix(in srgb, var(--bg-card) 75%, transparent) !important;
+    border-color: var(--border-color) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+html.light[data-theme="miku-light"] .detail-container,
+html.light[data-theme="luka"] .detail-container,
+html.light[data-theme="kagamine"] .detail-container,
+html.light[data-theme="kaito-light"] .detail-container,
+html.light[data-theme="meiko-light"] .detail-container,
+html.light[data-theme="gumi-light"] .detail-container,
+html[data-theme="miku-light"] .detail-container,
+html[data-theme="luka"] .detail-container,
+html[data-theme="kagamine"] .detail-container,
+html[data-theme="kaito-light"] .detail-container,
+html[data-theme="meiko-light"] .detail-container,
+html[data-theme="gumi-light"] .detail-container {
+    background: transparent !important;
+    border-color: var(--border-color) !important;
+    box-shadow: none !important;
+}
+
+html.light[data-theme="miku-light"] .detail-overlay,
+html.light[data-theme="luka"] .detail-overlay,
+html.light[data-theme="kagamine"] .detail-overlay,
+html.light[data-theme="kaito-light"] .detail-overlay,
+html.light[data-theme="meiko-light"] .detail-overlay,
+html.light[data-theme="gumi-light"] .detail-overlay,
+html[data-theme="miku-light"] .detail-overlay,
+html[data-theme="luka"] .detail-overlay,
+html[data-theme="kagamine"] .detail-overlay,
+html[data-theme="kaito-light"] .detail-overlay,
+html[data-theme="meiko-light"] .detail-overlay,
+html[data-theme="gumi-light"] .detail-overlay {
+    background: color-mix(in srgb, var(--page-bg) 70%, transparent) !important;
+}
+
+html.light[data-theme="miku-light"] .detail-card,
+html.light[data-theme="luka"] .detail-card,
+html.light[data-theme="kagamine"] .detail-card,
+html.light[data-theme="kaito-light"] .detail-card,
+html.light[data-theme="meiko-light"] .detail-card,
+html.light[data-theme="gumi-light"] .detail-card,
+html[data-theme="miku-light"] section.detail-card,
+html[data-theme="luka"] section.detail-card,
+html[data-theme="kagamine"] section.detail-card,
+html[data-theme="kaito-light"] section.detail-card,
+html[data-theme="meiko-light"] section.detail-card,
+html[data-theme="gumi-light"] section.detail-card,
+html[data-theme="miku-light"] .detail-card,
+html[data-theme="luka"] .detail-card,
+html[data-theme="kagamine"] .detail-card,
+html[data-theme="kaito-light"] .detail-card,
+html[data-theme="meiko-light"] .detail-card,
+html[data-theme="gumi-light"] .detail-card {
+    background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    color: var(--text-color) !important;
+    box-shadow: none !important;
+}
+
+html.light[data-theme="miku-light"] .detail-title,
+html.light[data-theme="luka"] .detail-title,
+html.light[data-theme="kagamine"] .detail-title,
+html.light[data-theme="kaito-light"] .detail-title,
+html.light[data-theme="meiko-light"] .detail-title,
+html.light[data-theme="gumi-light"] .detail-title,
+html[data-theme="miku-light"] .detail-title,
+html[data-theme="luka"] .detail-title,
+html[data-theme="kagamine"] .detail-title,
+html[data-theme="kaito-light"] .detail-title,
+html[data-theme="meiko-light"] .detail-title,
+html[data-theme="gumi-light"] .detail-title,
+html[data-theme="miku-light"] .detail-value,
+html[data-theme="luka"] .detail-value,
+html[data-theme="kagamine"] .detail-value,
+html[data-theme="kaito-light"] .detail-value,
+html[data-theme="meiko-light"] .detail-value,
+html[data-theme="gumi-light"] .detail-value {
+    color: var(--text-color) !important;
+}
+
+/* Dark vocaloid detail */
+html.dark[data-theme="miku"] .detail-container,
+html.dark[data-theme="luka-dark"] .detail-container,
+html.dark[data-theme="kagamine-dark"] .detail-container,
+html.dark[data-theme="kaito"] .detail-container,
+html.dark[data-theme="meiko"] .detail-container,
+html.dark[data-theme="gumi"] .detail-container,
+html[data-theme="miku"] .detail-container,
+html[data-theme="luka-dark"] .detail-container,
+html[data-theme="kagamine-dark"] .detail-container,
+html[data-theme="kaito"] .detail-container,
+html[data-theme="meiko"] .detail-container,
+html[data-theme="gumi"] .detail-container {
+    background: color-mix(in srgb, var(--page-bg) 40%, transparent) !important;
+    border-color: var(--border-color) !important;
+}
+html.dark[data-theme="miku"] .detail-card,
+html.dark[data-theme="luka-dark"] .detail-card,
+html.dark[data-theme="kagamine-dark"] .detail-card,
+html.dark[data-theme="kaito"] .detail-card,
+html.dark[data-theme="meiko"] .detail-card,
+html.dark[data-theme="gumi"] .detail-card,
+html[data-theme="miku"] .detail-card,
+html[data-theme="luka-dark"] .detail-card,
+html[data-theme="kagamine-dark"] .detail-card,
+html[data-theme="kaito"] .detail-card,
+html[data-theme="meiko"] .detail-card,
+html[data-theme="gumi"] .detail-card {
+    background: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
+    backdrop-filter: blur(12px) !important;
+    color: var(--text-color) !important;
 }
