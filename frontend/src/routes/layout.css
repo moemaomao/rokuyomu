@@ -82,7 +82,6 @@ html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-th
     background-image: none !important;
 }
 
-/* Settings cards etc */
 html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main section,
 html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="rounded-2xl"] {
     background-color: var(--bg-card) !important;
@@ -90,7 +89,6 @@ html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-th
     color: var(--text-color) !important;
 }
 
-/* Accent */
 html[data-theme] .border-violet-500 { border-color: var(--accent) !important; }
 html[data-theme] .bg-violet-600\/15,
 html[data-theme] .bg-violet-600\/10 {
@@ -101,33 +99,6 @@ html[data-theme] .text-violet-300,
 html[data-theme] .text-violet-400,
 html[data-theme] .text-violet-600 { color: var(--accent) !important; }
 html[data-theme] .bg-violet-600 { background-color: var(--accent) !important; }
-
-html[data-theme="miku-light"] .text-white,
-html[data-theme="luka"] .text-white,
-html[data-theme="kagamine"] .text-white,
-html[data-theme="kaito-light"] .text-white,
-html[data-theme="meiko-light"] .text-white,
-html[data-theme="gumi-light"] .text-white,
-html[data-theme="miku-light"] .text-zinc-100,
-html[data-theme="luka"] .text-zinc-100,
-html[data-theme="kagamine"] .text-zinc-100,
-html[data-theme="kaito-light"] .text-zinc-100,
-html[data-theme="meiko-light"] .text-zinc-100,
-html[data-theme="gumi-light"] .text-zinc-100,
-html[data-theme="miku-light"] .text-zinc-200,
-html[data-theme="luka"] .text-zinc-200,
-html[data-theme="kagamine"] .text-zinc-200,
-html[data-theme="kaito-light"] .text-zinc-200,
-html[data-theme="meiko-light"] .text-zinc-200,
-html[data-theme="gumi-light"] .text-zinc-200,
-html[data-theme="miku-light"] .text-zinc-300,
-html[data-theme="luka"] .text-zinc-300,
-html[data-theme="kagamine"] .text-zinc-300,
-html[data-theme="kaito-light"] .text-zinc-300,
-html[data-theme="meiko-light"] .text-zinc-300,
-html[data-theme="gumi-light"] .text-zinc-300 {
-    color: var(--text-color) !important;
-}
 
 html[data-theme="miku"] .text-black,
 html[data-theme="luka-dark"] .text-black,
@@ -154,8 +125,6 @@ html[data-theme] [class*="reader"] .text-white,
 html[data-theme] [class*="Reader"] .text-white {
     color: inherit;
 }
-
-/* ===== Character themes ===== */
 
 /* Miku Dark */
 html[data-theme="miku"] {
@@ -291,6 +260,107 @@ html[data-theme] header [class*="dropdown"] *,
 html[data-theme] header [class*="popover"] *,
 html[data-theme] header [class*="panel"] *,
 html[data-theme] header [class*="menu"] * {
-    /* reset max-width dari rule badge */
     max-width: none;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer {
+    background-color: var(--page-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-muted) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer p,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer a,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer span {
+    color: var(--text-muted) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer .font-medium,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer p.font-medium {
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer a:hover {
+    color: var(--accent) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside + * [class*="history"],
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) [class*="History"] {
+    background-color: var(--sidebar-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main .border-t {
+    border-color: var(--border-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.rounded-xl.border {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.rounded-xl.border:hover:not(:disabled) {
+    background-color: var(--hover-bg) !important;
+    border-color: var(--accent) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600 {
+    background-color: var(--accent) !important;
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent) !important;
+    color: #fff !important;
+    border-color: transparent !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main input[type="number"] {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main input[type="number"]:focus {
+    border-color: var(--accent) !important;
+    --tw-ring-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main .text-xs.font-medium {
+    color: var(--text-muted) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main span.text-xs.font-semibold {
+    color: var(--text-muted) !important;
+}
+
+html[data-theme="miku-light"] aside .text-white,
+html[data-theme="luka"] aside .text-white,
+html[data-theme="kagamine"] aside .text-white,
+html[data-theme="kaito-light"] aside .text-white,
+html[data-theme="meiko-light"] aside .text-white,
+html[data-theme="gumi-light"] aside .text-white,
+html[data-theme="miku-light"] header .text-white,
+html[data-theme="luka"] header .text-white,
+html[data-theme="kagamine"] header .text-white,
+html[data-theme="kaito-light"] header .text-white,
+html[data-theme="meiko-light"] header .text-white,
+html[data-theme="gumi-light"] header .text-white,
+html[data-theme="miku-light"] aside .text-zinc-100,
+html[data-theme="luka"] aside .text-zinc-100,
+html[data-theme="kagamine"] aside .text-zinc-100,
+html[data-theme="kaito-light"] aside .text-zinc-100,
+html[data-theme="meiko-light"] aside .text-zinc-100,
+html[data-theme="gumi-light"] aside .text-zinc-100,
+html[data-theme="miku-light"] header .text-zinc-100,
+html[data-theme="luka"] header .text-zinc-100,
+html[data-theme="kagamine"] header .text-zinc-100,
+html[data-theme="kaito-light"] header .text-zinc-100,
+html[data-theme="meiko-light"] header .text-zinc-100,
+html[data-theme="gumi-light"] header .text-zinc-100 {
+    color: var(--text-color) !important;
+}
+
+html[data-theme] main a .text-white,
+html[data-theme] main [class*="from-black"] .text-white,
+html[data-theme] main [class*="from-black"] span,
+html[data-theme] main [class*="bg-gradient"] .text-white {
+    color: #fff !important;
 }
