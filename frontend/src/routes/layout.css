@@ -4,12 +4,12 @@
 :root, html.light {
     --bg-card: #ffffff; --text-color: #18181b; --border-color: #e4e4e7;
     --bg-subtle: #f4f4f5; --text-muted: #71717a; --hover-bg: #f4f4f5;
-    --accent: #7c3aed; --page-bg: #ffffff; --sidebar-bg: #fafafa;
+    --accent: #706683; --page-bg: #ffffff; --sidebar-bg: #fafafa;
 }
 html.dark {
     --bg-card: #18181b; --text-color: #f4f4f5; --border-color: #27272a;
     --bg-subtle: #27272a; --text-muted: #a1a1aa; --hover-bg: #27272a;
-    --accent: #8b5cf6; --page-bg: #09090b; --sidebar-bg: #0c0a14;
+    --accent: #a57eff; --page-bg: #09090b; --sidebar-bg: #0c0a14;
 }
 body { background-color: inherit; color: inherit; }
 ::-webkit-scrollbar { width: 6px; background-color: #111; }
