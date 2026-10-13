@@ -309,26 +309,27 @@ export abstract class MadaraSource extends BaseSource {
 		$li: cheerio.Cheerio<any>
 	): boolean {
 		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
-		if (/\bfree-chap\b|\bfree\b/.test(cls) && !/premium|locked|vip|paywall|paid/.test(cls)) {
-			return false;
-		}
-		if (/premium|locked|vip|paywall|paid/.test(cls)) return true;
+
+		if (/\bfree-chap\b/.test(cls)) return false;
+		if ($li.find('span.coin.free, .coin.free').length && !/\bpremium\b/.test(cls)) return false;
+
+		if (/\bpremium\b|\blocked\b|\bvip\b|paywall|\bpaid\b/.test(cls)) return true;
 		if (/\bcoin-\d+\b/.test(cls)) return true;
 		if (
 			$li.find(
-				'.premium, .lock, .locked, .c-icon-lock, [data-coin], .premium-star, .coin:not(.free), .fa-lock'
+				'.premium, .lock, .locked, .c-icon-lock, [data-coin], .premium-star, .fa-lock, .fas.fa-lock, span.coin:not(.free)'
 			).length
 		)
 			return true;
 		const target = ($a.attr('data-bs-target') || $a.attr('data-target') || '').toLowerCase();
 		if (target.includes('lock') || target.includes('premium')) return true;
 		if ($a.attr('data-coin') || $li.attr('data-coin')) return true;
-		
 		const href = ($a.attr('href') || '').trim();
-		if (href === '#' || href === '' || href.toLowerCase().startsWith('javascript:')) {
-			if (/premium|lock|coin/i.test($li.text()) || $li.find('.fa-lock, .fas.fa-lock').length)
-				return true;
-		}
+		if (
+			(href === '#' || href === '' || href.toLowerCase().startsWith('javascript:')) &&
+			(/premium|lock|coin/i.test($li.text()) || $li.find('.fa-lock').length > 0)
+		)
+			return true;
 		return false;
 	}
 
@@ -347,7 +348,10 @@ export abstract class MadaraSource extends BaseSource {
 			let id: string;
 			if (href === '#' || href.toLowerCase().startsWith('javascript:')) {
 				const n = this.parseChapterNumber(rawText);
-				id = n > 0 ? `${this.seriesPath}/__locked__/chapter-${n}` : `${this.seriesPath}/__locked__/${encodeURIComponent(rawText || 'x')}`;
+				id =
+					n > 0
+						? `${this.seriesPath}/__locked__/chapter-${n}`
+						: `${this.seriesPath}/__locked__/${encodeURIComponent(rawText || 'x')}`;
 			} else {
 				id = this.cleanId(href);
 			}
@@ -365,6 +369,7 @@ export abstract class MadaraSource extends BaseSource {
 					.trim() ||
 				$li.find('time').attr('datetime') ||
 				undefined;
+
 			chapters.push({
 				id,
 				title,
@@ -467,11 +472,12 @@ export abstract class MadaraSource extends BaseSource {
 
 			const push = (src?: string | null) => {
 				if (!src) return;
-				const cleaned = src.replace(/\s+/g, ' ').trim();
+				const cleaned = String(src).replace(/\s+/g, ' ').trim();
 				if (!cleaned || cleaned.startsWith('data:')) return;
 				const url = this.absUrl(cleaned.split(/\s+/)[0].split('?')[0]);
 				if (!url || seen.has(url)) return;
-				if (/logo|icon|avatar|emoji|spinner|loading|favicon|placeholder/i.test(url)) return;
+				if (/logo|icon|avatar|emoji|spinner|loading|favicon|placeholder|dflazy/i.test(url))
+					return;
 				seen.add(url);
 				pages.push(url);
 			};
