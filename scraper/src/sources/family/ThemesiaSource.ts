@@ -98,11 +98,58 @@ export abstract class ThemesiaSource extends BaseSource {
 	}
 
 	protected cardSelector =
-		'div.listupd div.bsx, .postbody div.bsx, div.bsx, .page-item-detail, .bs';
+		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .epic-card';
 	protected chapterListSelector =
 		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a';
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
+
+	/** Badge chapter: .epxs/.epx/.bigor/.nchapter + href/HTML fallback */
+	protected extractLatestChapter(
+		$: cheerio.CheerioAPI,
+		$el: cheerio.Cheerio<any>
+	): string | undefined {
+		const selectors = [
+			'.epxs',
+			'.epx',
+			'.bigor .epxs',
+			'.bigor .epx',
+			'.adds .epx',
+			'.adds .epxs',
+			'.fivchap',
+			'.chfiv',
+			'.nchapter',
+			'.forchap',
+			'.num-chapter',
+			'.lchapter'
+		];
+		for (const sel of selectors) {
+			const t = $el.find(sel).first().text().replace(/\s+/g, ' ').trim();
+			if (!t) continue;
+			const n = this.parseChapterNumber(t);
+			if (n > 0) return String(n);
+			const m =
+				t.match(/(?:ch(?:apter)?\.?|ep(?:isode)?\.?)\s*(\d+(?:\.\d+)?)/i) ||
+				t.match(/\b(\d{1,4}(?:\.\d+)?)\b/);
+			if (m?.[1]) return m[1];
+		}
+
+		const chHref =
+			$el.find('a[href*="-chapter-"], a[href*="-ch-"], a[href*="-c"]').attr('href') ||
+			'';
+		if (chHref) {
+			const n = this.parseChapterNumber('', this.cleanId(chHref));
+			if (n > 0) return String(n);
+		}
+
+		const html = $.html($el) || '';
+		const em =
+			html.match(/class=["'][^"']*epxs?[^"']*["'][^>]*>\s*(?:Chapter\s*)?(\d+(?:\.\d+)?)/i) ||
+			html.match(/(?:Chapter|Ch\.?)\s*(\d+(?:\.\d+)?)/i);
+		if (em?.[1]) return em[1];
+
+		return undefined;
+	}
 
 	protected parseCards($: cheerio.CheerioAPI): Manga[] {
 		const res: Manga[] = [];
@@ -110,16 +157,45 @@ export abstract class ThemesiaSource extends BaseSource {
 
 		$(this.cardSelector).each((_, el) => {
 			const $el = $(el);
-			const $a = $el.find('a').first();
+
+			// prioritaskan link series (bukan chapter)
+			let $a = $el
+				.find(`a[href*="${this.seriesPath}/"]`)
+				.filter((_, a) => {
+					const h = ($(a).attr('href') || '').split('?')[0];
+					const re = new RegExp(
+						`${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+\\/?$`,
+						'i'
+					);
+					return re.test(h) && !/chapter/i.test(h);
+				})
+				.first();
+
+			if (!$a.length) {
+				$a = $el
+					.find('a')
+					.filter((_, a) => {
+						const h = ($(a).attr('href') || '').split('?')[0];
+						return (
+							!!h &&
+							!/\/(page|genre|tag|author|project)\//i.test(h) &&
+							!/chapter/i.test(h)
+						);
+					})
+					.first();
+			}
+
 			const href = $a.attr('href') || '';
 			if (!href) return;
 
 			const id = this.cleanId(href);
-			if (seen.has(id) || /\/(page|genre|tag|author|project)\//i.test(id)) return;
+			if (seen.has(id)) return;
+			if (/\/(page|genre|tag|author|project|list-mode)\//i.test(id)) return;
+			if (/-chapter-\d+/i.test(id) || /-ch-\d+/i.test(id)) return;
 			seen.add(id);
 
 			const title = this.normalizeTitle(
-				$el.find('.tt, .hottitle, h2, h3').first().text() ||
+				$el.find('.tt, .hottitle, .ntitle, h2, h3').first().text() ||
 					$a.attr('title') ||
 					$a.text() ||
 					$el.find('img').attr('alt') ||
@@ -137,15 +213,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			if (cover.startsWith('data:')) cover = '';
 			cover = this.preferFullCover(this.absUrl(cover));
 
-			let latestChapter: string | undefined;
-			// Prefer .epxs/.epx — jangan pakai .l (terlalu generik, badge sering hilang)
-			const chText =
-				$el.find('.epxs, .epx, .fivchap, .chfiv').first().text().replace(/\s+/g, ' ').trim() ||
-				$el.find('.chapter, .num-chapter').first().text().replace(/\s+/g, ' ').trim();
-			if (chText) {
-				const n = this.parseChapterNumber(chText);
-				if (n > 0) latestChapter = String(n);
-			}
+			const latestChapter = this.extractLatestChapter($, $el);
 
 			res.push({
 				id,
