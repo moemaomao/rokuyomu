@@ -100,6 +100,20 @@
 		}
 	}
 
+	/** Normalized download mode — treat anything other than 'zip' as 'disk'. */
+	function currentDownloadMode(): DownloadMode {
+		return prefs.downloadMode === 'zip' ? 'zip' : 'disk';
+	}
+
+	function setDownloadMode(mode: DownloadMode) {
+		prefs = setPreferences({ downloadMode: mode });
+		msg =
+			mode === 'zip'
+				? 'Download mode: ZIP / file (browser download).'
+				: 'Download mode: Local folder (Rokuyomu/Library).';
+		err = '';
+	}
+
 	function updateBadge(key: 'status' | 'type' | 'source', value: boolean) {
 		prefs = setPreferences({
 			hideBadges: { ...prefs.hideBadges, [key]: value }
@@ -529,29 +543,76 @@
 			</p>
 		{/if}
 
-		<div class="flex flex-col gap-2 sm:flex-row sm:gap-3">
-			<button
-				type="button"
-				onclick={() => updatePref('downloadMode', 'disk' as DownloadMode)}
-				class="flex flex-1 flex-col items-start gap-0.5 rounded-xl border px-4 py-3 text-left transition
-					{prefs.downloadMode !== 'zip'
-					? 'border-violet-500 bg-violet-500/10 text-violet-900 dark:text-violet-100'
-					: 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-300 dark:hover:border-zinc-600'}"
+		<div
+			class="flex flex-col gap-2 sm:flex-row sm:gap-3"
+			role="radiogroup"
+			aria-label="Download destination"
+		>
+			<label
+				class="relative flex flex-1 cursor-pointer items-start gap-3 rounded-xl border-2 px-4 py-3 transition
+					{currentDownloadMode() === 'disk'
+					? 'border-violet-500 bg-violet-50 shadow-sm dark:border-violet-400 dark:bg-violet-500/20'
+					: 'border-zinc-200 bg-zinc-50 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:hover:border-zinc-500'}"
 			>
-				<span class="text-sm font-semibold">Local folder</span>
-				<span class="text-[11px] opacity-80">Save into Rokuyomu/Library (default)</span>
-			</button>
-			<button
-				type="button"
-				onclick={() => updatePref('downloadMode', 'zip' as DownloadMode)}
-				class="flex flex-1 flex-col items-start gap-0.5 rounded-xl border px-4 py-3 text-left transition
-					{prefs.downloadMode === 'zip'
-					? 'border-violet-500 bg-violet-500/10 text-violet-900 dark:text-violet-100'
-					: 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-300 dark:hover:border-zinc-600'}"
+				<input
+					type="radio"
+					name="downloadMode"
+					value="disk"
+					class="mt-1 h-4 w-4 shrink-0 accent-violet-600"
+					checked={currentDownloadMode() === 'disk'}
+					onchange={() => setDownloadMode('disk')}
+				/>
+				<span class="flex flex-col gap-0.5">
+					<span
+						class="text-sm font-semibold {currentDownloadMode() === 'disk'
+							? 'text-violet-800 dark:text-violet-100'
+							: 'text-zinc-800 dark:text-zinc-200'}"
+					>
+						Local folder
+						{#if currentDownloadMode() === 'disk'}
+							<span class="ml-1 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-300"
+								>● active</span
+							>
+						{/if}
+					</span>
+					<span class="text-[11px] text-zinc-500 dark:text-zinc-400"
+						>Save into Rokuyomu/Library (default)</span
+					>
+				</span>
+			</label>
+
+			<label
+				class="relative flex flex-1 cursor-pointer items-start gap-3 rounded-xl border-2 px-4 py-3 transition
+					{currentDownloadMode() === 'zip'
+					? 'border-violet-500 bg-violet-50 shadow-sm dark:border-violet-400 dark:bg-violet-500/20'
+					: 'border-zinc-200 bg-zinc-50 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:hover:border-zinc-500'}"
 			>
-				<span class="text-sm font-semibold">ZIP / file</span>
-				<span class="text-[11px] opacity-80">Browser download (ZIP manga · PDF novel)</span>
-			</button>
+				<input
+					type="radio"
+					name="downloadMode"
+					value="zip"
+					class="mt-1 h-4 w-4 shrink-0 accent-violet-600"
+					checked={currentDownloadMode() === 'zip'}
+					onchange={() => setDownloadMode('zip')}
+				/>
+				<span class="flex flex-col gap-0.5">
+					<span
+						class="text-sm font-semibold {currentDownloadMode() === 'zip'
+							? 'text-violet-800 dark:text-violet-100'
+							: 'text-zinc-800 dark:text-zinc-200'}"
+					>
+						ZIP / file
+						{#if currentDownloadMode() === 'zip'}
+							<span class="ml-1 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-300"
+								>● active</span
+							>
+						{/if}
+					</span>
+					<span class="text-[11px] text-zinc-500 dark:text-zinc-400"
+						>Browser download (ZIP manga · PDF novel)</span
+					>
+				</span>
+			</label>
 		</div>
 	</section>
 
