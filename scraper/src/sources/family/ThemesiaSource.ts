@@ -12,7 +12,6 @@ import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
 export abstract class ThemesiaSource extends BaseSource {
-
 	protected perPage = 24;
 	protected defaultLang = 'en';
 
@@ -79,6 +78,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		if (t.includes('manhwa')) return 'manhwa';
 		if (t.includes('manhua')) return 'manhua';
 		if (t.includes('comic') || t.includes('western')) return 'comic';
+		if (t.includes('novel')) return 'novel';
 		return 'manga';
 	}
 
@@ -88,10 +88,12 @@ export abstract class ThemesiaSource extends BaseSource {
 	}
 
 	protected seriesPath = '/manga';
+
 	protected listPath(page: number): string {
 		const p = Math.max(1, page || 1);
 		return `${this.seriesPath}/?page=${p}&order=update`;
 	}
+
 	protected searchPath(query: string, page: number): string {
 		const q = encodeURIComponent(query);
 		return page <= 1 ? `/?s=${q}` : `/?s=${q}&page=${page}`;
@@ -99,12 +101,13 @@ export abstract class ThemesiaSource extends BaseSource {
 
 	protected cardSelector =
 		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .epic-card';
+
 	protected chapterListSelector =
-		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a';
+		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a, .eplisterfull li a, ul.clstyle li a';
+
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
 
-	/** Badge chapter: .epxs/.epx/.bigor/.nchapter + href/HTML fallback */
 	protected extractLatestChapter(
 		$: cheerio.CheerioAPI,
 		$el: cheerio.Cheerio<any>
@@ -158,7 +161,6 @@ export abstract class ThemesiaSource extends BaseSource {
 		$(this.cardSelector).each((_, el) => {
 			const $el = $(el);
 
-			// prioritaskan link series (bukan chapter)
 			let $a = $el
 				.find(`a[href*="${this.seriesPath}/"]`)
 				.filter((_, a) => {
@@ -246,12 +248,51 @@ export abstract class ThemesiaSource extends BaseSource {
 		$li: cheerio.Cheerio<any>
 	): boolean {
 		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
-		if (/premium|locked|vip|paywall|coin|paid/.test(cls)) return true;
-		if ($li.find('.premium, .lock, .locked, .coin, .coin-price, .premium-star, [data-coin], .is-premium').length)
+		if (/\b(premium|locked|vip|paywall|paid|is-premium|chapter-lock)\b/.test(cls))
 			return true;
-		const target = ($a.attr('data-bs-target') || $a.attr('data-target') || '').toLowerCase();
-		if (target.includes('lock') || target.includes('premium') || target.includes('coin')) return true;
+
+		if (
+			$li.find(
+				[
+					'.premium',
+					'.lock',
+					'.locked',
+					'.coin',
+					'.coin-price',
+					'.coin-price-pill',
+					'.premium-star',
+					'.chapter-lock-badge',
+					'.c-icon-lock',
+					'.is-premium',
+					'[data-coin]',
+					'[data-lock]',
+					'svg.lock',
+					'i.fa-lock',
+					'i.fa-lock',
+					'.dashicons-lock'
+				].join(', ')
+			).length
+		) {
+			return true;
+		}
+
+		const target = (
+			$a.attr('data-bs-target') ||
+			$a.attr('data-target') ||
+			$li.attr('data-bs-target') ||
+			''
+		).toLowerCase();
+		if (/lock|premium|coin|vip/.test(target)) return true;
+
 		if ($a.attr('data-coin') || $li.attr('data-coin')) return true;
+
+		const rowText = $li.text().replace(/\s+/g, ' ');
+		if (/🔒|prem(?:ium)?|\b\d+\s*coins?\b|\bvip\b/i.test(rowText) && /coin|prem|vip|🔒/i.test(rowText)) {
+			if (/🔒|(?:\d+\s*)?coins?|premium|vip\s*only|early\s*access/i.test(rowText)) {
+				return true;
+			}
+		}
+
 		return false;
 	}
 
@@ -267,14 +308,23 @@ export abstract class ThemesiaSource extends BaseSource {
 			if (seen.has(id)) return;
 			seen.add(id);
 
-			const $li = $a.closest('li');
+			const $li = $a.closest('li').length ? $a.closest('li') : $a.parent();
 			const rawText = $a.text().replace(/\s+/g, ' ').trim();
 			const number = this.parseChapterNumber(rawText || id, id);
 			const title = number > 0 ? `Chapter ${number}` : rawText || id;
+
 			const date =
-				$li.find('.chapterdate, .chapter-date, .dt, .chapter-release-date, time, .date').first().text().replace(/\s+/g, ' ').trim() ||
+				$li
+					.find(
+						'.chapterdate, .chapter-date, .dt, .chapter-release-date, time, .date, .chapter-time'
+					)
+					.first()
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim() ||
 				$li.find('time').attr('datetime') ||
 				undefined;
+
 			const isLocked = this.isChapterLocked($a, $li);
 
 			chapters.push({
@@ -296,35 +346,58 @@ export abstract class ThemesiaSource extends BaseSource {
 		const $ = cheerio.load(html);
 
 		const title = this.normalizeTitle(
-			$('h1.entry-title, h1').first().text() || '',
+			$('h1.entry-title, h1').first().text() ||
+				$('meta[property="og:title"]').attr('content') ||
+				'',
 			this.name
 		);
 
-		const $img = $(
-			[
-				'.thumbook img',
-				'.thumb img',
-				'.seriestucontl img',
-				'.seriestuimg img',
-				'.ims img',
-				'.manga-poster img',
-				'.summary_image img',
-				'img.wp-post-image',
-				'.post-thumbnail img'
-			].join(', ')
-		).first();
-		let cover =
-			$img.attr('data-src') ||
-			$img.attr('data-lazy-src') ||
-			$img.attr('data-srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
-			$img.attr('src') ||
-			$('meta[property="og:image"]').attr('content') ||
-			$('meta[name="twitter:image"]').attr('content') ||
-			'';
+		let cover = '';
+		const imgSelectors = [
+			'.thumbook img',
+			'.thumb img',
+			'.seriestucontl img',
+			'.seriestuimg img',
+			'.ims img',
+			'.manga-poster img',
+			'.summary_image img',
+			'img.wp-post-image',
+			'.post-thumbnail img',
+			'.series-thumb img',
+			'.info-desc img'
+		];
+		for (const sel of imgSelectors) {
+			const $img = $(sel).first();
+			if (!$img.length) continue;
+			cover =
+				$img.attr('data-src') ||
+				$img.attr('data-lazy-src') ||
+				$img.attr('data-srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
+				$img.attr('srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
+				$img.attr('src') ||
+				'';
+			if (cover && !cover.startsWith('data:')) break;
+			cover = '';
+		}
+		if (!cover) {
+			cover =
+				$('meta[property="og:image"]').attr('content') ||
+				$('meta[name="twitter:image"]').attr('content') ||
+				'';
+		}
+		if (!cover) {
+			const style =
+				$('.thumbook, .thumb, .seriestuimg, .summary_image').first().attr('style') ||
+				'';
+			const bm = style.match(/url\(['"]?([^'")\s]+)['"]?\)/i);
+			if (bm?.[1]) cover = bm[1];
+		}
 		if (cover.startsWith('data:')) cover = '';
 		cover = this.preferFullCover(this.absUrl(cover));
 
-		const description = $('.entry-content[itemprop="description"], .seriestuhead .entry-content, .entry-content')
+		const description = $(
+			'.entry-content[itemprop="description"], .seriestuhead .entry-content, .sersys, .series-synops, .entry-content'
+		)
 			.first()
 			.text()
 			.replace(/\s+/g, ' ')
@@ -337,17 +410,20 @@ export abstract class ThemesiaSource extends BaseSource {
 		});
 
 		const authors: string[] = [];
-		$('.infotable tr, .fmed').each((_, row) => {
+		$('.infotable tr, .fmed, .imptdt').each((_, row) => {
 			const t = $(row).text();
-			if (/author|artist|pengarang/i.test(t)) {
-				const v = $(row).find('td').last().text().replace(/\s+/g, ' ').trim() ||
-					$(row).find('span').last().text().replace(/\s+/g, ' ').trim();
-				if (v && !authors.includes(v)) authors.push(v);
+			if (/author|artist|pengarang|penulis/i.test(t)) {
+				const v =
+					$(row).find('td').last().text().replace(/\s+/g, ' ').trim() ||
+					$(row).find('span, a').last().text().replace(/\s+/g, ' ').trim();
+				if (v && !/author|artist|pengarang/i.test(v) && !authors.includes(v)) {
+					authors.push(v);
+				}
 			}
 		});
 
 		let status = 'Ongoing';
-		$('.status, .imptdt').each((_, el) => {
+		$('.status, .imptdt, .infotable tr').each((_, el) => {
 			const t = $(el).text();
 			if (/status/i.test(t)) status = this.mapStatus(t);
 		});
@@ -359,7 +435,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			sourceId: this.id,
 			title: title || path.split('/').filter(Boolean).pop() || path,
 			cover,
-			type: this.mapType($('.infotable, .seriestucont').text()),
+			type: this.mapType($('.infotable, .seriestucont, .spe').text()),
 			status,
 			description,
 			authors,
