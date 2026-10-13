@@ -22,7 +22,6 @@ export class SiikomikSource extends MadaraSource {
 	protected defaultLang = 'id';
 	protected perPage = 24;
 	protected useAjaxChapters = true;
-
 	protected cardSelector =
 		'.slider__item, .page-item-detail, .manga, .page-listing-item .col-12, .badge-pos-1, .c-tabs-item__content';
 
