@@ -331,7 +331,6 @@ export abstract class ThemesiaSource extends BaseSource {
 				title,
 				number: number || chapters.length + 1,
 				date: date || undefined,
-				lang: this.defaultLang,
 				...(isLocked ? { isLocked: true } : {})
 			});
 		});
