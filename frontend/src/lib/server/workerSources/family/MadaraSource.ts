@@ -6,13 +6,15 @@
  *
  * Existing Madara-like sources can keep extending BaseSource;
  * new ones (or gradual refactors) should extend MadaraSource.
+ *
+ * Fix (2026-10): fetchChaptersAjax uses POST + X-Requested-With
+ * so sites like Setsu Scans return chapter list instead of empty.
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
 export abstract class MadaraSource extends BaseSource {
-
 	protected perPage = 24;
 	protected defaultLang = 'en';
 
@@ -188,10 +190,49 @@ export abstract class MadaraSource extends BaseSource {
 	protected async fetchChaptersAjax(mangaPath: string): Promise<Chapter[]> {
 		if (!this.useAjaxChapters) return [];
 		const base = mangaPath.endsWith('/') ? mangaPath : `${mangaPath}/`;
+		const url = `${this.baseUrl}${base}ajax/chapters/`;
+
 		try {
-			const html = await this.fetchHtml(`${base}ajax/chapters/`);
+			const response = await fetch(url, {
+				method: 'POST',
+				headers: {
+					'User-Agent':
+						this.headers?.['User-Agent'] ||
+						'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+					Accept: '*/*',
+					'Accept-Language': 'en-US,en;q=0.9',
+					'X-Requested-With': 'XMLHttpRequest',
+					'Content-Type': 'application/x-www-form-urlencoded',
+					Origin: this.baseUrl,
+					Referer: `${this.baseUrl}${base}`,
+					'Sec-Fetch-Dest': 'empty',
+					'Sec-Fetch-Mode': 'cors',
+					'Sec-Fetch-Site': 'same-origin'
+				},
+				body: '',
+				redirect: 'follow'
+			});
+
+			const html = await response.text();
+			const lower = html.toLowerCase();
+			const isChallenge =
+				response.status === 403 ||
+				response.status === 503 ||
+				/just a moment|verify you are human|cf-browser-verification|challenge-platform|cf-turnstile|checking your browser/i.test(
+					lower
+				);
+
+			if (isChallenge || !response.ok) {
+				console.warn(`[${this.id}] ajax/chapters blocked`, {
+					url,
+					status: response.status
+				});
+				return [];
+			}
+
 			return this.parseChapterList(cheerio.load(html));
-		} catch {
+		} catch (e) {
+			console.warn(`[${this.id}] fetchChaptersAjax failed`, e);
 			return [];
 		}
 	}
