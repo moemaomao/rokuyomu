@@ -261,4 +261,49 @@ export class GDScansSource extends MadaraSource {
 			lang: this.defaultLang
 		};
 	}
+
+	async getChapterPages(chapterId: string): Promise<string[]> {
+		try {
+			const path = this.cleanId(chapterId);
+			const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+			const $ = cheerio.load(html);
+			const pages: string[] = [];
+			const seen = new Set<string>();
+
+			const push = (src?: string | null) => {
+				if (!src || src.startsWith('data:')) return;
+				const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
+				if (!url || seen.has(url)) return;
+				if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
+				seen.add(url);
+				pages.push(url);
+			};
+
+			$('.reading-content img, .page-break img, .wp-manga-chapter-img').each(
+				(_, img) => {
+					const $img = $(img);
+					push(
+						$img.attr('data-src') ||
+							$img.attr('data-lazy-src') ||
+							$img.attr('data-srcset')?.split(/\s+/)[0] ||
+							$img.attr('src')
+					);
+				}
+			);
+
+			if (pages.length === 0) {
+				const re =
+					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
+				let m: RegExpExecArray | null;
+				while ((m = re.exec(html)) !== null) push(m[1]);
+			}
+
+			console.log(`[gdscans] getChapterPages ${path} → ${pages.length} pages`);
+			return pages;
+		} catch (e) {
+			console.error('[gdscans] getChapterPages', e);
+			return [];
+		}
+	}
 }
+
