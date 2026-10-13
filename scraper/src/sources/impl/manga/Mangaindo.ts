@@ -2,11 +2,13 @@
  * mangaindo.best adapter (MangaThemesia)
  * → extends ThemesiaSource
  *
- * List   : /home/  |  /home/page/{n}/
+ * List   : /manga/?order=update&page=N  (bukan /home/page/N — isinya sama terus)
  * Search : /?s=QUERY
  * Detail : /manga/{slug}/
  * Chapter: /{slug}-chapter-{n}/
  * Pages  : ts_reader / #readerarea
+ *
+ * Site ~12–20/page → merge 2 site-pages per app page.
  */
 
 import * as cheerio from 'cheerio';
@@ -24,8 +26,8 @@ export class MangaindoSource extends ThemesiaSource {
 
 	protected listPath(page: number): string {
 		const p = Math.max(1, page || 1);
-		if (p <= 1) return '/home/';
-		return `/home/page/${p}/`;
+		if (p <= 1) return `${this.seriesPath}/?order=update`;
+		return `${this.seriesPath}/?order=update&page=${p}`;
 	}
 
 	protected searchPath(query: string, page: number): string {
@@ -43,20 +45,28 @@ export class MangaindoSource extends ThemesiaSource {
 	async getLatestManga(page: number): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			let list = this.parseCards(cheerio.load(await this.fetchHtml(this.listPath(p))));
-			if (list.length < 8 && p === 1) {
-				const fill = this.parseCards(
-					cheerio.load(await this.fetchHtml(`${this.seriesPath}/?order=update`))
-				);
-				const seen = new Set(list.map((m) => m.id));
-				for (const m of fill) {
-					if (seen.has(m.id)) continue;
-					seen.add(m.id);
-					list.push(m);
-					if (list.length >= this.perPage) break;
+			const siteStart = (p - 1) * 2 + 1;
+			const pagesToFetch = [siteStart, siteStart + 1];
+
+			const seen = new Set<string>();
+			const mangas: Manga[] = [];
+
+			for (const pg of pagesToFetch) {
+				const path = this.listPath(pg);
+				try {
+					const batch = this.parseCards(cheerio.load(await this.fetchHtml(path)));
+					for (const item of batch) {
+						if (seen.has(item.id)) continue;
+						seen.add(item.id);
+						mangas.push(item);
+					}
+				} catch (e) {
+					console.error(`[mangaindo] fetch page ${pg}`, e);
 				}
 			}
-			return list.slice(0, this.perPage);
+
+			console.log(`[mangaindo] latest page=${p} → ${mangas.length}`);
+			return mangas.slice(0, this.perPage);
 		} catch (e) {
 			console.error('[mangaindo] getLatestManga', e);
 			return [];

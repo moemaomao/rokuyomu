@@ -138,11 +138,10 @@ export abstract class ThemesiaSource extends BaseSource {
 			cover = this.preferFullCover(this.absUrl(cover));
 
 			let latestChapter: string | undefined;
-			const chText = $el
-				.find('.epxs, .chapter, .l').first()
-				.text()
-				.replace(/\s+/g, ' ')
-				.trim();
+			// Prefer .epxs/.epx — jangan pakai .l (terlalu generik, badge sering hilang)
+			const chText =
+				$el.find('.epxs, .epx, .fivchap, .chfiv').first().text().replace(/\s+/g, ' ').trim() ||
+				$el.find('.chapter, .num-chapter').first().text().replace(/\s+/g, ' ').trim();
 			if (chText) {
 				const n = this.parseChapterNumber(chText);
 				if (n > 0) latestChapter = String(n);
