@@ -2,10 +2,19 @@
  * Family base: MangaThemesia / MangaReader (WordPress)
  *
  * Typical paths:
- *   list   /manga/?order=update&page=N
+ *   list   /manga/?order=update&page=N  (or /series/)
  *   search /?s=q
- *   detail /manga/{slug}/  or  /{slug}/
- *   pages  #readerarea img  or  ts_reader.run({...})
+ *   detail /manga/{slug}/  or  /series/{slug}/
+ *   pages  #readerarea img  or  ts_reader.run({...})  (manga)
+ *   text   .epcontent / .entry-content                 (novel)
+ *
+ * Chapter list (detail page):
+ *   - number : .epl-num / path -chapter-N
+ *   - date   : .epl-date / .chapterdate
+ *   - lock   : .fa-lock / .premium / coin → chapter.isLocked (UI detail)
+ *
+ * Novel reader next/prev:
+ *   getChapterContent() returns prevChapterId / nextChapterId
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -14,6 +23,7 @@ import type { Chapter, Manga, MangaDetails } from '../types-manga';
 export abstract class ThemesiaSource extends BaseSource {
 	protected perPage = 24;
 	protected defaultLang = 'en';
+	protected seriesPath = '/manga';
 
 	protected absUrl(url: string): string {
 		if (!url) return '';
@@ -46,9 +56,9 @@ export abstract class ThemesiaSource extends BaseSource {
 	}
 
 	protected parseChapterNumber(text: string, path = ''): number {
-		const fromPath = path.match(
-			/(?:chapter|chap|ch)[-_.\s]*(\d+)(?:[.-](\d+))?/i
-		);
+		const fromPath =
+			path.match(/(?:chapter|chap|ch)[-_.\s]*(\d+)(?:[.-](\d+))?/i) ||
+			path.match(/-chapter-(\d+)(?:[.-](\d+))?/i);
 		if (fromPath) {
 			const major = parseInt(fromPath[1], 10);
 			if (fromPath[2] != null && fromPath[2].length <= 2) {
@@ -56,7 +66,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			}
 			return major;
 		}
-		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i);
+		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*[.\-_:]?\s*(\d+)(?:[.,](\d+))?/i);
 		if (m) {
 			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
 			return parseInt(m[1], 10);
@@ -77,8 +87,8 @@ export abstract class ThemesiaSource extends BaseSource {
 		const t = String(raw || '').toLowerCase();
 		if (t.includes('manhwa')) return 'manhwa';
 		if (t.includes('manhua')) return 'manhua';
-		if (t.includes('comic') || t.includes('western')) return 'comic';
 		if (t.includes('novel')) return 'novel';
+		if (t.includes('comic') || t.includes('western')) return 'comic';
 		return 'manga';
 	}
 
@@ -86,8 +96,6 @@ export abstract class ThemesiaSource extends BaseSource {
 		if (!url) return '';
 		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
 	}
-
-	protected seriesPath = '/manga';
 
 	protected listPath(page: number): string {
 		const p = Math.max(1, page || 1);
@@ -100,13 +108,15 @@ export abstract class ThemesiaSource extends BaseSource {
 	}
 
 	protected cardSelector =
-		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .epic-card';
+		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .uta, .epic-card';
 
 	protected chapterListSelector =
-		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a, .eplisterfull li a, ul.clstyle li a';
+		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a, .eplisterfull li a, ul.clstyle li a, .eplister a';
 
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
+
+	// ── Latest badge on list cards ───────────────────────────────────────────
 
 	protected extractLatestChapter(
 		$: cheerio.CheerioAPI,
@@ -136,21 +146,17 @@ export abstract class ThemesiaSource extends BaseSource {
 				t.match(/\b(\d{1,4}(?:\.\d+)?)\b/);
 			if (m?.[1]) return m[1];
 		}
-
 		const chHref =
-			$el.find('a[href*="-chapter-"], a[href*="-ch-"], a[href*="-c"]').attr('href') ||
-			'';
+			$el.find('a[href*="-chapter-"], a[href*="-ch-"]').attr('href') || '';
 		if (chHref) {
 			const n = this.parseChapterNumber('', this.cleanId(chHref));
 			if (n > 0) return String(n);
 		}
-
 		const html = $.html($el) || '';
 		const em =
 			html.match(/class=["'][^"']*epxs?[^"']*["'][^>]*>\s*(?:Chapter\s*)?(\d+(?:\.\d+)?)/i) ||
 			html.match(/(?:Chapter|Ch\.?)\s*(\d+(?:\.\d+)?)/i);
 		if (em?.[1]) return em[1];
-
 		return undefined;
 	}
 
@@ -199,6 +205,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			const title = this.normalizeTitle(
 				$el.find('.tt, .hottitle, .ntitle, h2, h3').first().text() ||
 					$a.attr('title') ||
+					$a.attr('oldtitle') ||
 					$a.text() ||
 					$el.find('img').attr('alt') ||
 					'',
@@ -247,34 +254,23 @@ export abstract class ThemesiaSource extends BaseSource {
 		$a: cheerio.Cheerio<any>,
 		$li: cheerio.Cheerio<any>
 	): boolean {
-		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
-		if (/\b(premium|locked|vip|paywall|paid|is-premium|chapter-lock)\b/.test(cls))
-			return true;
-
 		if (
-			$li.find(
-				[
-					'.premium',
-					'.lock',
-					'.locked',
-					'.coin',
-					'.coin-price',
-					'.coin-price-pill',
-					'.premium-star',
-					'.chapter-lock-badge',
-					'.c-icon-lock',
-					'.is-premium',
-					'[data-coin]',
-					'[data-lock]',
-					'svg.lock',
-					'i.fa-lock',
-					'i.fa-lock',
-					'.dashicons-lock'
-				].join(', ')
+			$a.find(
+				'.lock, .fa-lock, .fas.fa-lock, .premium, .premium-lock, .coin-price, .coin-price-pill, .premium-star, [class*="lock"], [data-coin]'
 			).length
 		) {
 			return true;
 		}
+		if (
+			$li.find(
+				'.lock, .fa-lock, .fas.fa-lock, .premium, .premium-lock, .coin-price, .coin-price-pill, .premium-star, .chapter-lock-badge, [class*="lock"], [data-coin]'
+			).length
+		) {
+			return true;
+		}
+
+		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
+		if (/\b(premium|locked|paywall|is-premium|chapter-lock)\b/.test(cls)) return true;
 
 		const target = (
 			$a.attr('data-bs-target') ||
@@ -287,10 +283,8 @@ export abstract class ThemesiaSource extends BaseSource {
 		if ($a.attr('data-coin') || $li.attr('data-coin')) return true;
 
 		const rowText = $li.text().replace(/\s+/g, ' ');
-		if (/🔒|prem(?:ium)?|\b\d+\s*coins?\b|\bvip\b/i.test(rowText) && /coin|prem|vip|🔒/i.test(rowText)) {
-			if (/🔒|(?:\d+\s*)?coins?|premium|vip\s*only|early\s*access/i.test(rowText)) {
-				return true;
-			}
+		if (/🔒|(?:\d+\s*)coins?|premium|vip\s*only|early\s*access/i.test(rowText)) {
+			return true;
 		}
 
 		return false;
@@ -303,21 +297,26 @@ export abstract class ThemesiaSource extends BaseSource {
 		$(this.chapterListSelector).each((_, a) => {
 			const $a = $(a);
 			const href = $a.attr('href') || '';
-			if (!href) return;
+			if (!href || href === '#' || href.includes('{{')) return;
+
 			const id = this.cleanId(href);
 			if (seen.has(id)) return;
 			seen.add(id);
 
 			const $li = $a.closest('li').length ? $a.closest('li') : $a.parent();
-			const rawText = $a.text().replace(/\s+/g, ' ').trim();
-			const number = this.parseChapterNumber(rawText || id, id);
-			const title = number > 0 ? `Chapter ${number}` : rawText || id;
+
+			const numText =
+				$a.find('.epl-num, .chapternum').first().text().replace(/\s+/g, ' ').trim() ||
+				$a.text().replace(/\s+/g, ' ').trim();
+			const number = this.parseChapterNumber(numText || id, id);
+			if (!number && !/chapter/i.test(id) && !/chapter/i.test(numText)) return;
+
+			const title = number > 0 ? `Chapter ${number}` : numText || id;
 
 			const date =
+				$a.find('.epl-date, .chapterdate, .chapter-date').first().text().replace(/\s+/g, ' ').trim() ||
 				$li
-					.find(
-						'.chapterdate, .chapter-date, .dt, .chapter-release-date, time, .date, .chapter-time'
-					)
+					.find('.epl-date, .chapterdate, .chapter-date, .dt, .chapter-release-date, time, .date, .chapter-time')
 					.first()
 					.text()
 					.replace(/\s+/g, ' ')
@@ -330,7 +329,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			chapters.push({
 				id,
 				title,
-				number,
+				number: number || chapters.length + 1,
 				date: date || undefined,
 				lang: this.defaultLang,
 				...(isLocked ? { isLocked: true } : {})
@@ -356,6 +355,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		const imgSelectors = [
 			'.thumbook img',
 			'.thumb img',
+			'.series-thumb img',
 			'.seriestucontl img',
 			'.seriestuimg img',
 			'.ims img',
@@ -363,7 +363,6 @@ export abstract class ThemesiaSource extends BaseSource {
 			'.summary_image img',
 			'img.wp-post-image',
 			'.post-thumbnail img',
-			'.series-thumb img',
 			'.info-desc img'
 		];
 		for (const sel of imgSelectors) {
@@ -387,8 +386,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		}
 		if (!cover) {
 			const style =
-				$('.thumbook, .thumb, .seriestuimg, .summary_image').first().attr('style') ||
-				'';
+				$('.thumbook, .thumb, .seriestuimg, .summary_image').first().attr('style') || '';
 			const bm = style.match(/url\(['"]?([^'")\s]+)['"]?\)/i);
 			if (bm?.[1]) cover = bm[1];
 		}
@@ -396,7 +394,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		cover = this.preferFullCover(this.absUrl(cover));
 
 		const description = $(
-			'.entry-content[itemprop="description"], .seriestuhead .entry-content, .sersys, .series-synops, .entry-content'
+			'.entry-content[itemprop="description"], .seriestuhead .entry-content, .sersys, .series-synops, .synops, .wd-full, .entry-content'
 		)
 			.first()
 			.text()
@@ -404,13 +402,13 @@ export abstract class ThemesiaSource extends BaseSource {
 			.trim();
 
 		const genres: string[] = [];
-		$('.seriestugenre a, .mgen a, a[rel="tag"]').each((_, a) => {
+		$('.seriestugenre a, .mgen a, .genxed a, a[rel="tag"]').each((_, a) => {
 			const g = $(a).text().replace(/\s+/g, ' ').trim();
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
 
 		const authors: string[] = [];
-		$('.infotable tr, .fmed, .imptdt').each((_, row) => {
+		$('.infotable tr, .fmed, .imptdt, .tsinfo .imptdt').each((_, row) => {
 			const t = $(row).text();
 			if (/author|artist|pengarang|penulis/i.test(t)) {
 				const v =
@@ -488,5 +486,74 @@ export abstract class ThemesiaSource extends BaseSource {
 		}
 
 		return pages;
+	}
+
+	protected adjacentChapterIds(path: string): {
+		prev: string | null;
+		next: string | null;
+	} {
+		const p = path.replace(/\/$/, '');
+		const m = p.match(/^(.*-chapter-)(\d+(?:\.\d+)?)(?:-side-story.*)?$/i);
+		if (!m) return { prev: null, next: null };
+		const n = parseFloat(m[2]);
+		const prevN = n > 1 ? (Number.isInteger(n) ? n - 1 : Math.floor(n)) : null;
+		const nextN = Number.isInteger(n) ? n + 1 : Math.ceil(n);
+		return {
+			prev: prevN != null && prevN > 0 ? `${m[1]}${prevN}` : null,
+			next: `${m[1]}${nextN}`
+		};
+	}
+
+	async getChapterContent(chapterId: string): Promise<{
+		title: string;
+		content: string;
+		prevChapterId?: string | null;
+		nextChapterId?: string | null;
+	}> {
+		const path = this.cleanId(chapterId);
+		const adj = this.adjacentChapterIds(path);
+		let prevChapterId: string | null = adj.prev;
+		let nextChapterId: string | null = adj.next;
+
+		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+		const $ = cheerio.load(html);
+
+		const h1 = $('h1.entry-title, h1').first().text().replace(/\s+/g, ' ').trim();
+		const number = this.parseChapterNumber(h1, path);
+		const title = number > 0 ? `Chapter ${number}` : h1 || 'Chapter';
+
+		const root = $(
+			'.epcontent.entry-content, .entry-content .epcontent, .epcontent, #readerarea, .reading-content, .text-left, .entry-content, .chapter-content'
+		).first();
+		root
+			.find(
+				'script, style, .ads, .code-block, .sharedaddy, .chapter-nav, .chnav, .navi, .epheader, .headpost, nav, .adsbygoogle'
+			)
+			.remove();
+
+		let content = (root.html() || '').trim();
+		if (!content) {
+			content = root.text().replace(/\s+/g, ' ').trim();
+		}
+		if (!content) {
+			content =
+				'<p><em>Empty content — selector may have changed or chapter is locked.</em></p>';
+		}
+
+		// nav links di halaman
+		$('a').each((_, a) => {
+			const t = $(a).text().replace(/\s+/g, ' ').trim().toLowerCase();
+			const href = $(a).attr('href') || '';
+			if (!href || href === '#') return;
+			const id = this.cleanId(href);
+			if (t === 'prev' || t === 'previous' || t === '←') prevChapterId = id;
+			if (t === 'next' || t === '→') nextChapterId = id;
+		});
+		const relPrev = $('a[rel="prev"]').attr('href');
+		const relNext = $('a[rel="next"]').attr('href');
+		if (relPrev) prevChapterId = this.cleanId(relPrev);
+		if (relNext) nextChapterId = this.cleanId(relNext);
+
+		return { title, content, prevChapterId, nextChapterId };
 	}
 }
