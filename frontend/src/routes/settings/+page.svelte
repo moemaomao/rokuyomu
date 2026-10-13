@@ -41,8 +41,10 @@
 		applyThemeFromPreferences,
 		type AppPreferences,
 		type ThemeMode,
-		type GridSize
+		type GridSize,
+		type DownloadMode
 	} from '$lib/stores/preferences';
+	import { supportsFileSystemAccess } from '$lib/utils/localFs';
 	import { clearNsfwConfirmed, isNsfwConfirmed } from '$lib/utils/nsfw';
 	import { clearHistory } from '$lib/stores/history';
 
@@ -498,6 +500,57 @@
 				class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
 			>
 				Reset age gate (ask again)
+			</button>
+		</div>
+	</section>
+
+	<!-- Download destination -->
+	<section
+		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
+	>
+		<div class="mb-4 flex items-center gap-2">
+			<HardDrive class="h-4 w-4 text-violet-600 dark:text-violet-400" />
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Download</h2>
+		</div>
+
+		<p class="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+			Default is <strong class="text-zinc-700 dark:text-zinc-300">Local folder</strong>
+			(Rokuyomu/Library/…). First download may ask you to pick a parent folder (Chrome / Edge).
+			Choose <strong class="text-zinc-700 dark:text-zinc-300">ZIP</strong> to always get a browser
+			download instead.
+		</p>
+
+		{#if !supportsFileSystemAccess()}
+			<p
+				class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
+			>
+				This browser does not support the File System Access API. Downloads will use ZIP / file
+				save even if Local folder is selected.
+			</p>
+		{/if}
+
+		<div class="flex flex-col gap-2 sm:flex-row sm:gap-3">
+			<button
+				type="button"
+				onclick={() => updatePref('downloadMode', 'disk' as DownloadMode)}
+				class="flex flex-1 flex-col items-start gap-0.5 rounded-xl border px-4 py-3 text-left transition
+					{prefs.downloadMode !== 'zip'
+					? 'border-violet-500 bg-violet-500/10 text-violet-900 dark:text-violet-100'
+					: 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-300 dark:hover:border-zinc-600'}"
+			>
+				<span class="text-sm font-semibold">Local folder</span>
+				<span class="text-[11px] opacity-80">Save into Rokuyomu/Library (default)</span>
+			</button>
+			<button
+				type="button"
+				onclick={() => updatePref('downloadMode', 'zip' as DownloadMode)}
+				class="flex flex-1 flex-col items-start gap-0.5 rounded-xl border px-4 py-3 text-left transition
+					{prefs.downloadMode === 'zip'
+					? 'border-violet-500 bg-violet-500/10 text-violet-900 dark:text-violet-100'
+					: 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:text-zinc-300 dark:hover:border-zinc-600'}"
+			>
+				<span class="text-sm font-semibold">ZIP / file</span>
+				<span class="text-[11px] opacity-80">Browser download (ZIP manga · PDF novel)</span>
 			</button>
 		</div>
 	</section>

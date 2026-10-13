@@ -328,7 +328,11 @@ export async function downloadNovelChapterPdf(opts: {
 	const fileName = sanitizeFilename(chapterFileLabel) + '.pdf';
 
 	let savedPath = '';
-	if (supportsFileSystemAccess()) {
+	const preferDisk =
+		(await import('$lib/stores/preferences')).prefersDiskDownload() &&
+		supportsFileSystemAccess();
+
+	if (preferDisk) {
 		const root = await ensureLibraryRoot();
 		if (root) {
 			report({ phase: 'disk', current: 1, total: 1, message: 'Saving to local folder…' });

@@ -33,7 +33,6 @@ function pad(n: number, width = 3): string {
 	return String(n).padStart(width, '0');
 }
 
-/** Same filename derivation as the reader so cache keys match. */
 function proxyFilename(url: string): string {
 	let filename = 'image.jpg';
 	try {
@@ -41,7 +40,6 @@ function proxyFilename(url: string): string {
 		const last = path.split('/').pop() || '';
 		if (last) filename = decodeURIComponent(last);
 	} catch {
-		/* ignore */
 	}
 	filename = filename.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'image.jpg';
 	if (!/\.[a-zA-Z0-9]{2,5}$/.test(filename)) filename += '.jpg';
@@ -354,9 +352,12 @@ export async function downloadChapter(opts: {
 
 	const chapterSafe = sanitizePathSegment(chapterTitle);
 	const mangaSafe = sanitizePathSegment(mangaTitle || 'Manga');
+	const preferDisk =
+		!forceZip &&
+		(await import('$lib/stores/preferences')).prefersDiskDownload() &&
+		supportsFileSystemAccess();
 
-	// ── Disk (File System Access) ──────────────────────────────────────────
-	if (!forceZip && supportsFileSystemAccess()) {
+	if (preferDisk) {
 		const root = await ensureLibraryRoot();
 		if (root) {
 			report({
@@ -420,7 +421,6 @@ export async function downloadChapter(opts: {
 		}
 	}
 
-	// ── ZIP fallback ───────────────────────────────────────────────────────
 	const JSZip = await tryLoadJSZip();
 	if (JSZip) {
 		const zip = new JSZip();
@@ -470,7 +470,6 @@ export async function downloadChapter(opts: {
 		return;
 	}
 
-	// ── Sequential single-file fallback ────────────────────────────────────
 	for (let i = 0; i < pages.length; i++) {
 		report({
 			phase: 'images',

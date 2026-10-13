@@ -613,7 +613,7 @@
 				onclick={(e) => handleNavigate(e, '/library')}
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
 			>
-				<Library class="h-5 w-5 shrink-0" /> Library
+				<Library class="h-5 w-5 shrink-0" /> Offline Library
 			</a>
 			<a
 				href="/bookmark"

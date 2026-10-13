@@ -18,6 +18,7 @@ export type ThemeMode =
 	| 'gumi-light';
 
 export type GridSize = 'compact' | 'comfortable';
+export type DownloadMode = 'disk' | 'zip';
 
 export type AppPreferences = {
 	theme: ThemeMode;
@@ -32,6 +33,7 @@ export type AppPreferences = {
 	dontSaveHistory: boolean;
 	autoClearHistoryDays: number;
 	incognitoSession: boolean;
+	downloadMode: DownloadMode;
 };
 
 const STORAGE_KEY = 'rokuyomu_preferences';
@@ -44,7 +46,8 @@ const DEFAULTS: AppPreferences = {
 	blurR18Covers: false,
 	dontSaveHistory: false,
 	autoClearHistoryDays: 0,
-	incognitoSession: false
+	incognitoSession: false,
+	downloadMode: 'disk'
 };
 
 const DARK_THEMES: ThemeMode[] = [
@@ -173,4 +176,9 @@ export function applyThemeFromPreferences(theme?: ThemeMode): boolean {
 export function shouldSaveHistory(): boolean {
 	const p = getPreferences();
 	return !p.dontSaveHistory && !p.incognitoSession;
+}
+
+export function prefersDiskDownload(): boolean {
+	const mode = getPreferences().downloadMode;
+	return mode !== 'zip';
 }
