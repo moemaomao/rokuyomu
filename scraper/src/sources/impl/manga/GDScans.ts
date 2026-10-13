@@ -1,6 +1,6 @@
 /**
  * GD Scans adapter (https://gdscans.com)
- * Theme: WordPress Madara
+ * Theme: WordPress Madara → extends MadaraSource
  *
  * Latest  : /manga/?m_orderby=latest  |  /manga/page/{n}/?m_orderby=latest
  * Search  : /?s={q}&post_type=wp-manga
@@ -10,49 +10,34 @@
  * Pages   : .reading-content img / .wp-manga-chapter-img
  */
 
-import { BaseSource } from '../../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 import * as cheerio from 'cheerio';
+import { MadaraSource } from '../../family/MadaraSource';
+import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 
-export class GDScansSource extends BaseSource {
+export class GDScansSource extends MadaraSource {
 	id = 'gdscans';
 	name = 'GD Scans';
 	baseUrl = 'https://gdscans.com';
 
-	private readonly PER_PAGE = 24;
+	protected seriesPath = '/manga';
+	protected defaultLang = 'en';
+	protected perPage = 24;
+	/** Site lists ~10 items per HTML page */
 	private readonly SITE_PER_PAGE = 10;
-	private readonly DEFAULT_LANG = 'en';
 
-	private absUrl(url: string): string {
-		if (!url) return '';
-		if (url.startsWith('http')) return url;
-		if (url.startsWith('//')) return `https:${url}`;
-		return `${this.baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+	protected listPath(page: number): string {
+		if (page <= 1) return `/manga/?m_orderby=latest`;
+		return `/manga/page/${page}/?m_orderby=latest`;
 	}
 
-	private cleanId(link: string): string {
-		let id = (link || '').trim();
-		if (id.startsWith('http')) {
-			try {
-				id = new URL(id).pathname;
-			} catch {
-				/* ignore */
-			}
-		}
-		if (!id.startsWith('/')) id = `/${id}`;
-		return id.replace(/\/+$/, '').split('?')[0] || '/';
+	protected searchPath(query: string, page: number): string {
+		const params = new URLSearchParams({ s: query, post_type: 'wp-manga' });
+		if (page > 1) params.set('page', String(page));
+		return `/?${params.toString()}`;
 	}
 
-	private normalizeTitle(raw: string): string {
-		if (!raw) return '';
-		return raw
-			.trim()
-			.replace(/\s+/g, ' ')
-			.replace(/\s*[-|–]\s*GD\s*Scans.*$/i, '')
-			.trim();
-	}
-
-	private parseChapterNumber(text: string, path = ''): number {
+	/** GD uses /ch-N in path */
+	protected parseChapterNumber(text: string, path = ''): number {
 		const fromPath =
 			path.match(/\/ch-(\d+)(?:-(\d+))?/i) ||
 			path.match(/\/chapter-(\d+)(?:[.-](\d+))?/i);
@@ -63,102 +48,20 @@ export class GDScansSource extends BaseSource {
 			}
 			return major;
 		}
-		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i);
-		if (m) {
-			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
-			return parseInt(m[1], 10);
-		}
-		const n = String(text).match(/\b(\d+(?:\.\d+)?)\b/);
-		return n ? parseFloat(n[1]) : 0;
+		return super.parseChapterNumber(text, path);
 	}
 
-	private mapStatus(raw: string): string {
-		const s = String(raw || '').toLowerCase();
-		if (/complete|end|finished/.test(s)) return 'Completed';
-		if (/hiatus/.test(s)) return 'Hiatus';
-		if (/drop|cancel/.test(s)) return 'Dropped';
-		return 'Ongoing';
+	protected normalizeTitle(raw: string): string {
+		return super.normalizeTitle(raw, 'GD Scans').replace(/\s*GD\s*Scans.*$/i, '').trim();
 	}
 
-	private preferFullCover(url: string): string {
-		if (!url) return '';
-		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
-	}
-
-	private parseCards($: cheerio.CheerioAPI): Manga[] {
-		const res: Manga[] = [];
-		const seen = new Set<string>();
-
-		$('.page-item-detail').each((_, card) => {
-			const $card = $(card);
-			const $a = $card
-				.find('h3 a[href*="/manga/"], h5 a[href*="/manga/"], a[href*="/manga/"]')
-				.filter((_, el) => {
-					const h = ($(el).attr('href') || '').split('?')[0];
-					return /\/manga\/[^/]+\/?$/.test(h);
-				})
-				.first();
-
-			const href = $a.attr('href') || '';
-			if (!href) return;
-
-			const id = this.cleanId(href);
-			if (seen.has(id) || /\/manga\/(page|genre|tag)/i.test(id)) return;
-			seen.add(id);
-
-			let title = this.normalizeTitle(
-				$a.attr('title') || $a.text() || $card.find('img').attr('alt') || ''
-			);
-			if (!title) return;
-
-			const $img = $card.find('img').first();
-			let cover =
-				$img.attr('data-src') ||
-				$img.attr('data-lazy-src') ||
-				$img.attr('src') ||
-				'';
-			if (cover.startsWith('data:')) cover = '';
-			cover = this.preferFullCover(this.absUrl(cover));
-
-			let latestChapter: string | undefined;
-			const chText = $card
-				.find('.chapter-item a, .list-chapter a, .font-meta.chapter a, .chapter a')
-				.first()
-				.text()
-				.replace(/\s+/g, ' ')
-				.trim();
-			if (chText) {
-				const n = this.parseChapterNumber(chText);
-				if (n > 0) latestChapter = String(n);
-			}
-
-			const typeText = $card.text().toLowerCase();
-			let type = 'manga';
-			if (/\bmanhwa\b/.test(typeText)) type = 'manhwa';
-			else if (/\bmanhua\b/.test(typeText)) type = 'manhua';
-
-			res.push({
-				id,
-				title,
-				cover,
-				sourceId: this.id,
-				type,
-				status: 'Ongoing',
-				latestChapter,
-				lang: this.DEFAULT_LANG
-			});
-		});
-
-		return res;
-	}
-
-	/** Merge beberapa halaman situs (10/item) biar dapat ~PER_PAGE */
+	/** Merge several site pages (10/item) to fill ~perPage */
 	private async fetchCatalogPages(
 		buildPath: (sitePage: number) => string,
 		appPage: number
 	): Promise<Manga[]> {
 		const p = Math.max(1, Number(appPage) || 1);
-		const start = (p - 1) * this.PER_PAGE;
+		const start = (p - 1) * this.perPage;
 		const siteStart = Math.floor(start / this.SITE_PER_PAGE) + 1;
 		const offsetInFirst = start % this.SITE_PER_PAGE;
 
@@ -167,7 +70,7 @@ export class GDScansSource extends BaseSource {
 
 		for (
 			let sp = siteStart;
-			sp <= siteStart + 3 && merged.length < offsetInFirst + this.PER_PAGE;
+			sp <= siteStart + 3 && merged.length < offsetInFirst + this.perPage;
 			sp++
 		) {
 			try {
@@ -185,7 +88,7 @@ export class GDScansSource extends BaseSource {
 			}
 		}
 
-		return merged.slice(offsetInFirst, offsetInFirst + this.PER_PAGE);
+		return merged.slice(offsetInFirst, offsetInFirst + this.perPage);
 	}
 
 	async getLatestManga(
@@ -193,11 +96,7 @@ export class GDScansSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		try {
-			const list = await this.fetchCatalogPages((sitePage) => {
-				if (sitePage <= 1) return `/manga/?m_orderby=latest`;
-				return `/manga/page/${sitePage}/?m_orderby=latest`;
-			}, page);
-
+			const list = await this.fetchCatalogPages((sitePage) => this.listPath(sitePage), page);
 			console.log(`[gdscans] latest page=${page} → ${list.length}`);
 			return list;
 		} catch (e) {
@@ -215,9 +114,7 @@ export class GDScansSource extends BaseSource {
 		if (!q) return this.getLatestManga(page, opts);
 
 		try {
-			const params = new URLSearchParams({ s: q, post_type: 'wp-manga' });
-			if (page > 1) params.set('page', String(page));
-			const html = await this.fetchHtml(`/?${params.toString()}`);
+			const html = await this.fetchHtml(this.searchPath(q, page));
 			const list = this.parseCards(cheerio.load(html));
 			console.log(`[gdscans] search "${q}" page=${page} → ${list.length}`);
 			return list;
@@ -227,7 +124,8 @@ export class GDScansSource extends BaseSource {
 		}
 	}
 
-	private async fetchChaptersAjax(mangaPath: string): Promise<Chapter[]> {
+	/** POST ajax chapters (Madara default GET is not enough here) */
+	protected async fetchChaptersAjax(mangaPath: string): Promise<Chapter[]> {
 		const base = mangaPath.endsWith('/') ? mangaPath : `${mangaPath}/`;
 		const url = `${this.baseUrl}${base}ajax/chapters/?t=1`;
 
@@ -280,7 +178,6 @@ export class GDScansSource extends BaseSource {
 			});
 		});
 
-		// newest first
 		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
 		return chapters;
 	}
@@ -365,51 +262,9 @@ export class GDScansSource extends BaseSource {
 			genres,
 			chapters,
 			latestChapter,
-			lang: this.DEFAULT_LANG
+			lang: this.defaultLang
 		};
 	}
 
-	async getChapterPages(chapterId: string): Promise<string[]> {
-		try {
-			const path = this.cleanId(chapterId);
-			const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-			const $ = cheerio.load(html);
-
-			const pages: string[] = [];
-			const seen = new Set<string>();
-
-			const push = (src?: string | null) => {
-				if (!src || src.startsWith('data:')) return;
-				const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
-				if (!url || seen.has(url)) return;
-				if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
-				seen.add(url);
-				pages.push(url);
-			};
-
-			$('.reading-content img, .page-break img, .wp-manga-chapter-img').each(
-				(_, img) => {
-					const $img = $(img);
-					push(
-						$img.attr('data-src') ||
-							$img.attr('data-lazy-src') ||
-							$img.attr('src')
-					);
-				}
-			);
-
-			if (pages.length === 0) {
-				const re =
-					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
-				let m: RegExpExecArray | null;
-				while ((m = re.exec(html)) !== null) push(m[1]);
-			}
-
-			console.log(`[gdscans] getChapterPages ${path} → ${pages.length} pages`);
-			return pages;
-		} catch (e) {
-			console.error('[gdscans] getChapterPages', e);
-			return [];
-		}
-	}
+	// getChapterPages → pakai implementasi MadaraSource (selector sama)
 }

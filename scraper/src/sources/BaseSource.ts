@@ -3,6 +3,9 @@ import { fetchWithCf } from '../lib/fetchWithCf';
 
 /**
  * Abstract base class for all manga source adapters.
+ * Do NOT add named helpers that subclasses already declare as private
+ * (absUrl, cleanId, parseChapterNumber, …) — that breaks TS2415.
+ * Shared helpers live in family/* bases instead.
  */
 export abstract class BaseSource implements IMangaSource {
 	abstract id: string;
