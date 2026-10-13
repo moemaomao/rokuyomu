@@ -493,9 +493,13 @@ export abstract class ThemesiaSource extends BaseSource {
 		next: string | null;
 	} {
 		const p = path.replace(/\/$/, '');
-		const m = p.match(/^(.*-chapter-)(\d+(?:\.\d+)?)(?:-side-story.*)?$/i);
+		const m =
+			p.match(/^(.*-chapter-)(\d+(?:\.\d+)?)(?:-.*)?$/i) ||
+			p.match(/^(.*-ch-)(\d+(?:\.\d+)?)(?:-.*)?$/i) ||
+			p.match(/^(.*-c)(\d+(?:\.\d+)?)(?:-.*)?$/i);
 		if (!m) return { prev: null, next: null };
 		const n = parseFloat(m[2]);
+		if (!Number.isFinite(n) || n <= 0) return { prev: null, next: null };
 		const prevN = n > 1 ? (Number.isInteger(n) ? n - 1 : Math.floor(n)) : null;
 		const nextN = Number.isInteger(n) ? n + 1 : Math.ceil(n);
 		return {
@@ -523,7 +527,16 @@ export abstract class ThemesiaSource extends BaseSource {
 		const title = number > 0 ? `Chapter ${number}` : h1 || 'Chapter';
 
 		const root = $(
-			'.epcontent.entry-content, .entry-content .epcontent, .epcontent, #readerarea, .reading-content, .text-left, .entry-content, .chapter-content'
+			[
+				'.epcontent.entry-content',
+				'.entry-content .epcontent',
+				'.epcontent',
+				'#readerarea',
+				'.reading-content',
+				'.text-left',
+				'.entry-content',
+				'.chapter-content'
+			].join(', ')
 		).first();
 		root
 			.find(
@@ -540,19 +553,50 @@ export abstract class ThemesiaSource extends BaseSource {
 				'<p><em>Empty content — selector may have changed or chapter is locked.</em></p>';
 		}
 
-		// nav links di halaman
-		$('a').each((_, a) => {
-			const t = $(a).text().replace(/\s+/g, ' ').trim().toLowerCase();
-			const href = $(a).attr('href') || '';
-			if (!href || href === '#') return;
-			const id = this.cleanId(href);
-			if (t === 'prev' || t === 'previous' || t === '←') prevChapterId = id;
-			if (t === 'next' || t === '→') nextChapterId = id;
-		});
-		const relPrev = $('a[rel="prev"]').attr('href');
-		const relNext = $('a[rel="next"]').attr('href');
-		if (relPrev) prevChapterId = this.cleanId(relPrev);
-		if (relNext) nextChapterId = this.cleanId(relNext);
+		const pickNav = (sels: string[]): string | null => {
+			for (const sel of sels) {
+				const href = $(sel).first().attr('href') || '';
+				if (!href || href === '#' || href.startsWith('javascript:')) continue;
+				const id = this.cleanId(href);
+				if (id && id !== path && id !== '/') return id;
+			}
+			return null;
+		};
+
+		const fromPrevNav = pickNav([
+			'.chnav a[rel="prev"]',
+			'.chnav a.prev',
+			'.navi a.prev',
+			'.nextprev a[rel="prev"]',
+			'a.ch-prev',
+			'a[rel="prev"]'
+		]);
+		const fromNextNav = pickNav([
+			'.chnav a[rel="next"]',
+			'.chnav a.next',
+			'.navi a.next',
+			'.nextprev a[rel="next"]',
+			'a.ch-next',
+			'a[rel="next"]'
+		]);
+		if (fromPrevNav) prevChapterId = fromPrevNav;
+		if (fromNextNav) nextChapterId = fromNextNav;
+
+		if (!prevChapterId || !nextChapterId) {
+			$('a').each((_, a) => {
+				const t = $(a).text().replace(/\s+/g, ' ').trim().toLowerCase();
+				const href = $(a).attr('href') || '';
+				if (!href || href === '#' || href.startsWith('javascript:')) return;
+				const id = this.cleanId(href);
+				if (!id || id === path || id === '/') return;
+				if (new RegExp(`^${this.seriesPath}/[^/]+$`, 'i').test(id)) return;
+				if (!prevChapterId && /^(prev|previous|←|‹|«)$/i.test(t)) prevChapterId = id;
+				if (!nextChapterId && /^(next|→|›|»)$/i.test(t)) nextChapterId = id;
+			});
+		}
+
+		if (!prevChapterId && adj.prev) prevChapterId = adj.prev;
+		if (!nextChapterId && adj.next) nextChapterId = adj.next;
 
 		return { title, content, prevChapterId, nextChapterId };
 	}
