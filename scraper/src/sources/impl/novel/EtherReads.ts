@@ -7,9 +7,12 @@
  * Search  : /?s={q}
  * Detail  : /series/{slug}/
  * Chapter : /{slug}-chapter-{n}/  (root path)
- * Content : .epcontent / .entry-content / .reading-content (TEXT, bukan gambar)
+ * Content : ThemesiaSource.getChapterContent (TEXT + prev/next)
  *
  * Bahasa default: en
+ *
+ * JANGAN override getChapterContent tanpa prevChapterId/nextChapterId
+ * — biarkan inherit dari ThemesiaSource.
  */
 
 import * as cheerio from 'cheerio';
@@ -39,7 +42,13 @@ export class EtherReadsSource extends ThemesiaSource {
 	protected normalizeTitle(raw: string): string {
 		return super
 			.normalizeTitle(raw, this.name)
-			.replace(new RegExp(`\\s*[-|]\\s*${this.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`, 'i'), '')
+			.replace(
+				new RegExp(
+					`\\s*[-|]\\s*${this.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`,
+					'i'
+				),
+				''
+			)
 			.trim();
 	}
 
@@ -49,7 +58,7 @@ export class EtherReadsSource extends ThemesiaSource {
 			let list = this.parseCards(
 				cheerio.load(await this.fetchHtml(this.listPath(p)))
 			);
-			
+
 			if (list.length < 8 && p === 1) {
 				try {
 					const home = this.parseCards(cheerio.load(await this.fetchHtml('/')));
@@ -77,43 +86,6 @@ export class EtherReadsSource extends ThemesiaSource {
 		return [];
 	}
 
-	async getChapterContent(chapterId: string): Promise<{
-		title: string;
-		content: string;
-	}> {
-		const path = this.cleanId(chapterId);
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-		const $ = cheerio.load(html);
-
-		const title = this.normalizeTitle(
-			$('h1.entry-title, h1').first().text() ||
-				$('meta[property="og:title"]').attr('content') ||
-				path
-		);
-
-		const root = $(
-			[
-				'.epcontent.entry-content',
-				'.entry-content .epcontent',
-				'#readerarea',
-				'.reading-content',
-				'.text-left',
-				'.entry-content',
-				'.chapter-content',
-				'.content-area'
-			].join(', ')
-		).first();
-
-		root.find('script, style, .ads, .code-block, .sharedaddy, .chapter-nav, nav').remove();
-
-		let content = (root.html() || '').trim();
-		if (!content) {
-			content = root.text().replace(/\s+/g, ' ').trim();
-		}
-
-		console.log(`[${this.id}] chapter content ${path} → ${content.length} chars`);
-		return { title, content };
-	}
 }
 
 export default EtherReadsSource;
