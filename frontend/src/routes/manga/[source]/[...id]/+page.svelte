@@ -696,7 +696,6 @@
 				sortNewest = savedSort === 'true';
 			}
 		} catch {
-			/* ignore */
 		}
 
 		if (manga?.id) {
@@ -1245,11 +1244,6 @@
 											</span>
 										</div>
 									{/if}
-									<span
-										class="chapter-status-dot absolute top-1.5 left-1.5 z-10 {isChapterRead(chapter) ? 'is-read' : ''}"
-										title={isChapterRead(chapter) ? 'Read' : 'Unread'}
-										aria-hidden="true"
-									></span>
 									{#if chapterCover(chapter)}
 										<img
 											src={proxyImage(chapterCover(chapter), 150, 150)}
@@ -1326,11 +1320,6 @@
 										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''} {isChapterRead(chapter) ? 'chapter-read' : ''}"
 									>
 										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
-											<span
-												class="chapter-status-dot {isChapterRead(chapter) ? 'is-read' : ''}"
-												title={isChapterRead(chapter) ? 'Read' : 'Unread'}
-												aria-hidden="true"
-											></span>
 											{#if chapter.isLocked}
 												<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
 													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
@@ -1408,11 +1397,6 @@
 									</div>
 									<div class="min-w-0 flex-1 px-3 py-3">
 										<p class="detail-title flex items-center gap-2 truncate text-sm font-bold">
-											<span
-												class="chapter-status-dot {isChapterRead(chapter) ? 'is-read' : ''}"
-												title={isChapterRead(chapter) ? 'Read' : 'Unread'}
-												aria-hidden="true"
-											></span>
 											{#if chapter.isLocked}
 												<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
 													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
@@ -1785,19 +1769,6 @@
 	.chapter-read:hover .detail-title span {
 		color: #d4d4d8 !important;
 	}
-	.chapter-status-dot {
-		flex-shrink: 0;
-		width: 0.5rem;
-		height: 0.5rem;
-		border-radius: 9999px;
-		background: #f43f5e;
-		box-shadow: 0 0 8px rgba(244, 63, 94, 0.75);
-	}
-	.chapter-status-dot.is-read {
-		background: #52525b;
-		box-shadow: none;
-		opacity: 0.9;
-	}
 	.chapter-mark-read {
 		background: rgba(139, 92, 246, 0.15);
 		border-color: rgba(139, 92, 246, 0.4);
@@ -1826,15 +1797,11 @@
 	:global(html.light) .chapter-read .detail-muted {
 		color: #71717a !important;
 	}
-	:global(html.light) .chapter-status-dot.is-read {
-		background: #71717a;
-	}
 	:global(html.light) .chapter-mark-read {
 		background: rgba(139, 92, 246, 0.12);
 		border-color: rgba(139, 92, 246, 0.35);
 		color: #6d28d9;
 	}
-
 	.detail-chapter-thumb.chapter-read img {
 		filter: grayscale(0.4) brightness(0.55);
 	}
@@ -1847,7 +1814,6 @@
 	:global(html.light) .detail-chapter-thumb.chapter-read img {
 		filter: grayscale(0.35) brightness(0.7);
 	}
-
 	.detail-chapter-list.chapter-read img {
 		filter: grayscale(0.35) brightness(0.5);
 		opacity: 0.85;
