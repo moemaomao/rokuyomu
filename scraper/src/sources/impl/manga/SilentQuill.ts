@@ -1,38 +1,67 @@
 /**
- * SilentQuill / KDT Scans adapter (MangaThemesia)
+ * SilentQuill adapter (silentquill.net)
+ * → extends NextDataSource
  *
- * Domain  : https://silentquill.net
- * Latest  : /manga/?page=N&order=update
- * Search  : /?s={query}&page=N
- * Detail  : /{slug}/
- * Chapter : /{slug}-ch-{n}/  atau  /{slug}-chapter-{n}/
- * Pages   : #readerarea img
+ * Site   : Next.js (bukan Themesia lagi)
+ * Domain : https://silentquill.net
  *
- * ID format:
- *   manga   : "/{slug}"
- *   chapter : "/{slug}-ch-{n}"  (path asli di site)
+ * Data routes (Pages Router style — sesuaikan setelah cek Network tab):
+ *   Latest  : GET /_next/data/{buildId}/index.json
+ *             GET /_next/data/{buildId}/manga.json?page=N
+ *   Search  : GET /_next/data/{buildId}/search.json?q=
+ *   Detail  : GET /_next/data/{buildId}/{slug}.json
+ *             GET /_next/data/{buildId}/manga/{slug}.json?slug=
+ *   Chapter : GET /_next/data/{buildId}/{slug}-chapter-{n}.json
+ *
+ * URL publik (dari site):
+ *   manga   : /{slug}
+ *   chapter : /{slug}-chapter-{n}  |  /{slug}-ch-{n}
  *
  * Bahasa default: English
+ *
+ * Catatan:
+ * - Kalau App Router (RSC) tanpa /_next/data, adapter ini akan gagal di ensureBuildId /
+ *   dataGet → cek Network tab browser & sesuaikan dataPath / field pageProps.
+ * - Field pageProps di-map secara toleran (series / mangas / comics / data / ...).
  */
 
-import { BaseSource } from '../../BaseSource';
+import { NextDataSource } from '../../family/NextDataSource';
 import type { Chapter, Manga, MangaDetails } from '../../types-manga';
-import * as cheerio from 'cheerio';
 
-export class SilentQuillSource extends BaseSource {
+type AnyRec = Record<string, unknown>;
+
+export class SilentQuillSource extends NextDataSource {
 	id = 'silentquill';
 	name = 'SilentQuill';
 	baseUrl = 'https://silentquill.net';
 
-	private readonly PER_PAGE = 30;
-	private readonly DEFAULT_LANG = 'en';
+	protected defaultLang = 'en';
+	protected perPage = 30;
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
+
+	private asArr(v: unknown): AnyRec[] {
+		if (Array.isArray(v)) return v as AnyRec[];
+		return [];
+	}
+
+	private str(v: unknown): string {
+		return v == null ? '' : String(v).trim();
+	}
 
 	private absUrl(url: string): string {
 		if (!url) return '';
 		if (url.startsWith('http')) return url;
 		if (url.startsWith('//')) return `https:${url}`;
+		if (url.startsWith('/_next/image')) {
+			try {
+				const u = new URL(url, this.baseUrl);
+				const real = u.searchParams.get('url');
+				if (real) return decodeURIComponent(real);
+			} catch {
+				/* ignore */
+			}
+		}
 		return `${this.baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
 	}
 
@@ -49,24 +78,8 @@ export class SilentQuillSource extends BaseSource {
 		return id.replace(/\/+$/, '').split('?')[0] || '/';
 	}
 
-	private decodeHtml(s: string): string {
-		return String(s || '')
-			.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-			.replace(/&#x([0-9a-f]+);/gi, (_, h) =>
-				String.fromCharCode(parseInt(h, 16))
-			)
-			.replace(/&amp;/g, '&')
-			.replace(/&quot;/g, '"')
-			.replace(/&#039;/g, "'")
-			.replace(/&lt;/g, '<')
-			.replace(/&gt;/g, '>')
-			.replace(/&nbsp;/g, ' ')
-			.trim();
-	}
-
 	private normalizeTitle(raw: string): string {
-		if (!raw) return '';
-		return this.decodeHtml(raw)
+		return this.str(raw)
 			.replace(/\s+/g, ' ')
 			.replace(/\s*[-|]\s*(Silent\s*Quill|KDT\s*Scans|Armageddon).*$/i, '')
 			.trim();
@@ -83,9 +96,7 @@ export class SilentQuillSource extends BaseSource {
 			}
 			return major;
 		}
-		const m = String(text).match(
-			/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i
-		);
+		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i);
 		if (m) {
 			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
 			return parseInt(m[1], 10);
@@ -94,357 +105,418 @@ export class SilentQuillSource extends BaseSource {
 		return n ? parseFloat(n[1]) : 0;
 	}
 
-	private preferFullCover(url: string): string {
-		if (!url) return '';
-		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
+	private mapStatus(raw?: string | null): string {
+		const s = String(raw || '').toLowerCase();
+		if (/complet|finish|end|tamat/.test(s)) return 'Completed';
+		if (/hiatus/.test(s)) return 'Hiatus';
+		if (/drop|cancel/.test(s)) return 'Dropped';
+		return 'Ongoing';
 	}
 
-	private mangaSlug(mangaId: string): string {
-		const id = this.cleanId(mangaId);
-		const parts = id.split('/').filter(Boolean);
-		// site pakai root slug, bukan /manga/{slug}
-		if (parts[0] === 'manga' && parts[1]) return parts[1];
-		return parts[parts.length - 1] || '';
+	private mapType(raw?: string | null): string {
+		const t = String(raw || '').toLowerCase();
+		if (t.includes('manhwa')) return 'manhwa';
+		if (t.includes('manhua')) return 'manhua';
+		if (t.includes('novel')) return 'novel';
+		return 'manga';
 	}
 
-	private parseCards($: cheerio.CheerioAPI): Manga[] {
-		const res: Manga[] = [];
+	/** Ambil array list dari pageProps dengan key yang umum di Next manga sites */
+	private extractList(pp: AnyRec): AnyRec[] {
+		const candidates = [
+			pp.series,
+			pp.mangas,
+			pp.comics,
+			pp.entries,
+			pp.items,
+			pp.list,
+			pp.latest,
+			pp.posts,
+			(pp.data as AnyRec)?.series,
+			(pp.data as AnyRec)?.mangas,
+			(pp.data as AnyRec)?.list,
+			(pp.latestEntries as AnyRec)?.blocks
+		];
+		for (const c of candidates) {
+			if (Array.isArray(c) && c.length) {
+				// Flame-style blocks: [{ series: [...] }]
+				if ((c[0] as AnyRec)?.series && Array.isArray((c[0] as AnyRec).series)) {
+					const flat: AnyRec[] = [];
+					for (const b of c) {
+						flat.push(...this.asArr((b as AnyRec).series));
+					}
+					return flat;
+				}
+				return c as AnyRec[];
+			}
+		}
+		return [];
+	}
+
+	private itemSlug(it: AnyRec): string {
+		const s =
+			this.str(it.slug) ||
+			this.str(it.title_slug) ||
+			this.str(it.series_slug) ||
+			this.str(it.path) ||
+			this.str(it.id);
+		return s.replace(/^\/+/, '').split('/')[0] || '';
+	}
+
+	private itemTitle(it: AnyRec): string {
+		return this.normalizeTitle(
+			this.str(it.title) || this.str(it.name) || this.str(it.series_name) || this.itemSlug(it)
+		);
+	}
+
+	private itemCover(it: AnyRec): string {
+		const raw =
+			this.str(it.cover) ||
+			this.str(it.thumbnail) ||
+			this.str(it.image) ||
+			this.str(it.poster) ||
+			this.str(it.gambar) ||
+			this.str((it.coverImage as AnyRec)?.url);
+		return this.absUrl(raw);
+	}
+
+	private itemLatestChapter(it: AnyRec): string | undefined {
+		const ch =
+			it.latestChapter ??
+			it.latest_chapter ??
+			it.lastChapter ??
+			it.last_chapter ??
+			it.chapter ??
+			it.chapters;
+		if (Array.isArray(ch) && ch.length) {
+			const first = ch[0] as AnyRec;
+			const n = this.parseChapterNumber(
+				this.str(first.number ?? first.chapter ?? first.title ?? first.name)
+			);
+			return n > 0 ? String(n) : undefined;
+		}
+		if (typeof ch === 'number') return String(ch);
+		if (typeof ch === 'string') {
+			const n = this.parseChapterNumber(ch);
+			return n > 0 ? String(n) : ch || undefined;
+		}
+		return undefined;
+	}
+
+	private mapListItem(it: AnyRec): Manga | null {
+		const slug = this.itemSlug(it);
+		if (!slug || /^(page|manga|comics|series|search|api)$/i.test(slug)) return null;
+		const title = this.itemTitle(it);
+		if (!title) return null;
+		return {
+			id: `/${slug}`,
+			title,
+			cover: this.itemCover(it),
+			sourceId: this.id,
+			type: this.mapType(this.str(it.type ?? it.format ?? it.genre)),
+			status: this.mapStatus(this.str(it.status)),
+			latestChapter: this.itemLatestChapter(it),
+			lang: this.defaultLang
+		};
+	}
+
+	private mapChapters(raw: unknown, mangaSlug: string): Chapter[] {
+		const list = this.asArr(raw);
+		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
-		const cards = $(
-			'div.listupd div.bsx, .postbody div.bsx, div.bsx, .page-item-detail, .bs'
-		);
+		for (const ch of list) {
+			const numRaw =
+				this.str(ch.number) ||
+				this.str(ch.chapter) ||
+				this.str(ch.chapter_number) ||
+				this.str(ch.name) ||
+				this.str(ch.title);
+			const number = this.parseChapterNumber(numRaw);
+			const slugPart =
+				this.str(ch.slug) ||
+				this.str(ch.path) ||
+				(number > 0
+					? `${mangaSlug}-chapter-${number}`
+					: this.str(ch.id));
+			if (!slugPart) continue;
 
-		cards.each((_, card) => {
-			const $card = $(card);
-
-			// prioritaskan link yang mengarah ke manga detail
-			const a = $card
-				.find('a[href]')
-				.filter((_, el) => {
-					const h = ($(el).attr('href') || '').split('?')[0];
-					// exclude chapter links & pagination
-					if (/-(ch|chapter)-\d+/i.test(h)) return false;
-					if (/\/page\/\d+/i.test(h)) return false;
-					if (/\/manga\/?$/i.test(h)) return false;
-					// terima /slug/ atau /manga/slug/
-					return /\/[a-z0-9-]+\/?$/i.test(h) || /\/manga\/[^/]+\/?$/i.test(h);
-				})
-				.first();
-
-			const href = a.attr('href') || '';
-			if (!href) return;
-
-			const id = this.cleanId(href);
-			if (seen.has(id) || id === '/' || id === '/manga') return;
+			let id = this.cleanId(slugPart);
+			if (!id.includes(mangaSlug) && number > 0) {
+				id = `/${mangaSlug}-chapter-${number}`;
+			}
+			if (seen.has(id)) continue;
 			seen.add(id);
 
-			let title =
-				a.attr('title') ||
-				$card.find('.tt a, .tt, h3, h5, .title').first().text() ||
-				$card.find('img').first().attr('alt') ||
-				'';
-			title = this.normalizeTitle(title);
-			if (!title) return;
+			const isLocked = Boolean(
+				ch.locked || ch.isLocked || ch.premium || ch.is_premium || ch.coin
+			);
+			const titleBase =
+				number > 0 ? `Chapter ${number}` : this.normalizeTitle(numRaw) || id;
 
-			const img = $card.find('img').first();
-			let cover =
-				img.attr('data-src') ||
-				img.attr('data-lazy-src') ||
-				img.attr('src') ||
-				'';
-			if (cover.startsWith('data:')) cover = '';
-			cover = this.preferFullCover(this.absUrl(cover));
-
-			const epxs = $card
-				.find('.epxs, .fivchap, .chfiv, .chapter, .font-meta.chapter')
-				.first()
-				.text();
-			const latestChapter = epxs
-				? String(
-						this.parseChapterNumber(epxs) ||
-							epxs.replace(/\s+/g, ' ').trim()
-					)
-				: undefined;
-
-			const typeText = $card.text().toLowerCase();
-			let type = 'manga';
-			if (/\bmanhwa\b/.test(typeText)) type = 'manhwa';
-			else if (/\bmanhua\b/.test(typeText)) type = 'manhua';
-
-			res.push({
+			chapters.push({
 				id,
-				title,
-				cover,
-				sourceId: this.id,
-				type,
-				status: 'Ongoing',
-				latestChapter,
-				lang: this.DEFAULT_LANG
+				title: isLocked ? `${titleBase} 🔒` : titleBase,
+				number: number || chapters.length + 1,
+				date: this.str(ch.date || ch.released || ch.created_at) || undefined,
+				lang: this.defaultLang
 			});
-		});
+		}
 
-		return res;
+		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
+		return chapters;
 	}
 
 	// ── Catalog ──────────────────────────────────────────────────────────────
 
-	async getLatestManga(page: number, _opts?: { lang?: string; type?: string }): Promise<Manga[]> {
-  try {
-    const p = Math.max(1, Number(page) || 1);
-    const html = await this.fetchHtml(`/manga/?page=${p}&order=update`);
+	async getLatestManga(page: number): Promise<Manga[]> {
+		const p = Math.max(1, Number(page) || 1);
+		try {
+			// Coba beberapa path umum Next manga
+			const attempts: Array<() => Promise<unknown>> = [
+				() => this.dataGet('index.json'),
+				() => this.dataGet('manga.json', { page: p, order: 'update' }),
+				() => this.dataGet('comics.json', { page: p }),
+				() => this.dataGet(`manga/page/${p}.json`)
+			];
 
-    console.log('[silentquill] has __NEXT_DATA__?', html.includes('__NEXT_DATA__'));
-    console.log('[silentquill] has buildId?', /"buildId"\s*:\s*"/.test(html));
-    
-    const nextDataMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
-    if (nextDataMatch) {
-      console.log('[silentquill] __NEXT_DATA__ sample:', nextDataMatch[1].slice(0, 1500));
-    }
+			let rows: AnyRec[] = [];
+			for (const tryFetch of attempts) {
+				try {
+					const raw = await tryFetch();
+					const pp = this.pageProps<AnyRec>(raw);
+					rows = this.extractList(pp);
+					if (rows.length) break;
+				} catch {
+					/* coba path berikutnya */
+				}
+			}
 
-    const apiMatches = html.match(/\/api\/[a-z0-9/_-]+/gi) || [];
-    console.log('[silentquill] API paths found:', [...new Set(apiMatches)].slice(0, 20));
+			const seen = new Set<string>();
+			const list: Manga[] = [];
+			for (const it of rows) {
+				const m = this.mapListItem(it);
+				if (!m || seen.has(m.id)) continue;
+				seen.add(m.id);
+				list.push(m);
+			}
 
-    const seriesMatches = html.match(/"(?:series|comics|manga|posts)"\s*:/gi) || [];
-    console.log('[silentquill] series-like keys:', seriesMatches.slice(0, 10));
+			const start = (p - 1) * this.perPage;
+			const pageList =
+				list.length > this.perPage
+					? list.slice(start, start + this.perPage)
+					: list.slice(0, this.perPage);
 
-    console.log('[silentquill] HTML length:', html.length);
-    console.log('[silentquill] body sample (mid):', html.slice(50000, 52000)); // tengah HTML
+			console.log(
+				`[silentquill] latest page=${p} → ${pageList.length} (pool=${list.length})`
+			);
+			return pageList;
+		} catch (e) {
+			console.error('[silentquill] getLatestManga', e);
+			return [];
+		}
+	}
 
-    const $ = cheerio.load(html);
-    const list = this.parseCards($);
-    console.log(`[silentquill] latest page=${p} → ${list.length} items`);
-    return list;
-  } catch (e) {
-    console.error('[silentquill] getLatestManga', e);
-    return [];
-  }
-}
-
-	async searchManga(
-		query: string,
-		opts?: { page?: number; lang?: string; type?: string }
-	): Promise<Manga[]> {
+	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
 		const q = (query || '').trim();
 		const page = Math.max(1, opts?.page || 1);
-		if (!q) return this.getLatestManga(page, opts);
+		if (!q) return this.getLatestManga(page);
 
 		try {
-			const path =
-				page > 1
-					? `/?s=${encodeURIComponent(q)}&page=${page}`
-					: `/?s=${encodeURIComponent(q)}`;
-			const html = await this.fetchHtml(path);
-			const $ = cheerio.load(html);
-			const list = this.parseCards($);
-			console.log(
-				`[silentquill] search "${q}" page=${page} → ${list.length} items`
+			const attempts: Array<() => Promise<unknown>> = [
+				() => this.dataGet('search.json', { q, page }),
+				() => this.dataGet('index.json', { q, page }),
+				() => this.dataGet('manga.json', { s: q, page })
+			];
+
+			let rows: AnyRec[] = [];
+			for (const tryFetch of attempts) {
+				try {
+					const raw = await tryFetch();
+					const pp = this.pageProps<AnyRec>(raw);
+					rows = this.extractList(pp);
+					if (rows.length) break;
+				} catch {
+					/* next */
+				}
+			}
+
+			const nq = q.toLowerCase();
+			const filtered = rows.filter((it) =>
+				this.itemTitle(it).toLowerCase().includes(nq)
 			);
-			return list;
+			const use = filtered.length ? filtered : rows;
+
+			const seen = new Set<string>();
+			const list: Manga[] = [];
+			for (const it of use) {
+				const m = this.mapListItem(it);
+				if (!m || seen.has(m.id)) continue;
+				seen.add(m.id);
+				list.push(m);
+			}
+
+			const start = (page - 1) * this.perPage;
+			return list.slice(start, start + this.perPage);
 		} catch (e) {
 			console.error('[silentquill] searchManga', e);
 			return [];
 		}
 	}
 
-	async getMangaDetails(
-		mangaId: string,
-		_opts?: { lang?: string }
-	): Promise<MangaDetails> {
+	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		const id = this.cleanId(mangaId);
-		const html = await this.fetchHtml(id.endsWith('/') ? id : `${id}/`);
-		const $ = cheerio.load(html);
-		const slug = this.mangaSlug(id);
+		const slug = id.replace(/^\//, '').split('/')[0];
 
-		const title = this.normalizeTitle(
-			$('h1.entry-title, h1').first().text() ||
-				$('meta[property="og:title"]').attr('content') ||
-				''
-		);
+		try {
+			const attempts: Array<() => Promise<unknown>> = [
+				() => this.dataGet(`${slug}.json`, { slug }),
+				() => this.dataGet(`manga/${slug}.json`, { slug }),
+				() => this.dataGet(`comics/${slug}.json`, { slug }),
+				() => this.dataGet(`series/${slug}.json`, { slug })
+			];
 
-		let cover =
-			$('.thumb img, .seriestuimg img, .infomanga img, img.wp-post-image, .summary_image img')
-				.first()
-				.attr('data-src') ||
-			$('.thumb img, .seriestuimg img, .infomanga img, img.wp-post-image, .summary_image img')
-				.first()
-				.attr('src') ||
-			$('meta[property="og:image"]').attr('content') ||
-			'';
-		cover = this.preferFullCover(this.absUrl(cover));
-
-		const description = this.decodeHtml(
-			$('.entry-content, .desc, .seriestucontent .entry-content, .description-summary .summary__content, .summary__content')
-				.first()
-				.text()
-				.replace(/\s+/g, ' ')
-				.trim()
-		);
-
-		const genres: string[] = [];
-		$('a[href*="/genres/"], .genres-content a, .mgen a').each((_, el) => {
-			const t = $(el).text().replace(/\s+/g, ' ').trim();
-			if (t && t.length < 40 && !genres.includes(t)) genres.push(t);
-		});
-
-		let status = 'Ongoing';
-		$('.imptdt, .infotable tr, .fmed, .post-status').each((_, el) => {
-			const text = $(el).text().replace(/\s+/g, ' ').trim();
-			if (/status/i.test(text)) {
-				if (/complet/i.test(text)) status = 'Completed';
-				else if (/hiatus/i.test(text)) status = 'Hiatus';
-				else if (/drop|cancel/i.test(text)) status = 'Dropped';
-			}
-		});
-
-		const authors: string[] = [];
-		$('.fmed, .imptdt, .infotable tr, .author-content a, .artist-content a').each(
-			(_, el) => {
-				const text = $(el).text().replace(/\s+/g, ' ').trim();
-				if (/author|artist/i.test(text)) {
-					const val = text
-						.replace(/author|artist/gi, '')
-						.replace(/\s+/g, ' ')
-						.trim();
-					if (val && val.length < 80 && !authors.includes(val)) {
-						authors.push(val);
-					}
-				} else {
-					const t = $(el).text().replace(/\s+/g, ' ').trim();
-					if (t && t.length < 60 && !authors.includes(t)) authors.push(t);
+			let pp: AnyRec = {};
+			for (const tryFetch of attempts) {
+				try {
+					const raw = await tryFetch();
+					pp = this.pageProps<AnyRec>(raw);
+					if (pp && Object.keys(pp).length) break;
+				} catch {
+					/* next */
 				}
 			}
-		);
 
-		const chapters: Chapter[] = [];
-		const seen = new Set<string>();
+			const series =
+				(pp.series as AnyRec) ||
+				(pp.manga as AnyRec) ||
+				(pp.comic as AnyRec) ||
+				(pp.data as AnyRec) ||
+				pp;
 
-		$('#chapterlist li, .eplister li, #chapterlist ul li, .wp-manga-chapter').each(
-			(_, li) => {
-				const $li = $(li);
-				const a = $li.find('a').first();
-				const href = (a.attr('href') || '').trim();
+			const title = this.normalizeTitle(
+				this.str(series.title) || this.str(series.name) || slug
+			);
+			const cover = this.itemCover(series);
+			const description = this.str(
+				series.description || series.synopsis || series.summary || series.deskripsi
+			);
+			const status = this.mapStatus(this.str(series.status));
+			const type = this.mapType(this.str(series.type || series.format));
 
-				const dataNum = $li.attr('data-num') || '';
-				const numText =
-					$li.find('.chapternum').text() ||
-					a.attr('data-title') ||
-					a.text() ||
-					dataNum;
-
-				const isPaid =
-					$li.find('.fa-coins, .ath-lock, [class*="coin"]').length > 0 ||
-					!!a.attr('data-coin') ||
-					a.attr('data-bs-target') === '#lockedChapterModal' ||
-					/coin|premium|paid/i.test($li.text());
-
-				let chId: string;
-				if (href && !href.startsWith('#') && !/javascript:/i.test(href)) {
-					chId = this.cleanId(href);
-				} else if (slug && (dataNum || numText)) {
-					const n = dataNum || String(this.parseChapterNumber(numText));
-					const pathNum = String(n).replace(/\./g, '-');
-					chId = `/${slug}-ch-${pathNum}`;
-				} else {
-					return;
-				}
-
-				if (seen.has(chId)) return;
-				seen.add(chId);
-
-				const number =
-					(dataNum ? parseFloat(dataNum) : 0) ||
-					this.parseChapterNumber(numText, chId);
-
-				const date = $li
-					.find('.chapterdate, .chapter-release-date')
-					.text()
-					.replace(/\s+/g, ' ')
-					.trim();
-
-				const titleBase = (numText || `Chapter ${number}`)
-					.replace(/\s+/g, ' ')
-					.trim();
-
-				chapters.push({
-					id: chId,
-					title: isPaid ? `${titleBase} 🔒` : titleBase,
-					number: number || chapters.length + 1,
-					date: date || undefined
-				});
+			const authors = this.asArr(series.authors || series.author)
+				.map((a) => this.str(typeof a === 'string' ? a : (a as AnyRec).name))
+				.filter(Boolean);
+			if (!authors.length && series.author) {
+				authors.push(...this.str(series.author).split(/[,&/]/).map((s) => s.trim()));
 			}
-		);
 
-		// newest first
-		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
+			const genres = this.asArr(series.genres || series.genre)
+				.map((g) => this.str(typeof g === 'string' ? g : (g as AnyRec).name))
+				.filter(Boolean);
 
-		const latestChapter =
-			chapters.length > 0 ? String(chapters[0].number) : undefined;
+			const chapters = this.mapChapters(
+				series.chapters || series.chapterList || pp.chapters,
+				slug
+			);
 
-		console.log(
-			`[silentquill] details ${id} → ch=${chapters.length} status=${status}`
-		);
+			const latestChapter =
+				chapters.length > 0 ? String(chapters[0].number) : this.itemLatestChapter(series);
 
-		return {
-			id,
-			sourceId: this.id,
-			title: title || slug || id,
-			cover,
-			type: 'manga',
-			status,
-			latestChapter,
-			lang: this.DEFAULT_LANG,
-			description,
-			authors: [...new Set(authors)],
-			genres,
-			chapters
-		};
+			console.log(
+				`[silentquill] details ${id} → ch=${chapters.length} status=${status}`
+			);
+
+			return {
+				id: `/${slug}`,
+				sourceId: this.id,
+				title,
+				cover,
+				type,
+				status,
+				latestChapter,
+				lang: this.defaultLang,
+				description,
+				authors: [...new Set(authors.filter(Boolean))],
+				genres,
+				chapters
+			};
+		} catch (e) {
+			console.error('[silentquill] getMangaDetails', e);
+			return {
+				id: `/${slug}`,
+				sourceId: this.id,
+				title: slug,
+				cover: '',
+				type: 'manga',
+				status: 'Ongoing',
+				lang: this.defaultLang,
+				description: '',
+				authors: [],
+				genres: [],
+				chapters: []
+			};
+		}
 	}
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
+		const path = this.cleanId(chapterId);
+		const dataPath = path.replace(/^\//, '') + '.json';
+
 		try {
-			const path = this.cleanId(chapterId);
-			const html = await this.fetchHtml(
-				path.endsWith('/') ? path : `${path}/`
-			);
-			const $ = cheerio.load(html);
+			const attempts: Array<() => Promise<unknown>> = [
+				() => this.dataGet(dataPath),
+				() => this.dataGet(path.replace(/^\//, '') + '/index.json')
+			];
+
+			let pp: AnyRec = {};
+			for (const tryFetch of attempts) {
+				try {
+					const raw = await tryFetch();
+					pp = this.pageProps<AnyRec>(raw);
+					if (pp && Object.keys(pp).length) break;
+				} catch {
+					/* next */
+				}
+			}
 
 			const pages: string[] = [];
 			const seen = new Set<string>();
-
 			const push = (src?: string | null) => {
 				if (!src) return;
 				if (src.startsWith('data:')) return;
-				const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
+				const url = this.absUrl(String(src).split(/\s+/)[0]);
 				if (!url || seen.has(url)) return;
-				if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
+				if (/logo|icon|avatar|emoji|spinner|loading|placeholder/i.test(url)) return;
 				seen.add(url);
 				pages.push(url);
 			};
 
-			$('#readerarea img, .readerarea img, #reader img, .reading-content img, .page-break img, .wp-manga-chapter-img').each(
-				(_, img) => {
-					const $img = $(img);
-					push(
-						$img.attr('data-src') ||
-							$img.attr('data-lazy-src') ||
-							$img.attr('src')
-					);
-				}
-			);
+			const candidates = [
+				pp.pages,
+				pp.images,
+				pp.chapterPages,
+				(pp.chapter as AnyRec)?.pages,
+				(pp.chapter as AnyRec)?.images,
+				(pp.data as AnyRec)?.pages,
+				(pp.data as AnyRec)?.images
+			];
 
-			if (pages.length === 0) {
-				const re =
-					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
-				let m: RegExpExecArray | null;
-				while ((m = re.exec(html)) !== null) {
-					push(m[1]);
+			for (const c of candidates) {
+				if (!Array.isArray(c)) continue;
+				for (const item of c) {
+					if (typeof item === 'string') push(item);
+					else if (item && typeof item === 'object') {
+						const o = item as AnyRec;
+						push(
+							this.str(o.url || o.src || o.image || o.path || o.link)
+						);
+					}
 				}
+				if (pages.length) break;
 			}
 
-			console.log(
-				`[silentquill] getChapterPages ${path} → ${pages.length} pages`
-			);
+			console.log(`[silentquill] getChapterPages ${path} → ${pages.length}`);
 			return pages;
 		} catch (e) {
 			console.error('[silentquill] getChapterPages', e);
@@ -452,3 +524,5 @@ export class SilentQuillSource extends BaseSource {
 		}
 	}
 }
+
+export default SilentQuillSource;
