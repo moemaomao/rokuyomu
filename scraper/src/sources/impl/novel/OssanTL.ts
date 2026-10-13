@@ -7,8 +7,7 @@
  * Search  : /?s={q}
  * Detail  : /series/{slug}/
  * Chapter : /{slug}-chapter-{n}/  (root path)
- * Content : .epcontent / .entry-content / .reading-content (TEXT, bukan gambar)
- *
+ * Content : .epcontent / .entry-content / .reading-content (TEXT)
  * Bahasa default: id
  */
 
@@ -75,44 +74,6 @@ export class OssanTLSource extends ThemesiaSource {
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
-	}
-
-	async getChapterContent(chapterId: string): Promise<{
-		title: string;
-		content: string;
-	}> {
-		const path = this.cleanId(chapterId);
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-		const $ = cheerio.load(html);
-
-		const title = this.normalizeTitle(
-			$('h1.entry-title, h1').first().text() ||
-				$('meta[property="og:title"]').attr('content') ||
-				path
-		);
-
-		const root = $(
-			[
-				'.epcontent.entry-content',
-				'.entry-content .epcontent',
-				'#readerarea',
-				'.reading-content',
-				'.text-left',
-				'.entry-content',
-				'.chapter-content',
-				'.content-area'
-			].join(', ')
-		).first();
-
-		root.find('script, style, .ads, .code-block, .sharedaddy, .chapter-nav, nav').remove();
-
-		let content = (root.html() || '').trim();
-		if (!content) {
-			content = root.text().replace(/\s+/g, ' ').trim();
-		}
-
-		console.log(`[${this.id}] chapter content ${path} → ${content.length} chars`);
-		return { title, content };
 	}
 }
 
