@@ -208,8 +208,9 @@ export abstract class MadaraSource extends BaseSource {
 			if (seen.has(id)) return;
 			seen.add(id);
 
-			const title = $a.text().replace(/\s+/g, ' ').trim() || id;
-			const number = this.parseChapterNumber(title, id);
+			const rawText = $a.text().replace(/\s+/g, ' ').trim();
+			const number = this.parseChapterNumber(rawText || id, id);
+			const title = number > 0 ? `Chapter ${number}` : rawText || id;
 			const date =
 				$a.closest('li').find('.chapter-release-date').text().trim() ||
 				undefined;
@@ -283,30 +284,43 @@ export abstract class MadaraSource extends BaseSource {
 	}
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
-		const path = this.cleanId(chapterId);
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-		const $ = cheerio.load(html);
-		const pages: string[] = [];
-		const seen = new Set<string>();
+		try {
+			const path = this.cleanId(chapterId);
+			const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+			const $ = cheerio.load(html);
+			const pages: string[] = [];
+			const seen = new Set<string>();
 
-		const push = (src?: string | null) => {
-			if (!src || src.startsWith('data:')) return;
-			const url = this.absUrl(src.split(/\s+/)[0]);
-			if (!url || seen.has(url)) return;
-			if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
-			seen.add(url);
-			pages.push(url);
-		};
+			const push = (src?: string | null) => {
+				if (!src || src.startsWith('data:')) return;
+				const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
+				if (!url || seen.has(url)) return;
+				if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
+				seen.add(url);
+				pages.push(url);
+			};
 
-		$(this.pageImageSelector).each((_, img) => {
-			const $img = $(img);
-			push(
-				$img.attr('data-src') ||
-					$img.attr('data-lazy-src') ||
-					$img.attr('src')
-			);
-		});
+			$(this.pageImageSelector).each((_, img) => {
+				const $img = $(img);
+				push(
+					$img.attr('data-src') ||
+						$img.attr('data-lazy-src') ||
+						$img.attr('data-srcset')?.split(/\s+/)[0] ||
+						$img.attr('src')
+				);
+			});
 
-		return pages;
+			if (pages.length === 0) {
+				const re =
+					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
+				let m: RegExpExecArray | null;
+				while ((m = re.exec(html)) !== null) push(m[1]);
+			}
+
+			return pages;
+		} catch (e) {
+			console.error(`[${this.id}] getChapterPages`, e);
+			return [];
+		}
 	}
 }
