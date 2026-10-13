@@ -309,12 +309,27 @@ export abstract class MadaraSource extends BaseSource {
 		$li: cheerio.Cheerio<any>
 	): boolean {
 		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
-		if (/premium|locked|vip|paywall|coin|paid/.test(cls)) return true;
-		if ($li.find('.premium, .lock, .locked, .coin, .c-icon-lock, [data-coin], .premium-star').length)
+
+		if (/\bfree-chap\b/.test(cls)) return false;
+		if ($li.find('span.coin.free, .coin.free').length && !/\bpremium\b/.test(cls)) return false;
+
+		if (/\bpremium\b|\blocked\b|\bvip\b|paywall|\bpaid\b/.test(cls)) return true;
+		if (/\bcoin-\d+\b/.test(cls)) return true;
+		if (
+			$li.find(
+				'.premium, .lock, .locked, .c-icon-lock, [data-coin], .premium-star, .fa-lock, .fas.fa-lock, span.coin:not(.free)'
+			).length
+		)
 			return true;
 		const target = ($a.attr('data-bs-target') || $a.attr('data-target') || '').toLowerCase();
-		if (target.includes('lock') || target.includes('premium') || target.includes('coin')) return true;
+		if (target.includes('lock') || target.includes('premium')) return true;
 		if ($a.attr('data-coin') || $li.attr('data-coin')) return true;
+		const href = ($a.attr('href') || '').trim();
+		if (
+			(href === '#' || href === '' || href.toLowerCase().startsWith('javascript:')) &&
+			(/premium|lock|coin/i.test($li.text()) || $li.find('.fa-lock').length > 0)
+		)
+			return true;
 		return false;
 	}
 
@@ -324,14 +339,25 @@ export abstract class MadaraSource extends BaseSource {
 
 		$(this.chapterListSelector).each((_, a) => {
 			const $a = $(a);
-			const href = $a.attr('href') || '';
+			const href = ($a.attr('href') || '').trim();
 			if (!href) return;
-			const id = this.cleanId(href);
-			if (seen.has(id)) return;
-			seen.add(id);
-
 			const $li = $a.closest('li');
 			const rawText = $a.text().replace(/\s+/g, ' ').trim();
+			const isLocked = this.isChapterLocked($a, $li);
+
+			let id: string;
+			if (href === '#' || href.toLowerCase().startsWith('javascript:')) {
+				const n = this.parseChapterNumber(rawText);
+				id =
+					n > 0
+						? `${this.seriesPath}/__locked__/chapter-${n}`
+						: `${this.seriesPath}/__locked__/${encodeURIComponent(rawText || 'x')}`;
+			} else {
+				id = this.cleanId(href);
+			}
+			if (!id || id === '/' || id === '/#' || seen.has(id)) return;
+			seen.add(id);
+
 			const number = this.parseChapterNumber(rawText || id, id);
 			const title = number > 0 ? `Chapter ${number}` : rawText || id;
 			const date =
@@ -343,7 +369,6 @@ export abstract class MadaraSource extends BaseSource {
 					.trim() ||
 				$li.find('time').attr('datetime') ||
 				undefined;
-			const isLocked = this.isChapterLocked($a, $li);
 
 			chapters.push({
 				id,
@@ -446,10 +471,13 @@ export abstract class MadaraSource extends BaseSource {
 			const seen = new Set<string>();
 
 			const push = (src?: string | null) => {
-				if (!src || src.startsWith('data:')) return;
-				const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
+				if (!src) return;
+				const cleaned = String(src).replace(/\s+/g, ' ').trim();
+				if (!cleaned || cleaned.startsWith('data:')) return;
+				const url = this.absUrl(cleaned.split(/\s+/)[0].split('?')[0]);
 				if (!url || seen.has(url)) return;
-				if (/logo|icon|avatar|emoji|spinner|loading/i.test(url)) return;
+				if (/logo|icon|avatar|emoji|spinner|loading|favicon|placeholder|dflazy/i.test(url))
+					return;
 				seen.add(url);
 				pages.push(url);
 			};
@@ -459,14 +487,15 @@ export abstract class MadaraSource extends BaseSource {
 				push(
 					$img.attr('data-src') ||
 						$img.attr('data-lazy-src') ||
-						$img.attr('data-srcset')?.split(/\s+/)[0] ||
+						$img.attr('data-srcset') ||
+						$img.attr('srcset') ||
 						$img.attr('src')
 				);
 			});
 
 			if (pages.length === 0) {
 				const re =
-					/(https?:\/\/[^"'\\\s]+\/wp-content\/uploads\/[^"'\\\s]+\.(?:webp|jpg|jpeg|png|avif))/gi;
+					/(https?:\/\/[^"'\\\s>]+(?:\/wp-content\/uploads\/|\/manga_[a-f0-9]+\/)[^"'\\\s>]+\.(?:webp|jpg|jpeg|png|avif))/gi;
 				let m: RegExpExecArray | null;
 				while ((m = re.exec(html)) !== null) push(m[1]);
 			}
