@@ -1785,14 +1785,14 @@
 	}
 	:global(html.light) .chapter-read {
 		opacity: 1;
-		background: rgba(0, 0, 0, 0.16) !important;
+		background: rgba(0, 0, 0, 0.27) !important;
 	}
 	:global(html.light) .chapter-read:hover {
 		background: rgba(0, 0, 0, 0.12) !important;
 	}
 	:global(html.light) .chapter-read .detail-title,
 	:global(html.light) .chapter-read .detail-title span {
-		color: #3f3f46 !important;
+		color: #626262 !important;
 	}
 	:global(html.light) .chapter-read .detail-muted {
 		color: #71717a !important;
