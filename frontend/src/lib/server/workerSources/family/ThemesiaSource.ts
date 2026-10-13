@@ -2,19 +2,28 @@
  * Family base: MangaThemesia / MangaReader (WordPress)
  *
  * Typical paths:
- *   list   /manga/?order=update&page=N
+ *   list   /manga/?order=update&page=N  (or /series/)
  *   search /?s=q
- *   detail /manga/{slug}/  or  /{slug}/
- *   pages  #readerarea img  or  ts_reader.run({...})
+ *   detail /manga/{slug}/  or  /series/{slug}/
+ *   pages  #readerarea img  or  ts_reader.run({...})  (manga)
+ *   text   .epcontent / .entry-content                 (novel)
+ *
+ * Chapter list (detail page):
+ *   - number : .epl-num / path -chapter-N
+ *   - date   : .epl-date / .chapterdate
+ *   - lock   : .fa-lock / .premium / coin → chapter.isLocked (UI detail)
+ *
+ * Novel reader next/prev:
+ *   getChapterContent() returns prevChapterId / nextChapterId
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
 export abstract class ThemesiaSource extends BaseSource {
-
 	protected perPage = 24;
 	protected defaultLang = 'en';
+	protected seriesPath = '/manga';
 
 	protected absUrl(url: string): string {
 		if (!url) return '';
@@ -47,9 +56,9 @@ export abstract class ThemesiaSource extends BaseSource {
 	}
 
 	protected parseChapterNumber(text: string, path = ''): number {
-		const fromPath = path.match(
-			/(?:chapter|chap|ch)[-_.\s]*(\d+)(?:[.-](\d+))?/i
-		);
+		const fromPath =
+			path.match(/(?:chapter|chap|ch)[-_.\s]*(\d+)(?:[.-](\d+))?/i) ||
+			path.match(/-chapter-(\d+)(?:[.-](\d+))?/i);
 		if (fromPath) {
 			const major = parseInt(fromPath[1], 10);
 			if (fromPath[2] != null && fromPath[2].length <= 2) {
@@ -57,7 +66,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			}
 			return major;
 		}
-		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*(\d+)(?:[.,](\d+))?/i);
+		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*[.\-_:]?\s*(\d+)(?:[.,](\d+))?/i);
 		if (m) {
 			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
 			return parseInt(m[1], 10);
@@ -78,6 +87,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		const t = String(raw || '').toLowerCase();
 		if (t.includes('manhwa')) return 'manhwa';
 		if (t.includes('manhua')) return 'manhua';
+		if (t.includes('novel')) return 'novel';
 		if (t.includes('comic') || t.includes('western')) return 'comic';
 		return 'manga';
 	}
@@ -87,24 +97,27 @@ export abstract class ThemesiaSource extends BaseSource {
 		return url.replace(/-\d+x\d+(\.\w+)(\?.*)?$/, '$1$2');
 	}
 
-	protected seriesPath = '/manga';
 	protected listPath(page: number): string {
 		const p = Math.max(1, page || 1);
 		return `${this.seriesPath}/?page=${p}&order=update`;
 	}
+
 	protected searchPath(query: string, page: number): string {
 		const q = encodeURIComponent(query);
 		return page <= 1 ? `/?s=${q}` : `/?s=${q}&page=${page}`;
 	}
 
 	protected cardSelector =
-		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .epic-card';
+		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .uta, .epic-card';
+
 	protected chapterListSelector =
-		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a';
+		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a, .eplisterfull li a, ul.clstyle li a, .eplister a';
+
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
 
-	/** Badge chapter: .epxs/.epx/.bigor/.nchapter + href/HTML fallback */
+	// ── Latest badge on list cards ───────────────────────────────────────────
+
 	protected extractLatestChapter(
 		$: cheerio.CheerioAPI,
 		$el: cheerio.Cheerio<any>
@@ -133,21 +146,17 @@ export abstract class ThemesiaSource extends BaseSource {
 				t.match(/\b(\d{1,4}(?:\.\d+)?)\b/);
 			if (m?.[1]) return m[1];
 		}
-
 		const chHref =
-			$el.find('a[href*="-chapter-"], a[href*="-ch-"], a[href*="-c"]').attr('href') ||
-			'';
+			$el.find('a[href*="-chapter-"], a[href*="-ch-"]').attr('href') || '';
 		if (chHref) {
 			const n = this.parseChapterNumber('', this.cleanId(chHref));
 			if (n > 0) return String(n);
 		}
-
 		const html = $.html($el) || '';
 		const em =
 			html.match(/class=["'][^"']*epxs?[^"']*["'][^>]*>\s*(?:Chapter\s*)?(\d+(?:\.\d+)?)/i) ||
 			html.match(/(?:Chapter|Ch\.?)\s*(\d+(?:\.\d+)?)/i);
 		if (em?.[1]) return em[1];
-
 		return undefined;
 	}
 
@@ -158,7 +167,6 @@ export abstract class ThemesiaSource extends BaseSource {
 		$(this.cardSelector).each((_, el) => {
 			const $el = $(el);
 
-			// prioritaskan link series (bukan chapter)
 			let $a = $el
 				.find(`a[href*="${this.seriesPath}/"]`)
 				.filter((_, a) => {
@@ -197,6 +205,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			const title = this.normalizeTitle(
 				$el.find('.tt, .hottitle, .ntitle, h2, h3').first().text() ||
 					$a.attr('title') ||
+					$a.attr('oldtitle') ||
 					$a.text() ||
 					$el.find('img').attr('alt') ||
 					'',
@@ -241,6 +250,46 @@ export abstract class ThemesiaSource extends BaseSource {
 		return this.parseCards(cheerio.load(html));
 	}
 
+	protected isChapterLocked(
+		$a: cheerio.Cheerio<any>,
+		$li: cheerio.Cheerio<any>
+	): boolean {
+		if (
+			$a.find(
+				'.lock, .fa-lock, .fas.fa-lock, .premium, .premium-lock, .coin-price, .coin-price-pill, .premium-star, [class*="lock"], [data-coin]'
+			).length
+		) {
+			return true;
+		}
+		if (
+			$li.find(
+				'.lock, .fa-lock, .fas.fa-lock, .premium, .premium-lock, .coin-price, .coin-price-pill, .premium-star, .chapter-lock-badge, [class*="lock"], [data-coin]'
+			).length
+		) {
+			return true;
+		}
+
+		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
+		if (/\b(premium|locked|paywall|is-premium|chapter-lock)\b/.test(cls)) return true;
+
+		const target = (
+			$a.attr('data-bs-target') ||
+			$a.attr('data-target') ||
+			$li.attr('data-bs-target') ||
+			''
+		).toLowerCase();
+		if (/lock|premium|coin|vip/.test(target)) return true;
+
+		if ($a.attr('data-coin') || $li.attr('data-coin')) return true;
+
+		const rowText = $li.text().replace(/\s+/g, ' ');
+		if (/🔒|(?:\d+\s*)coins?|premium|vip\s*only|early\s*access/i.test(rowText)) {
+			return true;
+		}
+
+		return false;
+	}
+
 	protected parseChapterList($: cheerio.CheerioAPI): Chapter[] {
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
@@ -248,18 +297,43 @@ export abstract class ThemesiaSource extends BaseSource {
 		$(this.chapterListSelector).each((_, a) => {
 			const $a = $(a);
 			const href = $a.attr('href') || '';
-			if (!href) return;
+			if (!href || href === '#' || href.includes('{{')) return;
+
 			const id = this.cleanId(href);
 			if (seen.has(id)) return;
 			seen.add(id);
 
-			const rawText = $a.text().replace(/\s+/g, ' ').trim();
-			const number = this.parseChapterNumber(rawText || id, id);
-			const title = number > 0 ? `Chapter ${number}` : rawText || id;
-			const date =
-				$a.closest('li').find('.chapterdate, .dt').text().trim() || undefined;
+			const $li = $a.closest('li').length ? $a.closest('li') : $a.parent();
 
-			chapters.push({ id, title, number, date, lang: this.defaultLang });
+			const numText =
+				$a.find('.epl-num, .chapternum').first().text().replace(/\s+/g, ' ').trim() ||
+				$a.text().replace(/\s+/g, ' ').trim();
+			const number = this.parseChapterNumber(numText || id, id);
+			if (!number && !/chapter/i.test(id) && !/chapter/i.test(numText)) return;
+
+			const title = number > 0 ? `Chapter ${number}` : numText || id;
+
+			const date =
+				$a.find('.epl-date, .chapterdate, .chapter-date').first().text().replace(/\s+/g, ' ').trim() ||
+				$li
+					.find('.epl-date, .chapterdate, .chapter-date, .dt, .chapter-release-date, time, .date, .chapter-time')
+					.first()
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim() ||
+				$li.find('time').attr('datetime') ||
+				undefined;
+
+			const isLocked = this.isChapterLocked($a, $li);
+
+			chapters.push({
+				id,
+				title,
+				number: number || chapters.length + 1,
+				date: date || undefined,
+				lang: this.defaultLang,
+				...(isLocked ? { isLocked: true } : {})
+			});
 		});
 
 		return chapters;
@@ -271,39 +345,83 @@ export abstract class ThemesiaSource extends BaseSource {
 		const $ = cheerio.load(html);
 
 		const title = this.normalizeTitle(
-			$('h1.entry-title, h1').first().text() || '',
+			$('h1.entry-title, h1').first().text() ||
+				$('meta[property="og:title"]').attr('content') ||
+				'',
 			this.name
 		);
 
-		const $img = $('.thumb img, .seriestucontl img, .ims img').first();
-		let cover =
-			$img.attr('data-src') || $img.attr('data-lazy-src') || $img.attr('src') || '';
+		let cover = '';
+		const imgSelectors = [
+			'.thumbook img',
+			'.thumb img',
+			'.series-thumb img',
+			'.seriestucontl img',
+			'.seriestuimg img',
+			'.ims img',
+			'.manga-poster img',
+			'.summary_image img',
+			'img.wp-post-image',
+			'.post-thumbnail img',
+			'.info-desc img'
+		];
+		for (const sel of imgSelectors) {
+			const $img = $(sel).first();
+			if (!$img.length) continue;
+			cover =
+				$img.attr('data-src') ||
+				$img.attr('data-lazy-src') ||
+				$img.attr('data-srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
+				$img.attr('srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
+				$img.attr('src') ||
+				'';
+			if (cover && !cover.startsWith('data:')) break;
+			cover = '';
+		}
+		if (!cover) {
+			cover =
+				$('meta[property="og:image"]').attr('content') ||
+				$('meta[name="twitter:image"]').attr('content') ||
+				'';
+		}
+		if (!cover) {
+			const style =
+				$('.thumbook, .thumb, .seriestuimg, .summary_image').first().attr('style') || '';
+			const bm = style.match(/url\(['"]?([^'")\s]+)['"]?\)/i);
+			if (bm?.[1]) cover = bm[1];
+		}
+		if (cover.startsWith('data:')) cover = '';
 		cover = this.preferFullCover(this.absUrl(cover));
 
-		const description = $('.entry-content[itemprop="description"], .seriestuhead .entry-content, .entry-content')
+		const description = $(
+			'.entry-content[itemprop="description"], .seriestuhead .entry-content, .sersys, .series-synops, .synops, .wd-full, .entry-content'
+		)
 			.first()
 			.text()
 			.replace(/\s+/g, ' ')
 			.trim();
 
 		const genres: string[] = [];
-		$('.seriestugenre a, .mgen a, a[rel="tag"]').each((_, a) => {
+		$('.seriestugenre a, .mgen a, .genxed a, a[rel="tag"]').each((_, a) => {
 			const g = $(a).text().replace(/\s+/g, ' ').trim();
 			if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
 		});
 
 		const authors: string[] = [];
-		$('.infotable tr, .fmed').each((_, row) => {
+		$('.infotable tr, .fmed, .imptdt, .tsinfo .imptdt').each((_, row) => {
 			const t = $(row).text();
-			if (/author|artist|pengarang/i.test(t)) {
-				const v = $(row).find('td').last().text().replace(/\s+/g, ' ').trim() ||
-					$(row).find('span').last().text().replace(/\s+/g, ' ').trim();
-				if (v && !authors.includes(v)) authors.push(v);
+			if (/author|artist|pengarang|penulis/i.test(t)) {
+				const v =
+					$(row).find('td').last().text().replace(/\s+/g, ' ').trim() ||
+					$(row).find('span, a').last().text().replace(/\s+/g, ' ').trim();
+				if (v && !/author|artist|pengarang/i.test(v) && !authors.includes(v)) {
+					authors.push(v);
+				}
 			}
 		});
 
 		let status = 'Ongoing';
-		$('.status, .imptdt').each((_, el) => {
+		$('.status, .imptdt, .infotable tr').each((_, el) => {
 			const t = $(el).text();
 			if (/status/i.test(t)) status = this.mapStatus(t);
 		});
@@ -315,7 +433,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			sourceId: this.id,
 			title: title || path.split('/').filter(Boolean).pop() || path,
 			cover,
-			type: this.mapType($('.infotable, .seriestucont').text()),
+			type: this.mapType($('.infotable, .seriestucont, .spe').text()),
 			status,
 			description,
 			authors,
@@ -368,5 +486,118 @@ export abstract class ThemesiaSource extends BaseSource {
 		}
 
 		return pages;
+	}
+
+	protected adjacentChapterIds(path: string): {
+		prev: string | null;
+		next: string | null;
+	} {
+		const p = path.replace(/\/$/, '');
+		const m =
+			p.match(/^(.*-chapter-)(\d+(?:\.\d+)?)(?:-.*)?$/i) ||
+			p.match(/^(.*-ch-)(\d+(?:\.\d+)?)(?:-.*)?$/i) ||
+			p.match(/^(.*-c)(\d+(?:\.\d+)?)(?:-.*)?$/i);
+		if (!m) return { prev: null, next: null };
+		const n = parseFloat(m[2]);
+		if (!Number.isFinite(n) || n <= 0) return { prev: null, next: null };
+		const prevN = n > 1 ? (Number.isInteger(n) ? n - 1 : Math.floor(n)) : null;
+		const nextN = Number.isInteger(n) ? n + 1 : Math.ceil(n);
+		return {
+			prev: prevN != null && prevN > 0 ? `${m[1]}${prevN}` : null,
+			next: `${m[1]}${nextN}`
+		};
+	}
+
+	async getChapterContent(chapterId: string): Promise<{
+		title: string;
+		content: string;
+		prevChapterId?: string | null;
+		nextChapterId?: string | null;
+	}> {
+		const path = this.cleanId(chapterId);
+		const adj = this.adjacentChapterIds(path);
+		let prevChapterId: string | null = adj.prev;
+		let nextChapterId: string | null = adj.next;
+
+		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+		const $ = cheerio.load(html);
+
+		const h1 = $('h1.entry-title, h1').first().text().replace(/\s+/g, ' ').trim();
+		const number = this.parseChapterNumber(h1, path);
+		const title = number > 0 ? `Chapter ${number}` : h1 || 'Chapter';
+
+		const root = $(
+			[
+				'.epcontent.entry-content',
+				'.entry-content .epcontent',
+				'.epcontent',
+				'#readerarea',
+				'.reading-content',
+				'.text-left',
+				'.entry-content',
+				'.chapter-content'
+			].join(', ')
+		).first();
+		root
+			.find(
+				'script, style, .ads, .code-block, .sharedaddy, .chapter-nav, .chnav, .navi, .epheader, .headpost, nav, .adsbygoogle'
+			)
+			.remove();
+
+		let content = (root.html() || '').trim();
+		if (!content) {
+			content = root.text().replace(/\s+/g, ' ').trim();
+		}
+		if (!content) {
+			content =
+				'<p><em>Empty content — selector may have changed or chapter is locked.</em></p>';
+		}
+
+		const pickNav = (sels: string[]): string | null => {
+			for (const sel of sels) {
+				const href = $(sel).first().attr('href') || '';
+				if (!href || href === '#' || href.startsWith('javascript:')) continue;
+				const id = this.cleanId(href);
+				if (id && id !== path && id !== '/') return id;
+			}
+			return null;
+		};
+
+		const fromPrevNav = pickNav([
+			'.chnav a[rel="prev"]',
+			'.chnav a.prev',
+			'.navi a.prev',
+			'.nextprev a[rel="prev"]',
+			'a.ch-prev',
+			'a[rel="prev"]'
+		]);
+		const fromNextNav = pickNav([
+			'.chnav a[rel="next"]',
+			'.chnav a.next',
+			'.navi a.next',
+			'.nextprev a[rel="next"]',
+			'a.ch-next',
+			'a[rel="next"]'
+		]);
+		if (fromPrevNav) prevChapterId = fromPrevNav;
+		if (fromNextNav) nextChapterId = fromNextNav;
+
+		if (!prevChapterId || !nextChapterId) {
+			$('a').each((_, a) => {
+				const t = $(a).text().replace(/\s+/g, ' ').trim().toLowerCase();
+				const href = $(a).attr('href') || '';
+				if (!href || href === '#' || href.startsWith('javascript:')) return;
+				const id = this.cleanId(href);
+				if (!id || id === path || id === '/') return;
+				if (new RegExp(`^${this.seriesPath}/[^/]+$`, 'i').test(id)) return;
+				if (!prevChapterId && /^(prev|previous|←|‹|«)$/i.test(t)) prevChapterId = id;
+				if (!nextChapterId && /^(next|→|›|»)$/i.test(t)) nextChapterId = id;
+			});
+		}
+
+		if (!prevChapterId && adj.prev) prevChapterId = adj.prev;
+		if (!nextChapterId && adj.next) nextChapterId = adj.next;
+
+		return { title, content, prevChapterId, nextChapterId };
 	}
 }
