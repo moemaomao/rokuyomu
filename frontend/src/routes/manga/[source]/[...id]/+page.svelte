@@ -1243,7 +1243,12 @@
 										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''} {isChapterRead(chapter) ? 'chapter-read' : ''}"
 									>
 										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
-{#if chapter.isLocked}
+											<span
+												class="chapter-status-dot {isChapterRead(chapter) ? 'is-read' : ''}"
+												title={isChapterRead(chapter) ? 'Read' : 'Unread'}
+												aria-hidden="true"
+											></span>
+											{#if chapter.isLocked}
 												<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
 													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
 													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -1320,7 +1325,12 @@
 									</div>
 									<div class="min-w-0 flex-1 px-3 py-3">
 										<p class="detail-title flex items-center gap-2 truncate text-sm font-bold">
-{#if chapter.isLocked}
+											<span
+												class="chapter-status-dot {isChapterRead(chapter) ? 'is-read' : ''}"
+												title={isChapterRead(chapter) ? 'Read' : 'Unread'}
+												aria-hidden="true"
+											></span>
+											{#if chapter.isLocked}
 												<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
 													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
 													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -1673,11 +1683,41 @@
 	}
 
 	.chapter-read {
-		opacity: 0.42;
-		filter: saturate(0.65);
+		opacity: 1;
+		filter: none;
+		background: rgba(0, 0, 0, 0.45) !important;
+		border-color: rgba(82, 82, 91, 0.65) !important;
+		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+	}
+	.chapter-read .detail-title,
+	.chapter-read .detail-title span {
+		color: #a1a1aa !important;
+		font-weight: 600 !important;
+	}
+	.chapter-read .detail-muted {
+		color: #71717a !important;
 	}
 	.chapter-read:hover {
-		opacity: 0.72;
+		background: rgba(0, 0, 0, 0.38) !important;
+		border-color: rgba(113, 113, 122, 0.75) !important;
+	}
+	.chapter-read:hover .detail-title,
+	.chapter-read:hover .detail-title span {
+		color: #d4d4d8 !important;
+	}
+	/* Status dot: unread = bright red, read = muted check-circle */
+	.chapter-status-dot {
+		flex-shrink: 0;
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 9999px;
+		background: #f43f5e;
+		box-shadow: 0 0 8px rgba(244, 63, 94, 0.75);
+	}
+	.chapter-status-dot.is-read {
+		background: #52525b;
+		box-shadow: none;
+		opacity: 0.9;
 	}
 	.chapter-mark-read {
 		background: rgba(139, 92, 246, 0.15);
@@ -1694,7 +1734,19 @@
 		color: #a1a1aa;
 	}
 	:global(html.light) .chapter-read {
-		opacity: 0.45;
+		opacity: 1;
+		background: rgba(24, 24, 27, 0.12) !important;
+		border-color: rgba(82, 82, 91, 0.35) !important;
+	}
+	:global(html.light) .chapter-read .detail-title,
+	:global(html.light) .chapter-read .detail-title span {
+		color: #52525b !important;
+	}
+	:global(html.light) .chapter-read .detail-muted {
+		color: #71717a !important;
+	}
+	:global(html.light) .chapter-status-dot.is-read {
+		background: #a1a1aa;
 	}
 	:global(html.light) .chapter-mark-read {
 		background: rgba(139, 92, 246, 0.12);
