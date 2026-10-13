@@ -1,22 +1,10 @@
 /**
  * BotiTranslation.com — custom SPA novel site
- * Path: scraper/src/sources/impl/BotiTranslation.ts
  *
  * URL pattern:
  *   Book    : /book/{id}-{slug}
  *   Chapter : /chapter/{id}-chapter-{n}-{title}
  *   Home    : /
- *
- * PERINGATAN:
- * - Cloudflare Turnstile sangat ketat (bukan sekadar JS challenge)
- * - Halaman book/chapter adalah SPA — HTML SSR hampir kosong ("Loading...")
- * - Cheerio saja sering gagal; butuh Worker + kemungkinan reverse-API
- * - Chapter VIP / early-access mungkin tidak bisa diambil
- *
- * Adapter ini mencoba:
- * 1) Parse link /book/ dari homepage (kalau HTML lolos CF)
- * 2) API heuristics umum
- * 3) Parse chapter content dari DOM bila ada
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -77,7 +65,6 @@ function extractChapterNum(text: string): number | undefined {
 	return Number.isNaN(n) ? undefined : n;
 }
 
-/** Ambil numeric book id dari path /book/12345-slug */
 function bookIdFromPath(path: string): string | null {
 	const m = path.match(/\/book\/(\d+)/);
 	return m ? m[1] : null;
@@ -89,7 +76,6 @@ export class BotiTranslationSource extends BaseSource {
 	baseUrl = 'https://botitranslation.com';
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
-		// Homepage + pagination heuristic
 		const paths =
 			page <= 1
 				? ['/', '/?page=1', '/novels', '/novels?page=1']
@@ -110,7 +96,6 @@ export class BotiTranslationSource extends BaseSource {
 			}
 		}
 
-		// Coba API list (beberapa SPA expose JSON)
 		if (all.length < 8) {
 			const apiList = await this.tryApiList(page).catch(() => [] as Manga[]);
 			for (const m of apiList) {
@@ -143,7 +128,6 @@ export class BotiTranslationSource extends BaseSource {
 		$('a[href*="/book/"]').each((_, el) => {
 			const href = $(el).attr('href') || '';
 			if (!href || !/\/book\/\d+/.test(href)) return;
-			// Skip chapter-like
 			if (/\/chapter\//.test(href)) return;
 
 			const id = pathOnly(href);
@@ -184,7 +168,6 @@ export class BotiTranslationSource extends BaseSource {
 		return list;
 	}
 
-	/** Heuristic API endpoints — mungkin berubah */
 	private async tryApiList(page: number): Promise<Manga[]> {
 		const candidates = [
 			`/api/books?page=${page}`,
@@ -205,7 +188,7 @@ export class BotiTranslationSource extends BaseSource {
 				if (!res.ok) continue;
 				const ct = res.headers.get('content-type') || '';
 				if (!ct.includes('json')) continue;
-				const data = await res.json();
+				const data: any = await res.json();
 				const items = this.normalizeApiList(data);
 				if (items.length) return items;
 			} catch {
@@ -234,8 +217,9 @@ export class BotiTranslationSource extends BaseSource {
 			const id = `/book/${idNum}${slug ? `-${slug}` : ''}`;
 			const cover = item.cover ?? item.cover_url ?? item.image ?? item.thumbnail ?? '';
 			const latestChapter =
-				extractChapterNum(String(item.latest_chapter ?? item.last_chapter ?? item.chapter_count ?? '')) ??
-				undefined;
+				extractChapterNum(
+					String(item.latest_chapter ?? item.last_chapter ?? item.chapter_count ?? '')
+				) ?? undefined;
 			out.push({
 				id,
 				title: String(title),
@@ -253,7 +237,6 @@ export class BotiTranslationSource extends BaseSource {
 		const page = opts?.page ?? 1;
 		const q = encodeURIComponent(query);
 
-		// HTML search
 		const htmlPaths = [`/?s=${q}`, `/search?q=${q}`, `/search?keyword=${q}&page=${page}`];
 		for (const path of htmlPaths) {
 			try {
@@ -266,7 +249,6 @@ export class BotiTranslationSource extends BaseSource {
 			}
 		}
 
-		// API search
 		const apiPaths = [
 			`/api/books/search?q=${q}&page=${page}`,
 			`/api/search?keyword=${q}&page=${page}`,
@@ -278,7 +260,7 @@ export class BotiTranslationSource extends BaseSource {
 					headers: { ...this.headers, Accept: 'application/json' }
 				});
 				if (!res.ok) continue;
-				const data = await res.json();
+				const data: any = await res.json();
 				const items = this.normalizeApiList(data);
 				if (items.length) return items;
 			} catch {
@@ -299,7 +281,6 @@ export class BotiTranslationSource extends BaseSource {
 		this.assertNotCf(html);
 		const $ = cheerio.load(html);
 
-		// SPA shell detection
 		const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
 		const looksEmpty =
 			bodyText.length < 200 ||
@@ -323,7 +304,7 @@ export class BotiTranslationSource extends BaseSource {
 			'';
 		cover = (cover || '').split('?')[0];
 
-		let description =
+		const description =
 			$('meta[property="og:description"]').attr('content') ||
 			$('[class*="synopsis"], [class*="summary"], [class*="description"]')
 				.first()
@@ -332,10 +313,8 @@ export class BotiTranslationSource extends BaseSource {
 				.trim() ||
 			'';
 
-		// Chapters dari HTML (TOC)
 		let chapters = this.parseChapterLinks($, path);
 
-		// API fallback untuk chapters
 		if (!chapters.length) {
 			const bid = bookIdFromPath(path);
 			if (bid) {
@@ -370,7 +349,7 @@ export class BotiTranslationSource extends BaseSource {
 		};
 	}
 
-	private parseChapterLinks($: cheerio.CheerioAPI, bookPath: string): Chapter[] {
+	private parseChapterLinks($: cheerio.CheerioAPI, _bookPath: string): Chapter[] {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -403,7 +382,7 @@ export class BotiTranslationSource extends BaseSource {
 					headers: { ...this.headers, Accept: 'application/json' }
 				});
 				if (!res.ok) continue;
-				const data = await res.json();
+				const data: any = await res.json();
 				const arr =
 					(Array.isArray(data) && data) ||
 					data?.data ||
@@ -415,7 +394,10 @@ export class BotiTranslationSource extends BaseSource {
 				arr.forEach((c: any, i: number) => {
 					const cid = c.id ?? c.chapter_id;
 					const title = c.title ?? c.name ?? `Chapter ${c.number ?? i + 1}`;
-					const num = parseChapterNumber(String(title), Number(c.number ?? c.index ?? i + 1));
+					const num = parseChapterNumber(
+						String(title),
+						Number(c.number ?? c.index ?? i + 1)
+					);
 					const slug = c.slug ?? String(title).toLowerCase().replace(/\s+/g, '-');
 					const id = cid
 						? `/chapter/${cid}-chapter-${num}-${slug}`.replace(/-+/g, '-').slice(0, 120)
@@ -488,7 +470,6 @@ export class BotiTranslationSource extends BaseSource {
 			}
 		}
 
-		// API content fallback
 		if (!contentHtml || contentHtml.length < 80) {
 			const m = path.match(/\/chapter\/(\d+)/);
 			if (m) {
@@ -523,7 +504,7 @@ export class BotiTranslationSource extends BaseSource {
 					headers: { ...this.headers, Accept: 'application/json' }
 				});
 				if (!res.ok) continue;
-				const data = await res.json();
+				const data: any = await res.json();
 				const text =
 					data?.content ||
 					data?.data?.content ||
@@ -531,7 +512,6 @@ export class BotiTranslationSource extends BaseSource {
 					data?.text ||
 					'';
 				if (typeof text === 'string' && text.length > 50) {
-					// Jika plain text → wrap p
 					if (!text.includes('<')) {
 						return text
 							.split(/\n{2,}/)

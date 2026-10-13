@@ -403,7 +403,7 @@ export class BrightNovelsSource extends BaseSource {
 		if (content && !content.includes('<p') && !content.includes('<br')) {
 			content = content
 				.split(/\n{2,}/)
-				.map((p) => `<p>${escapeHtml(p.trim())}</p>`)
+				.map((p: string) => `<p>${escapeHtml(p.trim())}</p>`)
 				.join('');
 		}
 

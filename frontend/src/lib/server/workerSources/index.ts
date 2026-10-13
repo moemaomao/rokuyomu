@@ -156,6 +156,7 @@ export async function getWorkerSource(sourceId: string): Promise<IMangaSource> {
 	const loader = loaders[sourceId];
 	if (!loader) {
 		throw new Error(`Worker source "${sourceId}" not registered`);
+
 	}
 
 	const src = await loader();

@@ -5,6 +5,7 @@
  * - Baca daftar ID dari scripts/worker-sources.json
  * - Scan scraper/src/sources/impl/manga/*.ts + impl/novel/*.ts
  * - Match berdasarkan `id = '...'` di dalam file
+ * - Copy folder family/ (MadaraSource, ThemesiaSource, …) ke workerSources/family/
  * - Copy + rewrite import path ke frontend/src/lib/server/workerSources/impl/
  * - Generate ulang index.ts (WORKER_SOURCE_IDS + loaders)
  *
@@ -26,8 +27,11 @@ const ROOT = path.resolve(__dirname, '../..'); // rokuyomu/
 const FRONTEND = path.resolve(__dirname, '..'); // frontend/
 const SCRAPER_MANGA = path.join(ROOT, 'scraper/src/sources/impl/manga');
 const SCRAPER_NOVEL = path.join(ROOT, 'scraper/src/sources/impl/novel');
-const WORKER_IMPL = path.join(FRONTEND, 'src/lib/server/workerSources/impl');
-const WORKER_INDEX = path.join(FRONTEND, 'src/lib/server/workerSources/index.ts');
+const SCRAPER_FAMILY = path.join(ROOT, 'scraper/src/sources/family');
+const WORKER_ROOT = path.join(FRONTEND, 'src/lib/server/workerSources');
+const WORKER_IMPL = path.join(WORKER_ROOT, 'impl');
+const WORKER_FAMILY = path.join(WORKER_ROOT, 'family');
+const WORKER_INDEX = path.join(WORKER_ROOT, 'index.ts');
 const IDS_FILE = path.join(__dirname, 'worker-sources.json');
 
 // ---------- helpers ----------
@@ -90,13 +94,26 @@ function scanScraperSources() {
 function rewriteImportsForWorker(content) {
 	let out = content;
 
-	// BaseSource: scraper ../../BaseSource → worker ../BaseSource
+	out = out
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/\.\.\/family\/([^'"]+)['"]/g,
+			"from '../family/$1'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/family\/([^'"]+)['"]/g,
+			"from '../family/$1'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/family\/([^'"]+)['"]/g,
+			"from '../family/$1'"
+		);
+
 	out = out
 		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
 		.replace(/from\s+['"]\.\.\/\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
 		.replace(/from\s+['"]\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'");
 
-	// types-manga (harus sebelum `types` generic supaya tidak match parsial)
+	// types-manga
 	out = out
 		.replace(/from\s+['"]\.\.\/\.\.\/\.\.\/types-manga(?:\.js)?['"]/g, "from '../types-manga'")
 		.replace(/from\s+['"]\.\.\/\.\.\/types-manga(?:\.js)?['"]/g, "from '../types-manga'")
@@ -114,11 +131,7 @@ function rewriteImportsForWorker(content) {
 		.replace(/from\s+['"]\.\.\/\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'")
 		.replace(/from\s+['"]\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'");
 
-	// fetchWithCf:
-	// scraper path : ../../../lib/fetchWithCf  (dari impl/novel|manga)
-	// worker target: frontend/src/lib/server/fetchWithCf.ts
-	// dari workerSources/impl/ → ../../fetchWithCf
-	// Juga rewrite path salah lama (../../../lib/server/...) agar re-sync memperbaiki semua source
+	// fetchWithCf
 	out = out
 		.replace(
 			/from\s+['"]\.\.\/\.\.\/\.\.\/lib\/server\/fetchWithCf(?:\.js)?['"]/g,
@@ -156,10 +169,59 @@ function rewriteImportsForWorker(content) {
 	return out;
 }
 
-function copyAndRewrite(srcAbs, destAbs) {
+function rewriteImportsForFamily(content) {
+	let out = content;
+
+	out = out
+		.replace(/from\s+['"]\.\.\/\.\.\/BaseSource(?:\.js)?['"]/g, "from '../BaseSource'")
+		.replace(/from\s+['"]\.\.\/\.\.\/types-manga(?:\.js)?['"]/g, "from '../types-manga'")
+		.replace(/from\s+['"]\.\.\/\.\.\/types-novel(?:\.js)?['"]/g, "from '../types-novel'")
+		.replace(/from\s+['"]\.\.\/\.\.\/types(?:\.js)?['"]/g, "from '../types-manga'");
+
+	out = out
+		.replace(
+			/from\s+['"]\.\.\/\.\.\/lib\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
+		)
+		.replace(
+			/from\s+['"]\.\.\/lib\/fetchWithCf(?:\.js)?['"]/g,
+			"from '../../fetchWithCf'"
+		);
+
+	return out;
+}
+
+function copyAndRewrite(srcAbs, destAbs, rewriter) {
 	const raw = fs.readFileSync(srcAbs, 'utf8');
-	const rewritten = rewriteImportsForWorker(raw);
+	const rewritten = rewriter(raw);
 	fs.writeFileSync(destAbs, rewritten, 'utf8');
+}
+
+function syncFamilyFolder() {
+	if (!fs.existsSync(SCRAPER_FAMILY)) {
+		console.log('ℹ  Tidak ada scraper/src/sources/family — skip family sync');
+		return;
+	}
+
+	ensureDir(WORKER_FAMILY);
+
+	const files = fs.readdirSync(SCRAPER_FAMILY).filter((f) => f.endsWith('.ts'));
+	const needed = new Set(files);
+
+	for (const file of fs.readdirSync(WORKER_FAMILY).filter((f) => f.endsWith('.ts'))) {
+		if (!needed.has(file)) {
+			fs.unlinkSync(path.join(WORKER_FAMILY, file));
+			console.log(`🗑  Family dihapus: ${file}`);
+		}
+	}
+
+	console.log('\n📁 Syncing family bases:');
+	for (const file of files) {
+		const src = path.join(SCRAPER_FAMILY, file);
+		const dest = path.join(WORKER_FAMILY, file);
+		copyAndRewrite(src, dest, rewriteImportsForFamily);
+		console.log(`   ✓ family/${file}`);
+	}
 }
 
 function generateIndex(ids, sourceMap) {
@@ -177,7 +239,7 @@ function generateIndex(ids, sourceMap) {
 
 	const idsLiteral = sortedIds.map((id) => `\t'${id}'`).join(',\n');
 
-	return `/**
+	const header = `/**
  * Worker-local sources — HANYA source yang diblokir outbound IP Vercel.
  *
  * File ini DIGENERATE otomatis oleh scripts/sync-worker-sources.mjs
@@ -205,23 +267,30 @@ ${loadersLines}
 };
 
 export function isWorkerSource(sourceId: string): boolean {
-\treturn WORKER_SOURCE_IDS.has(sourceId);
+	return WORKER_SOURCE_IDS.has(sourceId);
 }
 
 export async function getWorkerSource(sourceId: string): Promise<IMangaSource> {
-\tconst cached = instanceCache.get(sourceId);
-\tif (cached) return cached;
+	const cached = instanceCache.get(sourceId);
+	if (cached) return cached;
 
-\tconst loader = loaders[sourceId];
-\tif (!loader) {
-\t\tthrow new Error(\`Worker source "\${sourceId}" not registered\`);
-\t}
+	const loader = loaders[sourceId];
+	if (!loader) {
+`;
 
-\tconst src = await loader();
-\tinstanceCache.set(sourceId, src);
-\treturn src;
+	const throwLine =
+		'\t\tthrow new Error(`Worker source "${sourceId}" not registered`);\n';
+
+	const footer = `
+	}
+
+	const src = await loader();
+	instanceCache.set(sourceId, src);
+	return src;
 }
 `;
+
+	return header + throwLine + footer;
 }
 
 // ---------- main ----------
@@ -273,6 +342,8 @@ function main() {
 		process.exit(1);
 	}
 
+	syncFamilyFolder();
+
 	ensureDir(WORKER_IMPL);
 
 	const existingFiles = fs.readdirSync(WORKER_IMPL).filter((f) => f.endsWith('.ts'));
@@ -285,11 +356,11 @@ function main() {
 		}
 	}
 
-	console.log('\n📦 Copying files:');
+	console.log('\n📦 Copying adapter files:');
 	for (const id of found) {
 		const info = sourceMap.get(id);
 		const dest = path.join(WORKER_IMPL, info.filename);
-		copyAndRewrite(info.absPath, dest);
+		copyAndRewrite(info.absPath, dest, rewriteImportsForWorker);
 		console.log(`   ✓ ${info.filename}  (${id} → ${info.className}) [${info.kind}]`);
 	}
 
