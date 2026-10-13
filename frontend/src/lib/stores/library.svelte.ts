@@ -174,6 +174,15 @@ export async function chooseLibraryFolder(): Promise<boolean> {
 	try {
 		const h = await pickLibraryRoot();
 		hasRoot = !!h;
+		if (h) {
+			// Snapshot existing bookmarks into Rokuyomu/Bookmark/ after folder grant
+			try {
+				const { exportBookmarksToDisk } = await import('$lib/stores/bookmark.svelte');
+				await exportBookmarksToDisk();
+			} catch (e) {
+				console.warn('[library] export bookmarks after pick', e);
+			}
+		}
 		return !!h;
 	} catch (e) {
 		console.warn('[library] chooseLibraryFolder', e);

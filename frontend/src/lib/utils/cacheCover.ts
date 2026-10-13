@@ -1,13 +1,18 @@
 import {
 	supportsFileSystemAccess,
 	ensureLibraryRoot,
-	saveCoverToDisk
+	saveCoverToDisk,
+	saveBookmarkCoverToDisk
 } from '$lib/utils/localFs';
 import { idbPutLibraryCover } from '$lib/db';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
 
 function libKey(mangaId: string, sourceId: string): string {
 	return `${sourceId}::${normalizeMangaId(mangaId)}`;
+}
+
+function bmCoverKey(mangaId: string, sourceId: string): string {
+	return `bm::${libKey(mangaId, sourceId)}`;
 }
 
 async function fetchCoverBlob(coverUrl: string, source: string): Promise<Blob | null> {
@@ -63,6 +68,42 @@ export async function cacheLibraryCover(opts: {
 	}
 }
 
+export async function cacheBookmarkCover(opts: {
+	mangaId: string;
+	sourceId: string;
+	coverUrl: string;
+}): Promise<void> {
+	const { mangaId, sourceId, coverUrl } = opts;
+	if (!coverUrl || !mangaId || !sourceId) return;
+
+	const blob = await fetchCoverBlob(coverUrl, sourceId);
+	if (!blob) return;
+
+	const key = bmCoverKey(mangaId, sourceId);
+
+	try {
+		await idbPutLibraryCover(key, blob);
+	} catch (e) {
+		console.warn('[cacheCover] bookmark IDB put failed', e);
+	}
+
+	if (supportsFileSystemAccess()) {
+		try {
+			const root = await ensureLibraryRoot();
+			if (root) {
+				await saveBookmarkCoverToDisk({
+					root,
+					sourceId,
+					mangaId,
+					coverBlob: blob
+				});
+			}
+		} catch (e) {
+			console.warn('[cacheCover] bookmark disk save failed', e);
+		}
+	}
+}
+
 export async function getOfflineCoverObjectUrl(
 	mangaId: string,
 	sourceId: string
@@ -70,6 +111,21 @@ export async function getOfflineCoverObjectUrl(
 	try {
 		const { idbGetLibraryCover } = await import('$lib/db');
 		const blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
+		if (!blob) return null;
+		return URL.createObjectURL(blob);
+	} catch {
+		return null;
+	}
+}
+
+export async function getOfflineBookmarkCoverObjectUrl(
+	mangaId: string,
+	sourceId: string
+): Promise<string | null> {
+	try {
+		const { idbGetLibraryCover } = await import('$lib/db');
+		let blob = await idbGetLibraryCover(bmCoverKey(mangaId, sourceId));
+		if (!blob) blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
 		if (!blob) return null;
 		return URL.createObjectURL(blob);
 	} catch {

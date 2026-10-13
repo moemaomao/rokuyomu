@@ -1,7 +1,13 @@
-const ROOT_HANDLE_KEY = 'rokuyomu_library_root_v2';
+const ROOT_HANDLE_KEY = 'rokuyomu_root_v3';
 const FS_DB_NAME = 'rokuyomu-fs';
 const FS_STORE = 'handles';
-export const LIBRARY_FOLDER_NAME = 'RokuyomuLibrary';
+
+export const ROOT_FOLDER_NAME = 'Rokuyomu';
+export const LIBRARY_SUBDIR = 'Library';
+export const BOOKMARK_SUBDIR = 'Bookmark';
+
+/** @deprecated Use ROOT_FOLDER_NAME — kept for path string compatibility in older entries. */
+export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
 
 let memoryRoot: FileSystemDirectoryHandle | null = null;
 
@@ -78,22 +84,26 @@ async function ensurePermission(handle: FileSystemDirectoryHandle): Promise<bool
 	}
 }
 
+async function ensureSubdirs(root: FileSystemDirectoryHandle): Promise<void> {
+	await root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	await root.getDirectoryHandle(BOOKMARK_SUBDIR, { create: true });
+}
+
 export async function pickLibraryRoot(): Promise<FileSystemDirectoryHandle | null> {
 	if (!supportsFileSystemAccess()) return null;
 	try {
 		const parent = (await (window as any).showDirectoryPicker({
-			id: 'rokuyomu-library-parent',
+			id: 'rokuyomu-root-parent',
 			mode: 'readwrite',
 			startIn: 'downloads'
 		})) as FileSystemDirectoryHandle;
 
-		const lib = await parent.getDirectoryHandle(LIBRARY_FOLDER_NAME, { create: true });
+		const root = await parent.getDirectoryHandle(ROOT_FOLDER_NAME, { create: true });
+		await ensureSubdirs(root);
 
-		memoryRoot = lib;
-
-		await idbPutHandle(lib);
-
-		return lib;
+		memoryRoot = root;
+		await idbPutHandle(root);
+		return root;
 	} catch (e: any) {
 		if (e?.name === 'AbortError') return null;
 		console.warn('[localFs] pickLibraryRoot', e);
@@ -106,7 +116,10 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 
 	if (memoryRoot) {
 		const ok = await ensurePermission(memoryRoot);
-		if (ok) return memoryRoot;
+		if (ok) {
+			await ensureSubdirs(memoryRoot).catch(() => {});
+			return memoryRoot;
+		}
 		memoryRoot = null;
 	}
 
@@ -117,6 +130,7 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	if (!ok) return null;
 
 	memoryRoot = stored;
+	await ensureSubdirs(stored).catch(() => {});
 	return stored;
 }
 
@@ -124,6 +138,22 @@ export async function ensureLibraryRoot(): Promise<FileSystemDirectoryHandle | n
 	const existing = await getLibraryRoot();
 	if (existing) return existing;
 	return pickLibraryRoot();
+}
+
+export async function getLibraryDir(
+	root?: FileSystemDirectoryHandle | null
+): Promise<FileSystemDirectoryHandle | null> {
+	const r = root ?? (await getLibraryRoot());
+	if (!r) return null;
+	return r.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+}
+
+export async function getBookmarkDir(
+	root?: FileSystemDirectoryHandle | null
+): Promise<FileSystemDirectoryHandle | null> {
+	const r = root ?? (await getLibraryRoot());
+	if (!r) return null;
+	return r.getDirectoryHandle(BOOKMARK_SUBDIR, { create: true });
 }
 
 export function sanitizePathSegment(name: string): string {
@@ -167,6 +197,18 @@ export async function writeTextFile(
 	await writeBlobFile(dir, filename, new Blob([text], { type: 'text/plain;charset=utf-8' }));
 }
 
+function libraryRelPath(...parts: string[]): string {
+	return [ROOT_FOLDER_NAME, LIBRARY_SUBDIR, ...parts.map(sanitizePathSegment)].join('/');
+}
+
+function bookmarkRelPath(...parts: string[]): string {
+	return [ROOT_FOLDER_NAME, BOOKMARK_SUBDIR, ...parts.map((p) => p.replace(/\s+/g, '_'))].join(
+		'/'
+	);
+}
+
+// ─── Library (chapters) ───────────────────────────────────────────────────────
+
 export async function saveMangaChapterToDisk(opts: {
 	root: FileSystemDirectoryHandle;
 	mangaTitle: string;
@@ -174,7 +216,8 @@ export async function saveMangaChapterToDisk(opts: {
 	pages: { blob: Blob; ext: string }[];
 	meta?: Record<string, unknown>;
 }): Promise<string> {
-	const mangaRoot = await getOrCreateDir(opts.root, 'Manga');
+	const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	const mangaRoot = await getOrCreateDir(library, 'Manga');
 	const titleDir = await getOrCreateDir(mangaRoot, opts.mangaTitle);
 	if (opts.meta) {
 		await writeTextFile(titleDir, 'meta.json', JSON.stringify(opts.meta, null, 2));
@@ -185,7 +228,7 @@ export async function saveMangaChapterToDisk(opts: {
 		const name = `${String(i + 1).padStart(3, '0')}.${ext}`;
 		await writeBlobFile(chDir, name, blob);
 	}
-	return `${LIBRARY_FOLDER_NAME}/Manga/${sanitizePathSegment(opts.mangaTitle)}/${sanitizePathSegment(opts.chapterTitle)}`;
+	return libraryRelPath('Manga', opts.mangaTitle, opts.chapterTitle);
 }
 
 export async function saveNovelPdfToDisk(opts: {
@@ -195,14 +238,15 @@ export async function saveNovelPdfToDisk(opts: {
 	pdfBlob: Blob;
 	meta?: Record<string, unknown>;
 }): Promise<string> {
-	const novelRoot = await getOrCreateDir(opts.root, 'Novel');
+	const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	const novelRoot = await getOrCreateDir(library, 'Novel');
 	const titleDir = await getOrCreateDir(novelRoot, opts.novelTitle);
 	if (opts.meta) {
 		await writeTextFile(titleDir, 'meta.json', JSON.stringify(opts.meta, null, 2));
 	}
 	const fname = `${sanitizePathSegment(opts.chapterTitle)}.pdf`;
 	await writeBlobFile(titleDir, fname, opts.pdfBlob);
-	return `${LIBRARY_FOLDER_NAME}/Novel/${sanitizePathSegment(opts.novelTitle)}/${fname}`;
+	return libraryRelPath('Novel', opts.novelTitle, fname);
 }
 
 export async function saveCoverToDisk(opts: {
@@ -212,7 +256,8 @@ export async function saveCoverToDisk(opts: {
 	coverBlob: Blob;
 	ext?: string;
 }): Promise<string> {
-	const kindRoot = await getOrCreateDir(opts.root, opts.kind);
+	const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	const kindRoot = await getOrCreateDir(library, opts.kind);
 	const titleDir = await getOrCreateDir(kindRoot, sanitizePathSegment(opts.title));
 	let ext = opts.ext || 'jpg';
 	const ct = (opts.coverBlob.type || '').toLowerCase();
@@ -222,7 +267,7 @@ export async function saveCoverToDisk(opts: {
 	else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
 	const name = `cover.${ext}`;
 	await writeBlobFile(titleDir, name, opts.coverBlob);
-	return `${LIBRARY_FOLDER_NAME}/${opts.kind}/${sanitizePathSegment(opts.title)}/${name}`;
+	return libraryRelPath(opts.kind, opts.title, name);
 }
 
 export async function readCoverFromDisk(opts: {
@@ -231,7 +276,8 @@ export async function readCoverFromDisk(opts: {
 	title: string;
 }): Promise<Blob | null> {
 	try {
-		const kindRoot = await opts.root.getDirectoryHandle(opts.kind);
+		const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR);
+		const kindRoot = await library.getDirectoryHandle(opts.kind);
 		const titleDir = await kindRoot.getDirectoryHandle(sanitizePathSegment(opts.title));
 		for (const name of ['cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp', 'cover.gif']) {
 			try {
@@ -243,4 +289,122 @@ export async function readCoverFromDisk(opts: {
 	} catch {
 	}
 	return null;
+}
+
+export function bookmarkCoverKey(sourceId: string, mangaId: string): string {
+	const src = sanitizePathSegment(sourceId || 'src').replace(/\s+/g, '_');
+	const id = sanitizePathSegment(String(mangaId || 'id').replace(/\//g, '_')).replace(/\s+/g, '_');
+	return `${src}__${id}`.slice(0, 120);
+}
+
+export async function saveBookmarksJsonToDisk(
+	list: unknown[],
+	root?: FileSystemDirectoryHandle | null
+): Promise<string | null> {
+	try {
+		const bmDir = await getBookmarkDir(root);
+		if (!bmDir) return null;
+		const payload = JSON.stringify(
+			{
+				version: 1,
+				updatedAt: Date.now(),
+				count: Array.isArray(list) ? list.length : 0,
+				bookmarks: list
+			},
+			null,
+			2
+		);
+		await writeTextFile(bmDir, 'bookmarks.json', payload);
+		return bookmarkRelPath('bookmarks.json');
+	} catch (e) {
+		console.warn('[localFs] saveBookmarksJsonToDisk', e);
+		return null;
+	}
+}
+
+export async function saveBookmarkCoverToDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	mangaId: string;
+	coverBlob: Blob;
+	ext?: string;
+}): Promise<string | null> {
+	try {
+		const bmDir = await getBookmarkDir(opts.root);
+		if (!bmDir) return null;
+		const coversDir = await bmDir.getDirectoryHandle('covers', { create: true });
+		let ext = opts.ext || 'jpg';
+		const ct = (opts.coverBlob.type || '').toLowerCase();
+		if (ct.includes('png')) ext = 'png';
+		else if (ct.includes('webp')) ext = 'webp';
+		else if (ct.includes('gif')) ext = 'gif';
+		else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
+		const base = bookmarkCoverKey(opts.sourceId, opts.mangaId);
+		const name = `${base}.${ext}`;
+		await writeBlobFile(coversDir, name, opts.coverBlob);
+		return bookmarkRelPath('covers', name);
+	} catch (e) {
+		console.warn('[localFs] saveBookmarkCoverToDisk', e);
+		return null;
+	}
+}
+
+export async function removeBookmarkCoverFromDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	mangaId: string;
+}): Promise<void> {
+	try {
+		const bmDir = await getBookmarkDir(opts.root);
+		if (!bmDir) return;
+		const coversDir = await bmDir.getDirectoryHandle('covers');
+		const base = bookmarkCoverKey(opts.sourceId, opts.mangaId);
+		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+			try {
+				await coversDir.removeEntry(`${base}.${ext}`);
+			} catch {
+			}
+		}
+	} catch {
+	}
+}
+
+export async function readBookmarkCoverFromDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	mangaId: string;
+}): Promise<Blob | null> {
+	try {
+		const bmDir = await getBookmarkDir(opts.root);
+		if (!bmDir) return null;
+		const coversDir = await bmDir.getDirectoryHandle('covers');
+		const base = bookmarkCoverKey(opts.sourceId, opts.mangaId);
+		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+			try {
+				const fh = await coversDir.getFileHandle(`${base}.${ext}`);
+				return await fh.getFile();
+			} catch {
+			}
+		}
+	} catch {
+	}
+	return null;
+}
+
+export async function readBookmarksJsonFromDisk(
+	root?: FileSystemDirectoryHandle | null
+): Promise<unknown[] | null> {
+	try {
+		const bmDir = await getBookmarkDir(root);
+		if (!bmDir) return null;
+		const fh = await bmDir.getFileHandle('bookmarks.json');
+		const file = await fh.getFile();
+		const text = await file.text();
+		const data = JSON.parse(text);
+		if (Array.isArray(data)) return data;
+		if (data && Array.isArray(data.bookmarks)) return data.bookmarks;
+		return null;
+	} catch {
+		return null;
+	}
 }

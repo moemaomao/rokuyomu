@@ -259,7 +259,7 @@
 		try {
 			const ok = await chooseLibraryFolder();
 			msg = ok
-				? 'OK — RokuyomuLibrary folder is ready. Future downloads go there.'
+				? 'OK — Rokuyomu/ folder is ready (Library + Bookmark). Downloads & bookmarks go there.'
 				: 'Folder picker cancelled or not supported.';
 		} finally {
 			busy = false;
@@ -747,9 +747,14 @@
 					Chrome/Edge: pick a parent folder once — the app creates
 					<code
 						class="rounded bg-zinc-200/80 px-1 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
-						>RokuyomuLibrary/Manga|Novel/Title/…</code
+						>Rokuyomu/Library/Manga|Novel/…</code
 					>
-					automatically.
+					and
+					<code
+						class="rounded bg-zinc-200/80 px-1 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
+						>Rokuyomu/Bookmark/</code
+					>
+					(JSON + covers) automatically.
 				</li>
 				<li>Manga chapters save as image folders; novels convert each chapter to PDF.</li>
 				<li>

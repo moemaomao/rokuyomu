@@ -2,13 +2,41 @@
 	import { onMount } from 'svelte';
 	import { getBookmarks, removeBookmark, type BookmarkEntry } from '$lib/stores/bookmark.svelte';
 	import { Trash2, BookOpen, RefreshCw } from 'lucide-svelte';
-    import { proxyImage } from '$lib/utils/image';
+	import { proxyImage } from '$lib/utils/image';
+	import { getOfflineBookmarkCoverObjectUrl } from '$lib/utils/cacheCover';
 
 	let bookmarks = $state<BookmarkEntry[]>([]);
 	let refreshing = $state(false);
+	let offlineCovers = $state<Record<string, string>>({});
+
+	function bmKey(bm: BookmarkEntry): string {
+		return `${bm.sourceId}::${bm.mangaId}`;
+	}
 
 	function loadBookmarks() {
 		bookmarks = getBookmarks();
+		void loadOfflineCovers(bookmarks);
+	}
+
+	async function loadOfflineCovers(list: BookmarkEntry[]) {
+		const next: Record<string, string> = { ...offlineCovers };
+		for (const bm of list) {
+			const k = bmKey(bm);
+			if (next[k]) continue;
+			try {
+				const url = await getOfflineBookmarkCoverObjectUrl(bm.mangaId, bm.sourceId);
+				if (url) next[k] = url;
+			} catch {
+			}
+		}
+		offlineCovers = next;
+	}
+
+	function coverSrc(bm: BookmarkEntry): string {
+		const off = offlineCovers[bmKey(bm)];
+		if (off) return off;
+		if (!bm.cover) return '';
+		return proxyImage(bm.cover, bm.sourceId, 200);
 	}
 
 	async function handleRefresh() {
@@ -36,14 +64,6 @@
 		return `/manga/${sourceId}${cleanMangaId}`;
 	}
 
-	function proxyCover(url: string, sourceId: string, _w = 200, _h = 300): string {
-	   if (!url) return '';
-	   let u = String(url).trim();
-	   if (u.startsWith('//')) u = 'https:' + u;
-	   if (!/^https?:\/\//i.test(u)) return '';
-	   return `/api/proxy?url=${encodeURIComponent(u)}&source=${sourceId}`;
-    }
-
 	function onCoverError(e: Event) {
 		const img = e.currentTarget as HTMLImageElement;
 		const original = img.dataset.original;
@@ -64,85 +84,84 @@
 </script>
 
 <svelte:head>
-    <title>Bookmarks | Mikoroku</title>
+	<title>Bookmarks | Rokuyomu</title>
 </svelte:head>
 
 <div class="mx-auto max-w-6xl p-4 md:p-6">
-    <div class="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
-        <div>
-            <h1 class="text-xl font-bold md:text-2xl">Bookmark List</h1>
-            <p class="mt-1 text-sm text-zinc-400">{bookmarks.length} saved manga</p>
-        </div>
-        <button
-            type="button"
-            onclick={handleRefresh}
-            disabled={refreshing}
-            class="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-50"
-            title="Refresh"
-        >
-            <RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
-            Refresh
-        </button>
-    </div>
+	<div class="mb-6 flex items-center justify-between border-b border-zinc-800 pb-4">
+		<div>
+			<h1 class="text-xl font-bold md:text-2xl">Bookmark List</h1>
+			<p class="mt-1 text-sm text-zinc-400">
+				{bookmarks.length} saved · offline covers when available
+			</p>
+		</div>
+		<button
+			type="button"
+			onclick={handleRefresh}
+			disabled={refreshing}
+			class="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:opacity-50"
+		>
+			<RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
+			Refresh
+		</button>
+	</div>
 
-    {#if bookmarks.length === 0}
-        <div class="flex flex-col items-center justify-center py-16 text-center text-zinc-500">
-            <BookOpen class="mb-3 h-12 w-12 opacity-40" />
-            <p class="text-base font-medium">No bookmarked manga yet.</p>
-            <p class="mt-1 text-xs opacity-75">
-                Explore manga and click the Bookmark button to save them here.
-            </p>
-        </div>
-    {:else}
-        <div class="grid grid-cols-3 gap-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {#each bookmarks as bm (bm.mangaId + bm.sourceId)}
-                <div
-                    class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
-                >
-                    <a
-                        href={formatMangaHref(bm.sourceId, bm.mangaId)}
-                        class="relative aspect-[3/4] w-full overflow-hidden bg-zinc-800"
-                    >
-                        {#if bm.cover}
-	            <img
-		                src={proxyImage(bm.cover, bm.sourceId, 200)}
-		                data-original={bm.cover}
-		                data-source={bm.sourceId}
-		                alt={bm.mangaTitle}
-		                class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-		                loading="lazy"
-		                onerror={onCoverError}
-	                />
-                {:else}
-                            <div class="flex h-full w-full items-center justify-center">
-                                <BookOpen class="h-8 w-8 text-zinc-700" />
-                            </div>
-                        {/if}
+	{#if bookmarks.length === 0}
+		<div class="flex flex-col items-center justify-center py-20 text-center text-zinc-500">
+			<BookOpen class="mb-3 h-10 w-10 opacity-40" />
+			<p class="text-base font-medium">No bookmarked manga yet.</p>
+			<p class="mt-1 text-sm">Tap the bookmark icon on a title page to save it here.</p>
+		</div>
+	{:else}
+		<div class="grid grid-cols-3 gap-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+			{#each bookmarks as bm (bm.mangaId + bm.sourceId)}
+				<div
+					class="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
+				>
+					<a
+						href={formatMangaHref(bm.sourceId, bm.mangaId)}
+						class="relative aspect-[3/4] w-full overflow-hidden bg-zinc-800"
+					>
+						{#if coverSrc(bm)}
+							<img
+								src={coverSrc(bm)}
+								data-original={bm.cover}
+								data-source={bm.sourceId}
+								alt={bm.mangaTitle}
+								class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+								loading="lazy"
+								onerror={onCoverError}
+							/>
+						{:else}
+							<div class="flex h-full w-full items-center justify-center">
+								<BookOpen class="h-8 w-8 text-zinc-700" />
+							</div>
+						{/if}
 
-                        <span
-                            class="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-0.5 text-[10px] font-bold capitalize text-white backdrop-blur-md"
-                        >
-                            {bm.sourceId}
-                        </span>
-                    </a>
+						<span
+							class="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-0.5 text-[10px] font-bold capitalize text-white backdrop-blur-md"
+						>
+							{bm.sourceId}
+						</span>
+					</a>
 
-                    <div class="flex flex-1 flex-col justify-between p-3">
-                        <a
-                            href={formatMangaHref(bm.sourceId, bm.mangaId)}
-                            class="line-clamp-2 text-xs font-semibold hover:text-violet-100"
-                        >
-                            {bm.mangaTitle}
-                        </a>
+					<div class="flex flex-1 flex-col justify-between p-3">
+						<a
+							href={formatMangaHref(bm.sourceId, bm.mangaId)}
+							class="line-clamp-2 text-xs font-semibold hover:text-violet-100"
+						>
+							{bm.mangaTitle}
+						</a>
 
-                        <button
-                            onclick={() => handleRemove(bm.mangaId)}
-                            class="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500 hover:text-white"
-                        >
-                            <Trash2 class="h-3.5 w-3.5" /> Delete
-                        </button>
-                    </div>
-                </div>
-            {/each}
-        </div>
-    {/if}
+						<button
+							onclick={() => handleRemove(bm.mangaId)}
+							class="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500 hover:text-white"
+						>
+							<Trash2 class="h-3.5 w-3.5" /> Delete
+						</button>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{/if}
 </div>

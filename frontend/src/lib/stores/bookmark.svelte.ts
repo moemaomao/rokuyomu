@@ -17,6 +17,12 @@ import {
 	idbClearBookmarks,
 	type BookmarkEntry
 } from '$lib/db';
+import {
+	supportsFileSystemAccess,
+	getLibraryRoot,
+	saveBookmarksJsonToDisk,
+	removeBookmarkCoverFromDisk
+} from '$lib/utils/localFs';
 
 export type { BookmarkEntry };
 
@@ -70,6 +76,33 @@ function removeTombstone(mangaId: string) {
 let bookmarks = $state<BookmarkEntry[]>([]);
 let ready = $state(false);
 
+/** Persist full list to Rokuyomu/Bookmark/bookmarks.json (best-effort, non-blocking). */
+async function persistBookmarksToDisk(list: BookmarkEntry[]) {
+	if (!browser || !supportsFileSystemAccess()) return;
+	try {
+		const root = await getLibraryRoot();
+		if (!root) return; // user hasn't chosen a folder yet — skip silently
+		await saveBookmarksJsonToDisk(list, root);
+	} catch (e) {
+		console.warn('[bookmarks] disk snapshot failed', e);
+	}
+}
+
+/** Fetch + cache cover for one bookmark (IDB + Rokuyomu/Bookmark/covers/). */
+async function cacheCoverForBookmark(entry: BookmarkEntry) {
+	if (!entry?.cover || !entry.sourceId || !entry.mangaId) return;
+	try {
+		const { cacheBookmarkCover } = await import('$lib/utils/cacheCover');
+		await cacheBookmarkCover({
+			mangaId: entry.mangaId,
+			sourceId: entry.sourceId,
+			coverUrl: entry.cover
+		});
+	} catch (e) {
+		console.warn('[bookmarks] cover cache failed', e);
+	}
+}
+
 if (browser) {
 	(async () => {
 		try {
@@ -88,6 +121,8 @@ if (browser) {
 			}
 
 			bookmarks = await idbGetBookmarks();
+			// Snapshot existing list if disk root already granted
+			void persistBookmarksToDisk(bookmarks);
 		} catch (e) {
 			console.error('[bookmarks] failed to load from IndexedDB', e);
 			bookmarks = [];
@@ -177,6 +212,10 @@ export async function addBookmark(entry: Omit<BookmarkEntry, 'timestamp'>) {
 	bookmarks = trimmed;
 	window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 
+	// Offline: JSON snapshot + cover blob (disk + IDB)
+	void persistBookmarksToDisk(trimmed);
+	void cacheCoverForBookmark(full);
+
 	const user = getUser();
 	if (user && db) {
 		try {
@@ -204,9 +243,10 @@ export async function removeBookmark(mangaId: string) {
 	addTombstone(n || mangaId);
 
 	const list = await idbGetBookmarks();
+	const removed = list.filter((b) => normalizeMangaId(b.mangaId) === n);
 	const next = list.filter((b) => normalizeMangaId(b.mangaId) !== n);
 	await idbSetAllBookmarks(next);
-	
+
 	try {
 		await idbDeleteBookmark(mangaId);
 		if (n && n !== mangaId) await idbDeleteBookmark(n);
@@ -217,11 +257,19 @@ export async function removeBookmark(mangaId: string) {
 	bookmarks = next;
 	window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 
+	void persistBookmarksToDisk(next);
+	// Best-effort remove cover files for deleted entries
+	for (const b of removed) {
+		void removeBookmarkCoverFromDisk({ sourceId: b.sourceId, mangaId: b.mangaId }).catch(
+			() => {}
+		);
+	}
+
 	const user = getUser();
 	if (user && db) {
 		try {
 			await deleteDoc(doc(db, 'users', user.uid, 'bookmarks', bookmarkDocId(n || mangaId)));
-		
+
 			if (mangaId !== n) {
 				try {
 					await deleteDoc(
@@ -262,6 +310,13 @@ export async function clearBookmarks() {
 	bookmarks = [];
 	window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 
+	void persistBookmarksToDisk([]);
+	for (const b of list) {
+		void removeBookmarkCoverFromDisk({ sourceId: b.sourceId, mangaId: b.mangaId }).catch(
+			() => {}
+		);
+	}
+
 	const user = getUser();
 	if (user && db && list.length) {
 		try {
@@ -274,6 +329,22 @@ export async function clearBookmarks() {
 			console.error('Failed to clear cloud bookmarks', e);
 		}
 	}
+}
+
+/**
+ * Force-write current bookmarks + covers to disk.
+ * Call after the user picks the Rokuyomu folder so existing bookmarks get a snapshot.
+ */
+export async function exportBookmarksToDisk(): Promise<{ ok: boolean; count: number }> {
+	if (!browser) return { ok: false, count: 0 };
+	const list = await idbGetBookmarks();
+	const path = await saveBookmarksJsonToDisk(list);
+	if (!path) return { ok: false, count: 0 };
+	// Cache covers in background
+	for (const b of list) {
+		void cacheCoverForBookmark(b);
+	}
+	return { ok: true, count: list.length };
 }
 
 export async function syncBookmarksOnLogin() {
@@ -312,8 +383,10 @@ export async function syncBookmarksOnLogin() {
 		bookmarks = merged;
 		window.dispatchEvent(new CustomEvent('bookmarks-changed'));
 
+		void persistBookmarksToDisk(merged);
+
 		const batch = writeBatch(firestore);
-	
+
 		merged.forEach((b) => {
 			batch.set(doc(firestore, 'users', user.uid, 'bookmarks', bookmarkDocId(b.mangaId)), b);
 		});
