@@ -607,3 +607,17 @@ html[data-theme="system"] .detail-card {
 	backdrop-filter: none !important;
 	box-shadow: none !important;
 }
+
+html[data-theme] aside.theme-sidebar,
+html[data-theme] aside[class*="fixed"][class*="border-r"],
+html[data-theme] .history-widget {
+    border-color: var(--border-color) !important;
+}
+html[data-theme] aside[class*="fixed"] [class*="border-b"],
+html[data-theme] aside[class*="fixed"] [class*="border-t"],
+html[data-theme] .history-widget [class*="border-b"],
+html[data-theme] .history-widget [class*="border-t"],
+html[data-theme] header.theme-header,
+html[data-theme] header[class*="sticky"][class*="border-b"] {
+    border-color: var(--border-color) !important;
+}

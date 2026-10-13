@@ -571,16 +571,15 @@
 	{/if}
 
 	<aside
-		class="fixed top-0 bottom-0 left-0 z-50 flex w-[260px] flex-col border-r
+		class="fixed top-0 bottom-0 left-0 z-50 flex w-[260px] flex-col border-r border-[var(--border-color)]
 			{hasHydrated ? 'transition-transform duration-300' : ''}
 			{isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
 			{isDarkMode
-			? 'border-zinc-800/80 bg-gradient-to-b from-violet-950/70 via-[#0c0910] to-[#0c0910]'
-			: 'border-zinc-200 bg-white'}"
+			? 'bg-gradient-to-b from-violet-950/70 via-[#0c0910] to-[#0c0910]'
+			: 'bg-white'}"
 	>
 		<div
-			class="relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 border-b px-4
-				{isDarkMode ? 'border-zinc-800/80' : 'border-zinc-200'}"
+			class="relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-color)] px-4"
 		>
 			<a href="/" onclick={goHome} class="flex min-w-0 items-center">
 				<img src={logo} alt="Rokuyomu" class="h-12 w-auto" />
@@ -672,7 +671,7 @@
 				<Settings class="h-5 w-5 shrink-0" /> Settings
 			</a>
 
-			<div class="my-2 border-t {isDarkMode ? 'border-zinc-800/80' : 'border-zinc-200'}"></div>
+			<div class="my-2 border-t border-[var(--border-color)]"></div>
 
 			<a
 				href="https://discord.gg/kkt669knaG"
@@ -715,12 +714,12 @@
 		<div class="flex min-h-screen min-w-0 flex-1 flex-col">
 			<!-- Header -->
 			<header
-				class="sticky top-0 z-40 w-full border-b backdrop-blur-xl
+				class="sticky top-0 z-40 w-full border-b border-[var(--border-color)] backdrop-blur-xl
 		transition-transform duration-300 ease-in-out
 		{isHeaderHidden ? '-translate-y-full' : 'translate-y-0'}
 		{isDarkMode
-					? 'border-zinc-800/50 bg-gradient-to-b from-violet-950/70 via-[#0c0910]/90 to-[#0c0910]/90'
-					: 'border-zinc-200/80 bg-white/90'}"
+					? 'bg-gradient-to-b from-violet-950/70 via-[#0c0910]/90 to-[#0c0910]/90'
+					: 'bg-white/90'}"
 			>
 				<div class="flex h-12 w-full items-center justify-between gap-1.5 px-2.5 sm:h-14 sm:gap-2 sm:px-4">
 					<!-- Left: menu + logo -->
@@ -809,11 +808,10 @@
 							{#if isBookmarkOpen}
 								<div
 									class="absolute right-0 z-50 mt-2 max-h-[70vh] w-[min(20rem,calc(100vw-1.25rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border shadow-2xl
-							{isDarkMode ? 'border-zinc-800 bg-zinc-900' : 'border-zinc-200 bg-white'}"
+							border-[var(--border-color)] {isDarkMode ? 'bg-zinc-900' : 'bg-white'}"
 								>
 									<div
-										class="flex items-center justify-between border-b px-4 py-3
-								{isDarkMode ? 'border-zinc-800' : 'border-zinc-200'}"
+										class="flex items-center justify-between border-b border-[var(--border-color)] px-4 py-3"
 									>
 										<p class="text-sm font-semibold">Bookmarks</p>
 										<span class="text-xs text-zinc-500">{bookmarks.length} item</span>
@@ -931,7 +929,7 @@
 
 			<!-- History Widget Mobile -->
 			{#if !isReaderPage}
-				<div class="border-t xl:hidden {isDarkMode ? 'border-zinc-800/80' : 'border-zinc-200'}">
+				<div class="border-t border-[var(--border-color)] xl:hidden">
 					{#if isHistoryOpen}
 						<div class="flex h-[min(420px,55vh)] max-h-[420px] flex-col overflow-hidden">
 							<HistoryWidget bind:open={isHistoryOpen} {isDarkMode} />

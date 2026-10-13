@@ -92,15 +92,14 @@
 </script>
 
 <aside
-    class="history-widget flex h-full min-h-0 w-full flex-col border-l transition-transform duration-300 ease-in-out
+    class="history-widget flex h-full min-h-0 w-full flex-col border-l border-[var(--border-color)] transition-transform duration-300 ease-in-out
         xl:w-[280px]
         {open ? 'translate-x-0' : 'translate-x-full'}
-        {isDarkMode ? 'border-zinc-800 bg-gradient-to-b from-violet-950/80 via-zinc-900 to-zinc-950' : 'border-zinc-200 bg-white/95'}"
+        {isDarkMode ? 'bg-gradient-to-b from-violet-950/80 via-zinc-900 to-zinc-950' : 'bg-white/95'}"
 >
 	<!-- Header -->
 	<div
-		class="relative flex shrink-0 items-center justify-between gap-2 border-b px-3 py-3.5
-			{isDarkMode ? 'border-zinc-800/80' : 'border-zinc-200'}"
+		class="relative flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-color)] px-3 py-3.5"
 	>
 		<button
 			onclick={close}
@@ -217,7 +216,7 @@
 	</div>
 
 	{#if history.length > 0}
-		<div class="shrink-0 border-t p-2 {isDarkMode ? 'border-zinc-800/80' : 'border-zinc-200'}">
+		<div class="shrink-0 border-t border-[var(--border-color)] p-2">
 			<a
 				href="/history"
 				onclick={(e) => handleNavigate(e, '/history')}
