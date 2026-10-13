@@ -37,7 +37,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
 		body = await request.json();
 	} catch {
-		/* empty body = all popular */
 	}
 
 	const targets =

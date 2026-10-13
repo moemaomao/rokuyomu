@@ -60,7 +60,6 @@
 	type AdminSection =
 		| 'sources'
 		| 'reports'
-		| 'health'
 		| 'cache'
 		| 'announcements'
 		| 'users'
@@ -78,15 +77,14 @@
 		icon: typeof Shield;
 		ready: boolean;
 	}[] = [
-		{ id: 'sources', label: 'Sources', desc: 'Enable, notes, bulk actions', icon: BookMarked, ready: true },
-		{ id: 'reports', label: 'Reports', desc: 'User report inbox', icon: AlertTriangle, ready: false },
-		{ id: 'health', label: 'Health', desc: 'Scraper & source ping', icon: Activity, ready: true },
-		{ id: 'cache', label: 'Cache', desc: 'Purge KV / Worker cache', icon: Trash2, ready: false },
-		{ id: 'announcements', label: 'Announcements', desc: 'Site-wide banners', icon: Megaphone, ready: false },
-		{ id: 'users', label: 'Users', desc: 'Ban & moderation', icon: Users, ready: false },
-		{ id: 'analytics', label: 'Analytics', desc: 'Traffic & top sources', icon: BarChart3, ready: false },
+		{ id: 'sources', label: 'Sources', desc: 'Enable, notes, health, backups', icon: BookMarked, ready: true },
+		{ id: 'reports', label: 'Reports', desc: 'User report inbox', icon: AlertTriangle, ready: true },
+		{ id: 'cache', label: 'Cache', desc: 'Purge KV / Worker cache', icon: Trash2, ready: true },
+		{ id: 'announcements', label: 'Announcements', desc: 'Site-wide banners', icon: Megaphone, ready: true },
+		{ id: 'users', label: 'Users', desc: 'Ban & moderation', icon: Users, ready: true },
+		{ id: 'analytics', label: 'Analytics', desc: 'Traffic & top sources', icon: BarChart3, ready: true },
 		{ id: 'backups', label: 'Backups', desc: 'Rebuild meta snapshots', icon: HardDrive, ready: true },
-		{ id: 'flags', label: 'Feature flags', desc: 'Toggle experimental features', icon: Flag, ready: false },
+		{ id: 'flags', label: 'Feature flags', desc: 'Toggle experimental features', icon: Flag, ready: true },
 		{ id: 'about', label: 'About', desc: 'Admin panel info', icon: Info, ready: true }
 	];
 
@@ -101,6 +99,81 @@
 	let healthMap = $state<Record<string, HealthInfo>>({});
 	let healthRunning = $state(false);
 	let backupRunning = $state(false);
+
+	/** Shared loading bar for health / backup jobs */
+	let jobProgress = $state<{
+		active: boolean;
+		label: string;
+		current: number;
+		total: number;
+		indeterminate: boolean;
+	}>({ active: false, label: '', current: 0, total: 0, indeterminate: false });
+
+	function startJob(label: string, total: number, indeterminate = false) {
+		jobProgress = {
+			active: true,
+			label,
+			current: 0,
+			total,
+			indeterminate
+		};
+	}
+	function tickJob(current: number, label?: string) {
+		jobProgress = {
+			...jobProgress,
+			current,
+			label: label ?? jobProgress.label
+		};
+	}
+	function endJob() {
+		jobProgress = {
+			active: false,
+			label: '',
+			current: 0,
+			total: 0,
+			indeterminate: false
+		};
+	}
+	const jobPercent = $derived(
+		jobProgress.indeterminate || jobProgress.total <= 0
+			? 0
+			: Math.min(100, Math.round((jobProgress.current / jobProgress.total) * 100))
+	);
+
+	// Reports inbox
+	type ReportRow = {
+		id: string;
+		type?: string;
+		status?: string;
+		sourceId?: string | null;
+		message?: string;
+		url?: string;
+		createdAt?: { seconds?: number } | string | null;
+		uid?: string;
+	};
+	let reportRows = $state<ReportRow[]>([]);
+	let reportsLoading = $state(false);
+
+	// Cache purge
+	let cachePrefix = $state('browse:');
+	let cacheKey = $state('');
+	let cacheKeys = $state<string[]>([]);
+	let cacheBusy = $state(false);
+
+	// Announcements
+	let annEnabled = $state(false);
+	let annMessage = $state('');
+	let annLevel = $state<'info' | 'warning' | 'danger'>('info');
+	let annBusy = $state(false);
+
+	// Users / bans
+	let bannedUids = $state<string[]>([]);
+	let banDraft = $state('');
+	let usersBusy = $state(false);
+
+	// Feature flags
+	let featureFlags = $state<Record<string, boolean>>({});
+	let flagsBusy = $state(false);
 
 	function norm(id: string): string {
 		return String(id || '')
@@ -173,6 +246,7 @@
 		}, 80);
 
 		loadReportCounts();
+		loadAdminExtras();
 
 		return () => {
 			clearInterval(t);
@@ -181,6 +255,7 @@
 
 	async function loadReportCounts() {
 		if (!db) return;
+		reportsLoading = true;
 		try {
 			const qReports = query(
 				collection(db, 'reports'),
@@ -189,23 +264,241 @@
 			);
 			const snap = await getDocs(qReports);
 			const counts: Record<string, number> = {};
+			const rows: ReportRow[] = [];
 			for (const d of snap.docs) {
-				const r = d.data() as {
-					type?: string;
-					status?: string;
-					sourceId?: string | null;
-				};
+				const r = d.data() as ReportRow;
+				rows.push({
+					id: d.id,
+					type: r.type,
+					status: r.status || 'open',
+					sourceId: r.sourceId ?? null,
+					message: r.message,
+					url: r.url,
+					createdAt: r.createdAt,
+					uid: r.uid
+				});
 				const isOpen =
 					(r.type === 'broken_source' || r.type === 'bug') &&
-					(r.status === 'open' || r.status === 'in_progress');
+					(r.status === 'open' || r.status === 'in_progress' || !r.status);
 				if (isOpen && r.sourceId) {
 					const key = norm(r.sourceId);
 					counts[key] = (counts[key] || 0) + 1;
 				}
 			}
+			reportRows = rows;
 			reportCountMap = counts;
 		} catch (e) {
 			console.warn('[admin reports]', e);
+		} finally {
+			reportsLoading = false;
+		}
+	}
+
+	async function setReportStatus(reportId: string, status: string) {
+		if (!db) return;
+		errorMsg = '';
+		try {
+			const { doc, updateDoc } = await import('firebase/firestore');
+			await updateDoc(doc(db, 'reports', reportId), { status });
+			reportRows = reportRows.map((r) => (r.id === reportId ? { ...r, status } : r));
+			await loadReportCounts();
+			successMsg = `Report ${reportId.slice(0, 8)}… → ${status}`;
+			setTimeout(() => (successMsg = ''), 2500);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Update report failed';
+		}
+	}
+
+	async function loadAdminExtras() {
+		const token = await getIdToken();
+		if (!token) return;
+		const headers = { Authorization: `Bearer ${token}` };
+		try {
+			const [aRes, fRes, uRes] = await Promise.all([
+				fetch('/api/admin/announcements', { headers }),
+				fetch('/api/admin/flags', { headers }),
+				fetch('/api/admin/users', { headers })
+			]);
+			const a = (await aRes.json()) as {
+				announcement?: { enabled?: boolean; message?: string; level?: 'info' | 'warning' | 'danger' };
+			};
+			const f = (await fRes.json()) as { flags?: Record<string, boolean> };
+			const u = (await uRes.json()) as { banned?: string[] };
+			if (a?.announcement) {
+				annEnabled = !!a.announcement.enabled;
+				annMessage = a.announcement.message || '';
+				annLevel = a.announcement.level || 'info';
+			}
+			if (f?.flags) featureFlags = f.flags;
+			if (u?.banned) bannedUids = u.banned;
+		} catch (e) {
+			console.warn('[admin extras]', e);
+		}
+	}
+
+	async function saveAnnouncement() {
+		annBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/announcements', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled: annEnabled, message: annMessage, level: annLevel })
+			});
+			const body = (await res.json()) as { error?: string; announcement?: unknown };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			successMsg = 'Announcement saved';
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Save announcement failed';
+		} finally {
+			annBusy = false;
+		}
+	}
+
+	async function toggleFlag(key: string, value: boolean) {
+		flagsBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/flags', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ key, value })
+			});
+			const body = (await res.json()) as { error?: string; flags?: Record<string, boolean> };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			featureFlags = body.flags || { ...featureFlags, [key]: value };
+			successMsg = `Flag ${key} = ${value}`;
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Toggle flag failed';
+		} finally {
+			flagsBusy = false;
+		}
+	}
+
+	async function banUser() {
+		const uid = banDraft.trim();
+		if (!uid) return;
+		usersBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/users', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action: 'ban', uid })
+			});
+			const body = (await res.json()) as { error?: string; banned?: string[] };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			bannedUids = body.banned || [];
+			banDraft = '';
+			successMsg = `Banned ${uid}`;
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Ban failed';
+		} finally {
+			usersBusy = false;
+		}
+	}
+
+	async function unbanUser(uid: string) {
+		usersBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/users', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action: 'unban', uid })
+			});
+			const body = (await res.json()) as { error?: string; banned?: string[] };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			bannedUids = body.banned || [];
+			successMsg = `Unbanned ${uid}`;
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Unban failed';
+		} finally {
+			usersBusy = false;
+		}
+	}
+
+	async function listCacheKeys() {
+		cacheBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/cache', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action: 'list', prefix: cachePrefix })
+			});
+			const body = (await res.json()) as { error?: string; keys?: string[] };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			cacheKeys = body.keys || [];
+			successMsg = `Listed ${cacheKeys.length} keys`;
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'List cache failed';
+		} finally {
+			cacheBusy = false;
+		}
+	}
+
+	async function purgeCachePrefix() {
+		if (!confirm(`Purge up to 100 KV keys with prefix "${cachePrefix}"?`)) return;
+		cacheBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/cache', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ prefix: cachePrefix })
+			});
+			const body = (await res.json()) as { error?: string; keys?: string[]; deleted?: number };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			cacheKeys = body.keys || [];
+			successMsg = `Purged ${body.deleted ?? 0} keys`;
+			setTimeout(() => (successMsg = ''), 3000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Purge failed';
+		} finally {
+			cacheBusy = false;
+		}
+	}
+
+	async function deleteCacheKey() {
+		const key = cacheKey.trim();
+		if (!key) return;
+		cacheBusy = true;
+		errorMsg = '';
+		try {
+			const token = await getIdToken();
+			if (!token) throw new Error('Not authenticated');
+			const res = await fetch('/api/admin/cache', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ key })
+			});
+			const body = (await res.json()) as { error?: string };
+			if (!res.ok) throw new Error(body.error || res.statusText);
+			cacheKeys = cacheKeys.filter((k) => k !== key);
+			successMsg = `Deleted ${key}`;
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Delete key failed';
+		} finally {
+			cacheBusy = false;
 		}
 	}
 
@@ -426,12 +719,20 @@
 		if (targets.length === 0) return;
 		if (!confirm(`Health-check ${targets.length} source (max 15, ~8s timeout each)?`)) return;
 		healthRunning = true;
-		for (const s of targets) {
-			await runHealth(s.id);
+		startJob(`Health check 0/${targets.length}`, targets.length, false);
+		try {
+			for (let i = 0; i < targets.length; i++) {
+				const s = targets[i];
+				tickJob(i, `Health: ${s.name || s.id} (${i + 1}/${targets.length})`);
+				await runHealth(s.id);
+				tickJob(i + 1, `Health: ${s.name || s.id} (${i + 1}/${targets.length})`);
+			}
+			successMsg = `Health check selesai (${targets.length} source)`;
+			setTimeout(() => (successMsg = ''), 2500);
+		} finally {
+			healthRunning = false;
+			endJob();
 		}
-		healthRunning = false;
-		successMsg = `Health check selesai (${targets.length} source)`;
-		setTimeout(() => (successMsg = ''), 2500);
 	}
 
 	async function rebuildBackups(filteredOnly = false) {
@@ -450,6 +751,10 @@
 
 		backupRunning = true;
 		errorMsg = '';
+		const jobLabel = filteredOnly
+			? `Backup filtered (${targets.length} source)…`
+			: 'Rebuild all backups…';
+		startJob(jobLabel, filteredOnly && targets.length ? targets.length : 1, true);
 		try {
 			const token = await getIdToken();
 			if (!token) throw new Error('Not authenticated');
@@ -491,6 +796,7 @@
 			errorMsg = e instanceof Error ? e.message : 'Backup snapshot failed';
 		} finally {
 			backupRunning = false;
+			endJob();
 		}
 	}
 
@@ -781,6 +1087,43 @@
 			</button>
 		</div>
 
+		{#if jobProgress.active}
+			<div
+				class="mb-4 overflow-hidden rounded-xl border border-violet-200/80 bg-violet-50/60 p-3 dark:border-violet-900/50 dark:bg-violet-950/30"
+				role="progressbar"
+				aria-valuemin="0"
+				aria-valuemax={jobProgress.indeterminate ? undefined : 100}
+				aria-valuenow={jobProgress.indeterminate ? undefined : jobPercent}
+				aria-label={jobProgress.label}
+			>
+				<div class="mb-2 flex items-center justify-between gap-2 text-xs">
+					<span class="flex items-center gap-1.5 font-medium text-violet-800 dark:text-violet-200">
+						<Loader2 class="h-3.5 w-3.5 animate-spin" />
+						{jobProgress.label}
+					</span>
+					{#if !jobProgress.indeterminate && jobProgress.total > 0}
+						<span class="tabular-nums text-violet-600 dark:text-violet-300">
+							{jobProgress.current}/{jobProgress.total} · {jobPercent}%
+						</span>
+					{:else}
+						<span class="text-violet-500 dark:text-violet-400">Working…</span>
+					{/if}
+				</div>
+				<div class="h-2 w-full overflow-hidden rounded-full bg-violet-200/70 dark:bg-violet-900/60">
+					{#if jobProgress.indeterminate}
+						<div
+							class="h-full w-1/3 animate-[jobindeterminate_1.2s_ease-in-out_infinite] rounded-full bg-violet-600 dark:bg-violet-400"
+						></div>
+					{:else}
+						<div
+							class="h-full rounded-full bg-violet-600 transition-all duration-300 ease-out dark:bg-violet-400"
+							style="width: {jobPercent}%"
+						></div>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
 		{#if Object.keys(grouped).length === 0}
 			<div class="py-12 text-center text-sm text-zinc-500">No matching sources found.</div>
 		{:else}
@@ -992,35 +1335,241 @@
 			</span>
 		</p>
 
-				{:else if adminSection === 'health'}
+				{:else if adminSection === 'reports'}
+					<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+						<div>
+							<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Reports</h2>
+							<p class="mt-1 text-sm text-zinc-500">Open user reports (Firestore, last 100).</p>
+						</div>
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							onclick={loadReportCounts}
+							disabled={reportsLoading}
+						>
+							<RefreshCw class="h-4 w-4 {reportsLoading ? 'animate-spin' : ''}" />
+							Refresh
+						</button>
+					</div>
+					{#if errorMsg}
+						<div class="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{errorMsg}</div>
+					{/if}
+					{#if successMsg}
+						<div class="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{successMsg}</div>
+					{/if}
+					{#if reportRows.length === 0}
+						<p class="py-8 text-center text-sm text-zinc-500">{reportsLoading ? 'Loading…' : 'No reports found.'}</p>
+					{:else}
+						<div class="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
+							<table class="w-full text-left text-sm">
+								<thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
+									<tr>
+										<th class="px-3 py-2">Type</th>
+										<th class="px-3 py-2">Source</th>
+										<th class="px-3 py-2">Status</th>
+										<th class="px-3 py-2">Message</th>
+										<th class="px-3 py-2 text-right">Actions</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+									{#each reportRows as r (r.id)}
+										<tr class="bg-white dark:bg-zinc-950/40">
+											<td class="px-3 py-2 font-medium">{r.type || '—'}</td>
+											<td class="px-3 py-2">
+												{#if r.sourceId}
+													<button type="button" class="text-violet-600 hover:underline dark:text-violet-400" onclick={() => goToReports(r.sourceId || '')}>{r.sourceId}</button>
+												{:else}
+													—
+												{/if}
+											</td>
+											<td class="px-3 py-2">
+												<span class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase
+													{r.status === 'resolved' || r.status === 'closed'
+														? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+														: r.status === 'in_progress'
+															? 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300'
+															: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'}">{r.status || 'open'}</span>
+											</td>
+											<td class="max-w-[240px] truncate px-3 py-2 text-zinc-600 dark:text-zinc-400" title={r.message || ''}>{r.message || '—'}</td>
+											<td class="px-3 py-2 text-right">
+												<div class="flex justify-end gap-1">
+													<button type="button" class="rounded border border-sky-300/70 px-2 py-1 text-[10px] text-sky-700 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300" onclick={() => setReportStatus(r.id, 'in_progress')}>Progress</button>
+													<button type="button" class="rounded border border-emerald-300/70 px-2 py-1 text-[10px] text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300" onclick={() => setReportStatus(r.id, 'resolved')}>Resolve</button>
+													<button type="button" class="rounded border border-zinc-200 px-2 py-1 text-[10px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400" onclick={() => setReportStatus(r.id, 'closed')}>Close</button>
+												</div>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+
+				{:else if adminSection === 'cache'}
 					<div class="mb-4">
-						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Health</h2>
-						<p class="mt-1 text-sm text-zinc-500">
-							Ping scraper endpoints for sources currently filtered on the Sources tab (max 15).
-						</p>
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Cache</h2>
+						<p class="mt-1 text-sm text-zinc-500">List / purge Worker KV keys (max 100 per request).</p>
 					</div>
-					<div class="flex flex-wrap gap-2">
-						<button
-							type="button"
-							class="inline-flex items-center gap-1.5 rounded-lg border border-sky-300/70 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-800 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60"
-							onclick={runHealthFiltered}
-							disabled={loading || healthRunning || backupRunning}
-						>
-							<Activity class="h-4 w-4 {healthRunning ? 'animate-pulse' : ''}" />
-							{healthRunning ? 'Running…' : 'Health-check filtered sources'}
-						</button>
-						<button
-							type="button"
-							class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-							onclick={() => (adminSection = 'sources')}
-						>
-							Open Sources filters
-						</button>
+					{#if errorMsg}
+						<div class="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{errorMsg}</div>
+					{/if}
+					{#if successMsg}
+						<div class="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{successMsg}</div>
+					{/if}
+					<div class="mb-4 flex flex-wrap items-end gap-2">
+						<label class="block min-w-[180px] flex-1 text-xs text-zinc-500">
+							Prefix
+							<input bind:value={cachePrefix} class="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" placeholder="browse:" />
+						</label>
+						<button type="button" class="rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800" onclick={listCacheKeys} disabled={cacheBusy}>List</button>
+						<button type="button" class="rounded-lg border border-red-300/70 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300" onclick={purgeCachePrefix} disabled={cacheBusy}>Purge prefix</button>
 					</div>
-					<p class="mt-4 text-xs text-zinc-500">
-						Results appear as badges on each source row under <strong>Sources</strong>. Timeout 8s per
-						source.
-					</p>
+					<div class="mb-4 flex flex-wrap items-end gap-2">
+						<label class="block min-w-[180px] flex-1 text-xs text-zinc-500">
+							Exact key
+							<input bind:value={cacheKey} class="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" placeholder="browse:asura:1" />
+						</label>
+						<button type="button" class="rounded-lg border border-red-300/70 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300" onclick={deleteCacheKey} disabled={cacheBusy || !cacheKey.trim()}>Delete key</button>
+					</div>
+					{#if cacheKeys.length}
+						<ul class="max-h-64 overflow-auto rounded-xl border border-zinc-200 p-2 text-xs font-mono dark:border-zinc-800">
+							{#each cacheKeys as k}
+								<li class="truncate border-b border-zinc-100 px-2 py-1 dark:border-zinc-800/60">{k}</li>
+							{/each}
+						</ul>
+					{/if}
+
+				{:else if adminSection === 'announcements'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Announcements</h2>
+						<p class="mt-1 text-sm text-zinc-500">Site-wide banner stored in KV (<code class="text-xs">config:announcement</code>).</p>
+					</div>
+					{#if errorMsg}
+						<div class="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{errorMsg}</div>
+					{/if}
+					{#if successMsg}
+						<div class="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{successMsg}</div>
+					{/if}
+					<label class="mb-3 flex items-center gap-2 text-sm">
+						<input type="checkbox" bind:checked={annEnabled} class="rounded border-zinc-300" />
+						Enabled
+					</label>
+					<label class="mb-3 block text-xs text-zinc-500">
+						Level
+						<select bind:value={annLevel} class="mt-1 block w-full max-w-xs rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+							<option value="info">info</option>
+							<option value="warning">warning</option>
+							<option value="danger">danger</option>
+						</select>
+					</label>
+					<label class="mb-3 block text-xs text-zinc-500">
+						Message
+						<textarea bind:value={annMessage} rows="3" class="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" placeholder="Maintenance tonight 02:00 UTC…"></textarea>
+					</label>
+					<button type="button" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50" onclick={saveAnnouncement} disabled={annBusy}>
+						{annBusy ? 'Saving…' : 'Save announcement'}
+					</button>
+
+				{:else if adminSection === 'users'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Users</h2>
+						<p class="mt-1 text-sm text-zinc-500">Banned UIDs in KV (<code class="text-xs">config:banned_uids</code>). Wire client checks where needed.</p>
+					</div>
+					{#if errorMsg}
+						<div class="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{errorMsg}</div>
+					{/if}
+					{#if successMsg}
+						<div class="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{successMsg}</div>
+					{/if}
+					<div class="mb-4 flex flex-wrap gap-2">
+						<input bind:value={banDraft} placeholder="Firebase UID" class="min-w-[220px] flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
+						<button type="button" class="rounded-lg border border-red-300/70 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300" onclick={banUser} disabled={usersBusy || !banDraft.trim()}>Ban</button>
+					</div>
+					{#if bannedUids.length === 0}
+						<p class="text-sm text-zinc-500">No banned UIDs.</p>
+					{:else}
+						<ul class="space-y-1">
+							{#each bannedUids as uid}
+								<li class="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+									<span class="font-mono text-xs">{uid}</span>
+									<button type="button" class="text-xs text-emerald-600 hover:underline dark:text-emerald-400" onclick={() => unbanUser(uid)} disabled={usersBusy}>Unban</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+
+				{:else if adminSection === 'analytics'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Analytics</h2>
+						<p class="mt-1 text-sm text-zinc-500">Snapshot from admin data (no external analytics yet).</p>
+					</div>
+					<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+						<div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+							<div class="text-xs text-zinc-500">Total sources</div>
+							<div class="text-lg font-semibold">{sources.length}</div>
+						</div>
+						<div class="rounded-lg border border-emerald-200/60 bg-emerald-50/50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/30">
+							<div class="text-xs text-emerald-600">Enabled</div>
+							<div class="text-lg font-semibold text-emerald-700 dark:text-emerald-300">{sources.filter((s) => s.enabled).length}</div>
+						</div>
+						<div class="rounded-lg border border-red-200/60 bg-red-50/50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
+							<div class="text-xs text-red-600">Hidden</div>
+							<div class="text-lg font-semibold text-red-700 dark:text-red-300">{sources.filter((s) => !s.enabled).length}</div>
+						</div>
+						<div class="rounded-lg border border-amber-200/60 bg-amber-50/80 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+							<div class="text-xs text-amber-600">Open reports</div>
+							<div class="text-lg font-semibold text-amber-700 dark:text-amber-300">{reportRows.filter((r) => r.status === 'open' || r.status === 'in_progress' || !r.status).length}</div>
+						</div>
+						<div class="rounded-lg border border-sky-200/60 bg-sky-50/80 p-3 dark:border-sky-900/40 dark:bg-sky-950/30">
+							<div class="text-xs text-sky-600">Notes</div>
+							<div class="text-lg font-semibold text-sky-700 dark:text-sky-300">{sources.filter((s) => (s.note || '').trim()).length}</div>
+						</div>
+						<div class="rounded-lg border border-orange-200/60 bg-orange-50/80 p-3 dark:border-orange-900/40 dark:bg-orange-950/30">
+							<div class="text-xs text-orange-600">Broken / reported</div>
+							<div class="text-lg font-semibold text-orange-700 dark:text-orange-300">{sources.filter((s) => hasReport(s.id)).length}</div>
+						</div>
+						<div class="rounded-lg border border-violet-200/60 bg-violet-50/80 p-3 dark:border-violet-900/40 dark:bg-violet-950/30">
+							<div class="text-xs text-violet-600">Banned UIDs</div>
+							<div class="text-lg font-semibold text-violet-700 dark:text-violet-300">{bannedUids.length}</div>
+						</div>
+						<div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+							<div class="text-xs text-zinc-500">Comic / Novel</div>
+							<div class="text-lg font-semibold">{sources.filter((s) => !isNovelSource(s.id)).length} / {sources.filter((s) => isNovelSource(s.id)).length}</div>
+						</div>
+					</div>
+					<p class="mt-4 text-xs text-zinc-400">For traffic metrics, connect Cloudflare Analytics or a custom cron counter later.</p>
+
+				{:else if adminSection === 'flags'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Feature flags</h2>
+						<p class="mt-1 text-sm text-zinc-500">Remote toggles in KV (<code class="text-xs">config:feature_flags</code>).</p>
+					</div>
+					{#if errorMsg}
+						<div class="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{errorMsg}</div>
+					{/if}
+					{#if successMsg}
+						<div class="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{successMsg}</div>
+					{/if}
+					{#if Object.keys(featureFlags).length === 0}
+						<p class="text-sm text-zinc-500">No flags loaded. Open this tab while logged in as admin.</p>
+					{:else}
+						<ul class="space-y-2">
+							{#each Object.entries(featureFlags) as [key, val]}
+								<li class="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
+									<span class="font-mono text-sm">{key}</span>
+									<button
+										type="button"
+										class="rounded-full px-3 py-1 text-xs font-semibold transition
+											{val ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'}"
+										onclick={() => toggleFlag(key, !val)}
+										disabled={flagsBusy}
+									>
+										{val ? 'ON' : 'OFF'}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 
 				{:else if adminSection === 'backups'}
 					<div class="mb-4">
@@ -1048,6 +1597,39 @@
 							Backup filtered only
 						</button>
 					</div>
+					{#if jobProgress.active}
+						<div
+							class="mt-4 overflow-hidden rounded-xl border border-violet-200/80 bg-violet-50/60 p-3 dark:border-violet-900/50 dark:bg-violet-950/30"
+							role="progressbar"
+							aria-label={jobProgress.label}
+						>
+							<div class="mb-2 flex items-center justify-between gap-2 text-xs">
+								<span class="flex items-center gap-1.5 font-medium text-violet-800 dark:text-violet-200">
+									<Loader2 class="h-3.5 w-3.5 animate-spin" />
+									{jobProgress.label}
+								</span>
+								{#if !jobProgress.indeterminate && jobProgress.total > 0}
+									<span class="tabular-nums text-violet-600 dark:text-violet-300">
+										{jobProgress.current}/{jobProgress.total} · {jobPercent}%
+									</span>
+								{:else}
+									<span class="text-violet-500 dark:text-violet-400">Working…</span>
+								{/if}
+							</div>
+							<div class="h-2 w-full overflow-hidden rounded-full bg-violet-200/70 dark:bg-violet-900/60">
+								{#if jobProgress.indeterminate}
+									<div
+										class="h-full w-1/3 animate-[jobindeterminate_1.2s_ease-in-out_infinite] rounded-full bg-violet-600 dark:bg-violet-400"
+									></div>
+								{:else}
+									<div
+										class="h-full rounded-full bg-violet-600 transition-all duration-300 ease-out dark:bg-violet-400"
+										style="width: {jobPercent}%"
+									></div>
+								{/if}
+							</div>
+						</div>
+					{/if}
 					{#if successMsg}
 						<p class="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{successMsg}</p>
 					{/if}
@@ -1061,10 +1643,14 @@
 						<p class="mt-1 text-sm text-zinc-500">Rokuyomu admin panel</p>
 					</div>
 					<ul class="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
-						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Sources</strong> — hide/show adapters, notes, bulk actions</li>
-						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Health</strong> — scraper ping for filtered sources</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Sources</strong> — hide/show, notes, health ping, backups</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Reports</strong> — Firestore inbox + resolve/close</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Cache</strong> — list/purge Worker KV by prefix or key</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Announcements</strong> — site-wide banner (KV)</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Users</strong> — banned UIDs (KV)</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Analytics</strong> — snapshot counts from admin data</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Feature flags</strong> — remote toggles (KV)</li>
 						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Backups</strong> — rebuild KV metadata snapshots</li>
-						<li class="pt-2 text-xs text-zinc-500">Sections marked Soon are planned and not wired yet.</li>
 					</ul>
 
 				{:else}
@@ -1115,3 +1701,14 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	@keyframes jobindeterminate {
+		0% {
+			transform: translateX(-120%);
+		}
+		100% {
+			transform: translateX(320%);
+		}
+	}
+</style>
