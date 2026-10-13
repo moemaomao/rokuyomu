@@ -70,6 +70,8 @@
 
 	let adminSection = $state<AdminSection>('sources');
 
+
+
 	const ADMIN_NAV: {
 		id: AdminSection;
 		label: string;
@@ -90,6 +92,7 @@
 
 	let selectedKind = $state<ContentKind>('comic');
 	let authChecked = $state(false);
+
 	let reportCountMap = $state<Record<string, number>>({});
 
 	let editingNoteId = $state<string | null>(null);
@@ -161,10 +164,19 @@
 	let cacheBusy = $state(false);
 
 	// Announcements
-	let annEnabled = $state(false);
+	type AnnItem = {
+		id: string;
+		message: string;
+		level: 'info' | 'warning' | 'danger';
+		createdAt: string;
+		updatedAt: string;
+	};
+	let annItems = $state<AnnItem[]>([]);
+	let annActiveId = $state<string | null>(null);
 	let annMessage = $state('');
 	let annLevel = $state<'info' | 'warning' | 'danger'>('info');
 	let annBusy = $state(false);
+	let annEditingId = $state<string | null>(null);
 
 	// Users / bans
 	let bannedUids = $state<string[]>([]);
@@ -320,14 +332,15 @@
 				fetch('/api/admin/users', { headers })
 			]);
 			const a = (await aRes.json()) as {
-				announcement?: { enabled?: boolean; message?: string; level?: 'info' | 'warning' | 'danger' };
+				items?: AnnItem[];
+				activeId?: string | null;
+				error?: string;
 			};
 			const f = (await fRes.json()) as { flags?: Record<string, boolean> };
 			const u = (await uRes.json()) as { banned?: string[] };
-			if (a?.announcement) {
-				annEnabled = !!a.announcement.enabled;
-				annMessage = a.announcement.message || '';
-				annLevel = a.announcement.level || 'info';
+			if (Array.isArray(a?.items)) {
+				annItems = a.items;
+				annActiveId = a.activeId ?? null;
 			}
 			if (f?.flags) featureFlags = f.flags;
 			if (u?.banned) bannedUids = u.banned;
@@ -336,26 +349,136 @@
 		}
 	}
 
-	async function saveAnnouncement() {
+	$effect(() => {
+		if (adminSection === 'announcements' && authChecked && admin) {
+			void loadAdminExtras();
+		}
+	});
+
+
+	async function annPost(payload: Record<string, unknown>) {
+		const token = await getIdToken();
+		if (!token) throw new Error('Not authenticated');
+		const res = await fetch('/api/admin/announcements', {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
+		const body = (await res.json()) as {
+			error?: string;
+			items?: AnnItem[];
+			activeId?: string | null;
+		};
+		if (!res.ok) throw new Error(body.error || res.statusText);
+		if (Array.isArray(body.items)) {
+			annItems = body.items;
+			annActiveId = body.activeId ?? null;
+		}
+		return body;
+	}
+
+	async function createAnnouncement() {
+		const message = annMessage.trim();
+		if (!message) {
+			errorMsg = 'Message required';
+			return;
+		}
 		annBusy = true;
 		errorMsg = '';
 		try {
-			const token = await getIdToken();
-			if (!token) throw new Error('Not authenticated');
-			const res = await fetch('/api/admin/announcements', {
-				method: 'POST',
-				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-				body: JSON.stringify({ enabled: annEnabled, message: annMessage, level: annLevel })
-			});
-			const body = (await res.json()) as { error?: string; announcement?: unknown };
-			if (!res.ok) throw new Error(body.error || res.statusText);
-			successMsg = 'Announcement saved';
+			await annPost({ action: 'create', message, level: annLevel });
+			annMessage = '';
+			annLevel = 'info';
+			annEditingId = null;
+			successMsg = 'Announcement added to list';
 			setTimeout(() => (successMsg = ''), 2000);
 		} catch (e: unknown) {
-			errorMsg = e instanceof Error ? e.message : 'Save announcement failed';
+			errorMsg = e instanceof Error ? e.message : 'Create failed';
 		} finally {
 			annBusy = false;
 		}
+	}
+
+	async function updateAnnouncement() {
+		if (!annEditingId) return;
+		const message = annMessage.trim();
+		if (!message) {
+			errorMsg = 'Message required';
+			return;
+		}
+		annBusy = true;
+		errorMsg = '';
+		try {
+			await annPost({ action: 'update', id: annEditingId, message, level: annLevel });
+			annMessage = '';
+			annLevel = 'info';
+			annEditingId = null;
+			successMsg = 'Announcement updated';
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Update failed';
+		} finally {
+			annBusy = false;
+		}
+	}
+
+	async function activateAnnouncement(id: string) {
+		annBusy = true;
+		errorMsg = '';
+		try {
+			await annPost({ action: 'activate', id });
+			successMsg = 'Banner aktif di-set';
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Activate failed';
+		} finally {
+			annBusy = false;
+		}
+	}
+
+	async function deactivateAnnouncement() {
+		annBusy = true;
+		errorMsg = '';
+		try {
+			await annPost({ action: 'deactivate' });
+			successMsg = 'Banner dimatikan (list tetap ada)';
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Deactivate failed';
+		} finally {
+			annBusy = false;
+		}
+	}
+
+	async function deleteAnnouncement(id: string) {
+		if (!confirm('Hapus announcement ini dari list?')) return;
+		annBusy = true;
+		errorMsg = '';
+		try {
+			await annPost({ action: 'delete', id });
+			if (annEditingId === id) {
+				annEditingId = null;
+				annMessage = '';
+			}
+			successMsg = 'Deleted';
+			setTimeout(() => (successMsg = ''), 2000);
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Delete failed';
+		} finally {
+			annBusy = false;
+		}
+	}
+
+	function startEditAnnouncement(item: AnnItem) {
+		annEditingId = item.id;
+		annMessage = item.message;
+		annLevel = item.level;
+	}
+
+	function cancelEditAnnouncement() {
+		annEditingId = null;
+		annMessage = '';
+		annLevel = 'info';
 	}
 
 	async function toggleFlag(key: string, value: boolean) {
@@ -1440,9 +1563,23 @@
 					{/if}
 
 				{:else if adminSection === 'announcements'}
-					<div class="mb-4">
-						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Announcements</h2>
-						<p class="mt-1 text-sm text-zinc-500">Site-wide banner stored in KV (<code class="text-xs">config:announcement</code>).</p>
+					<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+						<div>
+							<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Announcements</h2>
+							<p class="mt-1 text-sm text-zinc-500">
+								Simpan banyak template, pilih mana yang ditampilkan di site (KV
+								<code class="text-xs">config:announcements</code>).
+							</p>
+						</div>
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							onclick={loadAdminExtras}
+							disabled={annBusy}
+						>
+							<RefreshCw class="h-4 w-4" />
+							Refresh
+						</button>
 					</div>
 					{#if errorMsg}
 						<div class="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{errorMsg}</div>
@@ -1450,26 +1587,97 @@
 					{#if successMsg}
 						<div class="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{successMsg}</div>
 					{/if}
-					<label class="mb-3 flex items-center gap-2 text-sm">
-						<input type="checkbox" bind:checked={annEnabled} class="rounded border-zinc-300" />
-						Enabled
-					</label>
-					<label class="mb-3 block text-xs text-zinc-500">
-						Level
-						<select bind:value={annLevel} class="mt-1 block w-full max-w-xs rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
-							<option value="info">info</option>
-							<option value="warning">warning</option>
-							<option value="danger">danger</option>
-						</select>
-					</label>
-					<label class="mb-3 block text-xs text-zinc-500">
-						Message
-						<textarea bind:value={annMessage} rows="3" class="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" placeholder="Maintenance tonight 02:00 UTC…"></textarea>
-					</label>
-					<button type="button" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50" onclick={saveAnnouncement} disabled={annBusy}>
-						{annBusy ? 'Saving…' : 'Save announcement'}
-					</button>
 
+					<div class="mb-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+						<div class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+							{annEditingId ? 'Edit announcement' : 'Tambah baru'}
+						</div>
+						<label class="mb-2 block text-xs text-zinc-500">
+							Level
+							<select bind:value={annLevel} class="mt-1 block w-full max-w-xs rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+								<option value="info">info</option>
+								<option value="warning">warning</option>
+								<option value="danger">danger</option>
+							</select>
+						</label>
+						<label class="mb-3 block text-xs text-zinc-500">
+							Message
+							<textarea bind:value={annMessage} rows="3" class="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" placeholder="Maintenance tonight 02:00 UTC…"></textarea>
+						</label>
+						<div class="flex flex-wrap gap-2">
+							{#if annEditingId}
+								<button type="button" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50" onclick={updateAnnouncement} disabled={annBusy}>
+									{annBusy ? 'Saving…' : 'Update'}
+								</button>
+								<button type="button" class="rounded-lg border border-zinc-200 px-4 py-2 text-sm dark:border-zinc-700" onclick={cancelEditAnnouncement} disabled={annBusy}>Cancel</button>
+							{:else}
+								<button type="button" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50" onclick={createAnnouncement} disabled={annBusy}>
+									{annBusy ? 'Saving…' : 'Add to list'}
+								</button>
+							{/if}
+						</div>
+					</div>
+
+					<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+						<h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">List ({annItems.length})</h3>
+						<button
+							type="button"
+							class="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400"
+							onclick={deactivateAnnouncement}
+							disabled={annBusy || !annActiveId}
+						>
+							Matikan banner (keep list)
+						</button>
+					</div>
+
+					{#if annItems.length === 0}
+						<p class="py-6 text-center text-sm text-zinc-500">Belum ada announcement. Tambah di form atas.</p>
+					{:else}
+						<ul class="space-y-2">
+							{#each annItems as item (item.id)}
+								<li
+									class="rounded-xl border px-3 py-3 transition
+										{annActiveId === item.id
+										? 'border-violet-400 bg-violet-50/80 dark:border-violet-700 dark:bg-violet-950/40'
+										: 'border-zinc-200 dark:border-zinc-800'}"
+								>
+									<div class="flex flex-wrap items-start justify-between gap-2">
+										<div class="min-w-0 flex-1">
+											<div class="mb-1 flex flex-wrap items-center gap-2">
+												<span
+													class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase
+														{item.level === 'danger'
+														? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+														: item.level === 'warning'
+															? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+															: 'bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300'}"
+												>{item.level}</span>
+												{#if annActiveId === item.id}
+													<span class="rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-bold text-white">ACTIVE</span>
+												{/if}
+											</div>
+											<p class="whitespace-pre-wrap text-sm text-zinc-800 dark:text-zinc-200">{item.message}</p>
+										</div>
+										<div class="flex shrink-0 flex-col gap-1 sm:flex-row">
+											{#if annActiveId !== item.id}
+												<button type="button" class="rounded-lg border border-violet-300/70 px-2.5 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300" onclick={() => activateAnnouncement(item.id)} disabled={annBusy}>
+													Tampilkan
+												</button>
+											{/if}
+											<button type="button" class="rounded-lg border border-zinc-200 px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400" onclick={() => startEditAnnouncement(item)} disabled={annBusy}>
+												Edit
+											</button>
+											<button type="button" class="rounded-lg border border-red-300/70 px-2.5 py-1 text-[11px] text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400" onclick={() => deleteAnnouncement(item.id)} disabled={annBusy}>
+												Hapus
+											</button>
+										</div>
+									</div>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+
+				
 				{:else if adminSection === 'users'}
 					<div class="mb-4">
 						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Users</h2>

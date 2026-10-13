@@ -1,16 +1,16 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
-import { getAnnouncement } from '$lib/server/adminConfig';
+import { getActiveAnnouncement } from '$lib/server/adminConfig';
 
 export const GET: RequestHandler = async ({ locals, platform, setHeaders }) => {
 	const kv = locals.kv ?? platform?.env?.MIKOROKU_CACHE ?? null;
-	const announcement = await getAnnouncement(kv);
+	const announcement = await getActiveAnnouncement(kv);
 
 	setHeaders({
-		'cache-control': 'public, max-age=30, s-maxage=30'
+		'cache-control': 'public, max-age=15, s-maxage=15'
 	});
 
-	if (!announcement.enabled || !announcement.message?.trim()) {
+	if (!announcement) {
 		return json({ ok: true, announcement: null });
 	}
 
@@ -19,7 +19,7 @@ export const GET: RequestHandler = async ({ locals, platform, setHeaders }) => {
 		announcement: {
 			enabled: true,
 			message: announcement.message,
-			level: announcement.level || 'info',
+			level: announcement.level,
 			updatedAt: announcement.updatedAt
 		}
 	});

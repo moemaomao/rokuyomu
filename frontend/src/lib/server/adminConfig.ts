@@ -1,11 +1,27 @@
-const KV_ANNOUNCEMENT = 'config:announcement';
+const KV_ANNOUNCEMENT_LEGACY = 'config:announcement';
+const KV_ANNOUNCEMENTS = 'config:announcements';
 const KV_FLAGS = 'config:feature_flags';
 const KV_BANNED = 'config:banned_uids';
+
+export type AnnouncementLevel = 'info' | 'warning' | 'danger';
+
+export type AnnouncementItem = {
+	id: string;
+	message: string;
+	level: AnnouncementLevel;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type AnnouncementsStore = {
+	items: AnnouncementItem[];
+	activeId: string | null;
+};
 
 export type Announcement = {
 	enabled: boolean;
 	message: string;
-	level: 'info' | 'warning' | 'danger';
+	level: AnnouncementLevel;
 	updatedAt?: string;
 };
 
@@ -20,43 +36,188 @@ const DEFAULT_FLAGS: FeatureFlags = {
 	novel_pdf: true
 };
 
-export async function getAnnouncement(kv?: KVNamespace | null): Promise<Announcement> {
-	if (!kv) {
-		return { enabled: false, message: '', level: 'info' };
-	}
+function newId(): string {
+	return `ann_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeLevel(v: unknown): AnnouncementLevel {
+	const s = String(v || 'info');
+	return (['info', 'warning', 'danger'].includes(s) ? s : 'info') as AnnouncementLevel;
+}
+
+export async function getAnnouncementsStore(
+	kv?: KVNamespace | null
+): Promise<AnnouncementsStore> {
+	if (!kv) return { items: [], activeId: null };
+
 	try {
-		const raw = await kv.get(KV_ANNOUNCEMENT, 'json');
+		const raw = await kv.get(KV_ANNOUNCEMENTS, 'json');
 		if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
 			const o = raw as Record<string, unknown>;
-			return {
-				enabled: Boolean(o.enabled),
-				message: String(o.message ?? ''),
-				level: (['info', 'warning', 'danger'].includes(String(o.level))
-					? String(o.level)
-					: 'info') as Announcement['level'],
-				updatedAt: o.updatedAt ? String(o.updatedAt) : undefined
-			};
+			const itemsIn = Array.isArray(o.items) ? o.items : [];
+			const items: AnnouncementItem[] = [];
+			for (const it of itemsIn) {
+				if (!it || typeof it !== 'object') continue;
+				const row = it as Record<string, unknown>;
+				const message = String(row.message ?? '').trim();
+				if (!message) continue;
+				const id = String(row.id || newId());
+				const now = new Date().toISOString();
+				items.push({
+					id,
+					message,
+					level: normalizeLevel(row.level),
+					createdAt: String(row.createdAt || now),
+					updatedAt: String(row.updatedAt || now)
+				});
+			}
+			const activeId =
+				o.activeId == null || o.activeId === ''
+					? null
+					: String(o.activeId);
+			const validActive =
+				activeId && items.some((x) => x.id === activeId) ? activeId : null;
+			return { items, activeId: validActive };
 		}
 	} catch (e) {
-		console.error('[adminConfig] get announcement failed:', e);
+		console.error('[adminConfig] get announcements failed:', e);
 	}
+
+	try {
+		const legacy = await kv.get(KV_ANNOUNCEMENT_LEGACY, 'json');
+		if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+			const o = legacy as Record<string, unknown>;
+			const message = String(o.message ?? '').trim();
+			if (message) {
+				const now = new Date().toISOString();
+				const id = newId();
+				const store: AnnouncementsStore = {
+					items: [
+						{
+							id,
+							message,
+							level: normalizeLevel(o.level),
+							createdAt: String(o.updatedAt || now),
+							updatedAt: String(o.updatedAt || now)
+						}
+					],
+					activeId: o.enabled ? id : null
+				};
+				await kv.put(KV_ANNOUNCEMENTS, JSON.stringify(store));
+				return store;
+			}
+		}
+	} catch (e) {
+		console.error('[adminConfig] legacy migrate failed:', e);
+	}
+
+	return { items: [], activeId: null };
+}
+
+export async function saveAnnouncementsStore(
+	store: AnnouncementsStore,
+	kv?: KVNamespace | null
+): Promise<AnnouncementsStore> {
+	if (!kv) throw new Error('KV not available');
+	const items = store.items.filter((i) => i.message?.trim());
+	const activeId =
+		store.activeId && items.some((i) => i.id === store.activeId)
+			? store.activeId
+			: null;
+	const next: AnnouncementsStore = { items, activeId };
+	await kv.put(KV_ANNOUNCEMENTS, JSON.stringify(next));
+
+	// Keep legacy key in sync for older readers
+	const active = activeId ? items.find((i) => i.id === activeId) : null;
+	const legacy: Announcement = active
+		? {
+				enabled: true,
+				message: active.message,
+				level: active.level,
+				updatedAt: active.updatedAt
+			}
+		: { enabled: false, message: '', level: 'info' };
+	await kv.put(KV_ANNOUNCEMENT_LEGACY, JSON.stringify(legacy));
+
+	return next;
+}
+
+export async function getActiveAnnouncement(
+	kv?: KVNamespace | null
+): Promise<Announcement | null> {
+	const store = await getAnnouncementsStore(kv);
+	if (!store.activeId) return null;
+	const item = store.items.find((i) => i.id === store.activeId);
+	if (!item) return null;
+	return {
+		enabled: true,
+		message: item.message,
+		level: item.level,
+		updatedAt: item.updatedAt
+	};
+}
+
+/** @deprecated use getActiveAnnouncement / getAnnouncementsStore */
+export async function getAnnouncement(kv?: KVNamespace | null): Promise<Announcement> {
+	const active = await getActiveAnnouncement(kv);
+	if (active) return active;
 	return { enabled: false, message: '', level: 'info' };
 }
 
+/** @deprecated prefer list APIs */
 export async function setAnnouncement(
 	data: Partial<Announcement>,
 	kv?: KVNamespace | null
 ): Promise<Announcement> {
 	if (!kv) throw new Error('KV not available');
-	const current = await getAnnouncement(kv);
-	const next: Announcement = {
-		enabled: data.enabled ?? current.enabled,
-		message: data.message != null ? String(data.message) : current.message,
-		level: data.level ?? current.level,
-		updatedAt: new Date().toISOString()
+	const store = await getAnnouncementsStore(kv);
+	const now = new Date().toISOString();
+	const message = data.message != null ? String(data.message).trim() : '';
+	const level = data.level ? normalizeLevel(data.level) : 'info';
+	const enabled = data.enabled ?? false;
+
+	if (enabled && message) {
+		if (store.activeId) {
+			const idx = store.items.findIndex((i) => i.id === store.activeId);
+			if (idx >= 0) {
+				store.items[idx] = {
+					...store.items[idx],
+					message,
+					level,
+					updatedAt: now
+				};
+			}
+		} else {
+			const id = newId();
+			store.items.unshift({
+				id,
+				message,
+				level,
+				createdAt: now,
+				updatedAt: now
+			});
+			store.activeId = id;
+		}
+	} else {
+		store.activeId = null;
+		if (message) {
+			const id = newId();
+			store.items.unshift({
+				id,
+				message,
+				level,
+				createdAt: now,
+				updatedAt: now
+			});
+		}
+	}
+
+	await saveAnnouncementsStore(store, kv);
+	return (await getActiveAnnouncement(kv)) || {
+		enabled: false,
+		message: '',
+		level: 'info'
 	};
-	await kv.put(KV_ANNOUNCEMENT, JSON.stringify(next));
-	return next;
 }
 
 export async function getFeatureFlags(kv?: KVNamespace | null): Promise<FeatureFlags> {
