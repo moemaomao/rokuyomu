@@ -16,6 +16,7 @@
 
 	// Components
 	import Footer from '$lib/components/Footer.svelte';
+	import AnnouncementBanner from '$lib/components/AnnouncementBanner.svelte';
 	import HistoryWidget from '$lib/components/HistoryWidget.svelte';
 	import AuthPanel from '$lib/components/AuthPanel.svelte';
 
@@ -919,6 +920,14 @@
 					</div>
 				</div>
 			</header>
+
+			{#if !isReaderPage && data.announcement}
+				<AnnouncementBanner
+					message={data.announcement.message}
+					level={data.announcement.level}
+					updatedAt={data.announcement.updatedAt}
+				/>
+			{/if}
 
 			<!-- Page content -->
 			<main class="flex-1">
