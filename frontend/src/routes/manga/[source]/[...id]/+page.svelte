@@ -54,7 +54,6 @@
 		try {
 			await ensureLibraryLoaded();
 		} catch {
-			/* ignore */
 		}
 		offlineIds = getOfflineChapterIds(source, manga.id);
 	}
@@ -165,6 +164,63 @@
 	let displayedChapters = $derived(loadedChapters);
 	let remainingChapters = $derived(Math.max(0, chapterTotal - loadedChapters.length));
 
+	const CHAPTERS_CACHE_PREFIX = 'rokuyomu:ch-cache:';
+
+	function chaptersCacheKey(src: string, id: string, lang: string, newest: boolean) {
+		return `${CHAPTERS_CACHE_PREFIX}${src}:${id}:${lang}:${newest ? 'new' : 'old'}`;
+	}
+
+	function saveChaptersCache() {
+		if (!source || !mangaIdPath) return;
+		try {
+			sessionStorage.setItem(
+				chaptersCacheKey(source, mangaIdPath, selectedLang, sortNewest),
+				JSON.stringify({
+					chapters: loadedChapters,
+					total: chapterTotal,
+					offset: chapterOffset,
+					hasMore: hasMoreChapters,
+					sortNewest,
+					ts: Date.now()
+				})
+			);
+		} catch {
+		}
+	}
+
+	function readChaptersCache(
+		src: string,
+		id: string,
+		lang: string,
+		newest: boolean
+	): {
+		chapters: any[];
+		total: number;
+		offset: number;
+		hasMore: boolean;
+		sortNewest: boolean;
+	} | null {
+		try {
+			const raw = sessionStorage.getItem(chaptersCacheKey(src, id, lang, newest));
+			if (!raw) return null;
+			const parsed = JSON.parse(raw);
+			if (!Array.isArray(parsed?.chapters) || parsed.chapters.length === 0) return null;
+			if (typeof parsed.ts === 'number' && Date.now() - parsed.ts > 2 * 60 * 60 * 1000) {
+				sessionStorage.removeItem(chaptersCacheKey(src, id, lang, newest));
+				return null;
+			}
+			return {
+				chapters: parsed.chapters,
+				total: typeof parsed.total === 'number' ? parsed.total : parsed.chapters.length,
+				offset: typeof parsed.offset === 'number' ? parsed.offset : parsed.chapters.length,
+				hasMore: Boolean(parsed.hasMore),
+				sortNewest: parsed.sortNewest !== false
+			};
+		} catch {
+			return null;
+		}
+	}
+
 	$effect(() => {
 		const m = manga;
 		const src = source;
@@ -173,11 +229,37 @@
 		const offset = (data as any).chapterOffset as number | undefined;
 		const more = (data as any).hasMoreChapters as boolean | undefined;
 		if (!m) return;
-		loadedChapters = [...(m.chapters || [])];
+
+		const initial = [...(m.chapters || [])];
+		const idPath = ((data as any).mangaId as string) || m.id || '';
+		const lang = ((data as any).selectedLang as string) || 'all';
+
+		let preferredNewest = sortNewest;
+		try {
+			const savedSort = localStorage.getItem(SORT_KEY);
+			if (savedSort === 'true' || savedSort === 'false') {
+				preferredNewest = savedSort === 'true';
+			}
+		} catch {
+		}
+
+		const cache = readChaptersCache(src, idPath, lang, preferredNewest);
+		if (
+			cache &&
+			cache.chapters.length >= initial.length &&
+			(cache.offset > (offset ?? initial.length) || cache.chapters.length > initial.length)
+		) {
+			loadedChapters = cache.chapters;
+			chapterTotal = cache.total || total || cache.chapters.length;
+			chapterOffset = cache.offset;
+			hasMoreChapters = cache.hasMore;
+			return;
+		}
+
+		loadedChapters = initial;
 		chapterTotal = total ?? loadedChapters.length;
 		chapterOffset = offset ?? loadedChapters.length;
 		hasMoreChapters = more ?? false;
-		sortNewest = true;
 	});
 
 	type ChaptersApiResponse = {
@@ -213,6 +295,7 @@
 			chapterTotal = typeof json.total === 'number' ? json.total : chapterTotal;
 			chapterOffset = offset + batch.length;
 			hasMoreChapters = Boolean(json.hasMore);
+			saveChaptersCache();
 		} catch (e) {
 			console.error('[load more chapters]', e);
 		} finally {
@@ -249,6 +332,7 @@
 				hasMoreChapters = Boolean(json.hasMore);
 				if (!json.hasMore) break;
 			}
+			saveChaptersCache();
 		} catch (e) {
 			console.error('[show all chapters]', e);
 		} finally {
@@ -269,7 +353,6 @@
 		readNums = sets.nums;
 	}
 
-	/** Only exact chapter id / number — NOT a <= range (jumping to last ch must not mark all). */
 	function isChapterRead(chapter: any): boolean {
 		if (!chapter) return false;
 		const cid = chapter.id != null ? String(chapter.id) : '';
@@ -288,7 +371,6 @@
 			unmarkChapterRead(source, manga.id, chapter.id, chapter.number);
 		} else {
 			markChapterRead(source, manga.id, chapter.id, chapter.number);
-			// also update history "last read" pointer for continue-reading
 			await saveReading({
 				mangaId: manga.id,
 				mangaSlug: manga.id,
@@ -410,7 +492,6 @@
 		return () => clearTimeout(t);
 	});
 
-	// ── SEO / share card ─────────────────────────────────────────────────────
 	let pageTitle = $derived(
 		manga?.title ? `${manga.title} - RokuYomu` : 'RokuYomu'
 	);
@@ -442,7 +523,6 @@
 		return { normal, female, male };
 	});
 
-	/** Link genre chip → Deep Search with that tag preselected */
 	function genreSearchHref(genre: string): string {
 		const g = String(genre || '').trim();
 		if (!g) return '/deep-search';
@@ -541,7 +621,6 @@
 		try {
 			localStorage.setItem(VIEW_KEY, mode);
 		} catch {
-			/* ignore */
 		}
 	}
 
@@ -550,7 +629,6 @@
 		try {
 			localStorage.setItem(SORT_KEY, String(sortNewest));
 		} catch {
-			/* ignore */
 		}
 
 		chapterOffset = 0;
@@ -1167,6 +1245,11 @@
 											</span>
 										</div>
 									{/if}
+									<span
+										class="chapter-status-dot absolute top-1.5 left-1.5 z-10 {isChapterRead(chapter) ? 'is-read' : ''}"
+										title={isChapterRead(chapter) ? 'Read' : 'Unread'}
+										aria-hidden="true"
+									></span>
 									{#if chapterCover(chapter)}
 										<img
 											src={proxyImage(chapterCover(chapter), 150, 150)}
@@ -1685,9 +1768,7 @@
 	.chapter-read {
 		opacity: 1;
 		filter: none;
-		background: rgba(0, 0, 0, 0.45) !important;
-		border-color: rgba(82, 82, 91, 0.65) !important;
-		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+		background: rgba(0, 0, 0, 0.42) !important;
 	}
 	.chapter-read .detail-title,
 	.chapter-read .detail-title span {
@@ -1698,14 +1779,12 @@
 		color: #71717a !important;
 	}
 	.chapter-read:hover {
-		background: rgba(0, 0, 0, 0.38) !important;
-		border-color: rgba(113, 113, 122, 0.75) !important;
+		background: rgba(0, 0, 0, 0.36) !important;
 	}
 	.chapter-read:hover .detail-title,
 	.chapter-read:hover .detail-title span {
 		color: #d4d4d8 !important;
 	}
-	/* Status dot: unread = bright red, read = muted check-circle */
 	.chapter-status-dot {
 		flex-shrink: 0;
 		width: 0.5rem;
@@ -1735,22 +1814,46 @@
 	}
 	:global(html.light) .chapter-read {
 		opacity: 1;
-		background: rgba(24, 24, 27, 0.12) !important;
-		border-color: rgba(82, 82, 91, 0.35) !important;
+		background: rgba(0, 0, 0, 0.16) !important;
+	}
+	:global(html.light) .chapter-read:hover {
+		background: rgba(0, 0, 0, 0.12) !important;
 	}
 	:global(html.light) .chapter-read .detail-title,
 	:global(html.light) .chapter-read .detail-title span {
-		color: #52525b !important;
+		color: #3f3f46 !important;
 	}
 	:global(html.light) .chapter-read .detail-muted {
 		color: #71717a !important;
 	}
 	:global(html.light) .chapter-status-dot.is-read {
-		background: #a1a1aa;
+		background: #71717a;
 	}
 	:global(html.light) .chapter-mark-read {
 		background: rgba(139, 92, 246, 0.12);
 		border-color: rgba(139, 92, 246, 0.35);
 		color: #6d28d9;
+	}
+
+	.detail-chapter-thumb.chapter-read img {
+		filter: grayscale(0.4) brightness(0.55);
+	}
+	.detail-chapter-thumb.chapter-read .absolute.inset-x-0.bottom-0 {
+		background: rgba(0, 0, 0, 0.92);
+	}
+	.detail-chapter-thumb.chapter-read .absolute.inset-x-0.bottom-0 p {
+		color: #a1a1aa !important;
+	}
+	:global(html.light) .detail-chapter-thumb.chapter-read img {
+		filter: grayscale(0.35) brightness(0.7);
+	}
+
+	.detail-chapter-list.chapter-read img {
+		filter: grayscale(0.35) brightness(0.5);
+		opacity: 0.85;
+	}
+	:global(html.light) .detail-chapter-list.chapter-read img {
+		filter: grayscale(0.3) brightness(0.65);
+		opacity: 0.9;
 	}
 </style>
