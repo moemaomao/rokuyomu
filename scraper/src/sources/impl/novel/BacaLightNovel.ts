@@ -7,9 +7,11 @@
  * Search  : /?s={q}
  * Detail  : /series/{slug}/
  * Chapter : /{slug}-chapter-{n}/  (root path)
- * Content : .epcontent / .entry-content / .reading-content (TEXT, bukan gambar)
+ * Content : .epcontent / .entry-content (TEXT)
  *
  * Bahasa default: id
+ *
+ * Reader next/prev: getChapterContent WAJIB return prevChapterId / nextChapterId
  */
 
 import * as cheerio from 'cheerio';
@@ -39,7 +41,13 @@ export class BacaLightNovelSource extends ThemesiaSource {
 	protected normalizeTitle(raw: string): string {
 		return super
 			.normalizeTitle(raw, this.name)
-			.replace(new RegExp(`\\s*[-|]\\s*${this.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`, 'i'), '')
+			.replace(
+				new RegExp(
+					`\\s*[-|]\\s*${this.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`,
+					'i'
+				),
+				''
+			)
 			.trim();
 	}
 
@@ -80,39 +88,86 @@ export class BacaLightNovelSource extends ThemesiaSource {
 	async getChapterContent(chapterId: string): Promise<{
 		title: string;
 		content: string;
+		prevChapterId?: string | null;
+		nextChapterId?: string | null;
 	}> {
+		const base = await super.getChapterContent(chapterId);
 		const path = this.cleanId(chapterId);
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-		const $ = cheerio.load(html);
 
-		const title = this.normalizeTitle(
-			$('h1.entry-title, h1').first().text() ||
-				$('meta[property="og:title"]').attr('content') ||
-				path
-		);
+		let prevChapterId = base.prevChapterId ?? null;
+		let nextChapterId = base.nextChapterId ?? null;
 
-		const root = $(
-			[
-				'.epcontent.entry-content',
-				'.entry-content .epcontent',
-				'#readerarea',
-				'.reading-content',
-				'.text-left',
-				'.entry-content',
-				'.chapter-content',
-				'.content-area'
-			].join(', ')
-		).first();
-
-		root.find('script, style, .ads, .code-block, .sharedaddy, .chapter-nav, nav').remove();
-
-		let content = (root.html() || '').trim();
-		if (!content) {
-			content = root.text().replace(/\s+/g, ' ').trim();
+		const p = path.replace(/\/$/, '');
+		const m = p.match(/^(.*-chapter-)(\d+(?:\.\d+)?)(?:-.*)?$/i);
+		if (m) {
+			const n = parseFloat(m[2]);
+			if (Number.isFinite(n) && n > 0) {
+				if (!prevChapterId && n > 1) {
+					const prevN = Number.isInteger(n) ? n - 1 : Math.floor(n);
+					if (prevN > 0) prevChapterId = `${m[1]}${prevN}`;
+				}
+				if (!nextChapterId) {
+					const nextN = Number.isInteger(n) ? n + 1 : Math.ceil(n);
+					nextChapterId = `${m[1]}${nextN}`;
+				}
+			}
 		}
 
-		console.log(`[${this.id}] chapter content ${path} → ${content.length} chars`);
-		return { title, content };
+		let content = base.content || '';
+		let title = base.title || 'Chapter';
+
+		if (!content || content.length < 40 || /Empty content/i.test(content)) {
+			const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
+			const $ = cheerio.load(html);
+
+			title = this.normalizeTitle(
+				$('h1.entry-title, h1').first().text() ||
+					$('meta[property="og:title"]').attr('content') ||
+					title
+			);
+
+			const root = $(
+				[
+					'.epcontent.entry-content',
+					'.entry-content .epcontent',
+					'.epcontent',
+					'#readerarea',
+					'.reading-content',
+					'.text-left',
+					'.entry-content',
+					'.chapter-content',
+					'.content-area'
+				].join(', ')
+			).first();
+
+			root
+				.find(
+					'script, style, .ads, .code-block, .sharedaddy, .chapter-nav, .chnav, .navi, nav'
+				)
+				.remove();
+
+			content = (root.html() || '').trim();
+			if (!content) {
+				content = root.text().replace(/\s+/g, ' ').trim();
+			}
+
+			if (!prevChapterId || !nextChapterId) {
+				$('a[rel="prev"], .chnav a.prev, .navi a.prev').each((_, a) => {
+					const href = $(a).attr('href') || '';
+					if (href && href !== '#') prevChapterId = this.cleanId(href);
+				});
+				$('a[rel="next"], .chnav a.next, .navi a.next').each((_, a) => {
+					const href = $(a).attr('href') || '';
+					if (href && href !== '#') nextChapterId = this.cleanId(href);
+				});
+			}
+		}
+
+		console.log(
+			`[${this.id}] chapter ${path} → ${content.length}c prev=${prevChapterId} next=${nextChapterId}`
+		);
+
+		return { title, content, prevChapterId, nextChapterId };
 	}
 }
 
