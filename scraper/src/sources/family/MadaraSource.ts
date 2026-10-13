@@ -208,8 +208,9 @@ export abstract class MadaraSource extends BaseSource {
 			if (seen.has(id)) return;
 			seen.add(id);
 
-			const title = $a.text().replace(/\s+/g, ' ').trim() || id;
-			const number = this.parseChapterNumber(title, id);
+			const rawText = $a.text().replace(/\s+/g, ' ').trim();
+			const number = this.parseChapterNumber(rawText || id, id);
+			const title = number > 0 ? `Chapter ${number}` : rawText || id;
 			const date =
 				$a.closest('li').find('.chapter-release-date').text().trim() ||
 				undefined;
