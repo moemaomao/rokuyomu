@@ -22,7 +22,6 @@ export class GDScansSource extends MadaraSource {
 	protected seriesPath = '/manga';
 	protected defaultLang = 'en';
 	protected perPage = 24;
-	/** Site lists ~10 items per HTML page */
 	private readonly SITE_PER_PAGE = 10;
 
 	protected listPath(page: number): string {
@@ -36,7 +35,6 @@ export class GDScansSource extends MadaraSource {
 		return `/?${params.toString()}`;
 	}
 
-	/** GD uses /ch-N in path */
 	protected parseChapterNumber(text: string, path = ''): number {
 		const fromPath =
 			path.match(/\/ch-(\d+)(?:-(\d+))?/i) ||
@@ -55,7 +53,6 @@ export class GDScansSource extends MadaraSource {
 		return super.normalizeTitle(raw, 'GD Scans').replace(/\s*GD\s*Scans.*$/i, '').trim();
 	}
 
-	/** Merge several site pages (10/item) to fill ~perPage */
 	private async fetchCatalogPages(
 		buildPath: (sitePage: number) => string,
 		appPage: number
@@ -124,7 +121,6 @@ export class GDScansSource extends MadaraSource {
 		}
 	}
 
-	/** POST ajax chapters (Madara default GET is not enough here) */
 	protected async fetchChaptersAjax(mangaPath: string): Promise<Chapter[]> {
 		const base = mangaPath.endsWith('/') ? mangaPath : `${mangaPath}/`;
 		const url = `${this.baseUrl}${base}ajax/chapters/?t=1`;
@@ -172,7 +168,7 @@ export class GDScansSource extends MadaraSource {
 
 			chapters.push({
 				id,
-				title: rawText || `Chapter ${number}`,
+				title: number > 0 ? `Chapter ${number}` : rawText || `Chapter ${number}`,
 				number,
 				date: date || undefined
 			});
@@ -265,6 +261,4 @@ export class GDScansSource extends MadaraSource {
 			lang: this.defaultLang
 		};
 	}
-
-	// getChapterPages → pakai implementasi MadaraSource (selector sama)
 }
