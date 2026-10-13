@@ -4,9 +4,11 @@
  *
  * Domain   : https://tangerinearchive.com
  * Series   : /series/{slug}/
- * Latest   : /series/?m_orderby=latest + homepage
+ * Latest   : homepage first + /series/?m_orderby=latest
  * Search   : /?s={q}&post_type=wp-manga
  * Chapters : POST /series/{slug}/ajax/chapters/
+ *
+ * Catatan: sering Cloudflare → Byparr atau WORKER_SOURCE_IDS.
  */
 
 import { MadaraNovelSource } from '../../family/MadaraNovelSource';
@@ -21,6 +23,12 @@ export class TangerineArchiveSource extends MadaraNovelSource {
 	protected perPage = 24;
 	protected useAjaxChapters = true;
 	protected mergeHomeOnPage1 = true;
+
+	protected listPath(page: number): string {
+		const p = Math.max(1, page || 1);
+		if (p <= 1) return `/`;
+		return `${this.seriesPath}/page/${p}/?m_orderby=${this.listOrderby}`;
+	}
 
 	protected normalizeTitle(raw: string): string {
 		return super

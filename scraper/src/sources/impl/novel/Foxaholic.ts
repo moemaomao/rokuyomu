@@ -4,9 +4,12 @@
  *
  * Domain   : https://www.foxaholic.com
  * Series   : /novel/{slug}/
- * Latest   : /novel/?m_orderby=latest + homepage
+ * Latest   : homepage first (CF often blocks /novel/?m_orderby=…)
  * Search   : /?s={q}&post_type=wp-manga
  * Chapters : POST /novel/{slug}/ajax/chapters/
+ *
+ * Catatan: domain sering Cloudflare challenge → taruh di WORKER_SOURCE_IDS
+ * atau aktifkan Byparr di scraper.
  */
 
 import { MadaraNovelSource } from '../../family/MadaraNovelSource';
@@ -21,6 +24,12 @@ export class FoxaholicSource extends MadaraNovelSource {
 	protected perPage = 24;
 	protected useAjaxChapters = true;
 	protected mergeHomeOnPage1 = true;
+
+	protected listPath(page: number): string {
+		const p = Math.max(1, page || 1);
+		if (p <= 1) return `/`;
+		return `${this.seriesPath}/page/${p}/?m_orderby=${this.listOrderby}`;
+	}
 
 	protected normalizeTitle(raw: string): string {
 		return super
