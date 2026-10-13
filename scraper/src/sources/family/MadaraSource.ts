@@ -106,7 +106,7 @@ export abstract class MadaraSource extends BaseSource {
 	}
 
 	protected cardSelector =
-		'.page-item-detail, .manga, .c-tabs-item__content, .badge-pos-1, li.mrm-r-item, .mrm-r-item, .bs, .listupd .bs';
+		'.page-item-detail, .manga, .c-tabs-item__content, .badge-pos-1, li.mrm-r-item, .mrm-r-item, .bs, .listupd .bs, .slider__item, .page-listing-item .page-item-detail, .c-tabs-item__content';
 	protected chapterListSelector =
 		'li.wp-manga-chapter a, .listing-chapters_wrap a, .version-chap a, .main.version-chap li a';
 	protected pageImageSelector =
@@ -121,13 +121,23 @@ export abstract class MadaraSource extends BaseSource {
 
 		$(this.cardSelector).each((_, card) => {
 			const $card = $(card);
-			const $a = $card
+			let $a = $card
 				.find(`a[href*="${this.seriesPath}/"]`)
 				.filter((_, el) => {
 					const h = ($(el).attr('href') || '').split('?')[0];
 					return seriesRe.test(h.replace(this.baseUrl, ''));
 				})
 				.first();
+
+			if (!$a.length) {
+				$a = $card
+					.find('.post-title a, h3 a, h5 a, a.mrm-r-item__link')
+					.filter((_, el) => {
+						const h = ($(el).attr('href') || '').split('?')[0];
+						return seriesRe.test(h.replace(this.baseUrl, '')) || new RegExp(`${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+`, 'i').test(h);
+					})
+					.first();
+			}
 
 			const href = $a.attr('href') || '';
 			if (!href) return;
@@ -138,7 +148,7 @@ export abstract class MadaraSource extends BaseSource {
 
 			const title = this.normalizeTitle(
 				$a.attr('title') ||
-					$card.find('.mrm-r-item__title, .post-title, h3, h5, .tt').first().text() ||
+					$card.find('.mrm-r-item__title, .post-title a, .post-title, h3 a, h3, h5 a, h5, .tt').first().text() ||
 					$a.text() ||
 					$card.find('img').attr('alt') ||
 					'',

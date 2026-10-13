@@ -1,14 +1,12 @@
 /**
  * Siikomik adapter (siikomik.id)
- * Theme: Madara (wp-manga) → extends MadaraSource
+ * Theme: Madara custom (slider grid + /komik/) → extends MadaraSource
  *
- * seriesPath : /komik
- * Latest     : homepage / ; fill /semua-komik/ ; page 2+ → POST admin-ajax.php action=madara_load_more
+ * Latest     : homepage / ; fill /semua-komik/ ; page 2+ → madara_load_more
  * Search     : /?s={q}&post_type=wp-manga
  * Detail     : /komik/{slug}/
  * Chapters   : POST /komik/{slug}/ajax/chapters/
  * Pages      : .wp-manga-chapter-img[data-src]
- * Catatan    : chapter premium (coin) terkunci tanpa login
  */
 
 import * as cheerio from 'cheerio';
@@ -25,6 +23,9 @@ export class SiikomikSource extends MadaraSource {
 	protected perPage = 24;
 	protected useAjaxChapters = true;
 
+	protected cardSelector =
+		'.slider__item, .page-item-detail, .manga, .page-listing-item .col-12, .badge-pos-1, .c-tabs-item__content';
+
 	protected normalizeTitle(raw: string): string {
 		return super
 			.normalizeTitle(raw, this.name)
@@ -32,6 +33,8 @@ export class SiikomikSource extends MadaraSource {
 			.replace(/&amp;/g, '&')
 			.replace(/\s*[-|]\s*Siikomik.*$/i, '')
 			.replace(/\s*[-|]\s*Chapter\s*\d+.*$/i, '')
+			.replace(/^(?:18\+?\s*)?(?:HOT\s*)+/i, '')
+			.replace(/\s+(?:Drama|Romance|Smut|Fantasy|Action|Comedy|Horror|Mystery|Historical|Adult|Mature|Slice of Life|School Life|Supernatural)(?:\s+(?:Drama|Romance|Smut|Fantasy|Action|Comedy|Horror|Mystery|Historical|Adult|Mature|Slice of Life|School Life|Supernatural))*\s*$/i, '')
 			.trim();
 	}
 
@@ -41,6 +44,131 @@ export class SiikomikSource extends MadaraSource {
 		if (u.startsWith('http')) return u;
 		if (u.startsWith('//')) return `https:${u}`;
 		return `${this.baseUrl}${u.startsWith('/') ? '' : '/'}${u}`;
+	}
+
+	private imgSrc($img: cheerio.Cheerio<any>): string {
+		let cover =
+			$img.attr('data-src') ||
+			$img.attr('data-lazy-src') ||
+			$img.attr('data-srcset')?.split(',')[0]?.trim().split(/\s+/)[0] ||
+			$img.attr('srcset')?.split(',')[0]?.trim().split(/\s+/)[0] ||
+			$img.attr('src') ||
+			'';
+		if (/^data:image/i.test(cover) || /dflazy/i.test(cover)) {
+			cover =
+				$img.attr('data-src') ||
+				$img.attr('data-srcset')?.split(',')[0]?.trim().split(/\s+/)[0] ||
+				'';
+		}
+		return (cover || '').trim();
+	}
+
+	protected parseCards($: cheerio.CheerioAPI): Manga[] {
+		const mangas: Manga[] = [];
+		const seen = new Set<string>();
+
+		const push = (
+			id: string,
+			titleRaw: string,
+			cover: string,
+			latestChapter?: string,
+			status = 'Ongoing'
+		) => {
+			if (!id || seen.has(id)) return;
+			if (!/^\/komik\/[^/]+$/i.test(id)) return;
+			seen.add(id);
+			const title =
+				this.normalizeTitle(titleRaw) || id.split('/').filter(Boolean).pop() || id;
+			if (!title) return;
+			mangas.push({
+				id,
+				title,
+				cover: this.preferFullCover(this.absUrl(cover)),
+				sourceId: this.id,
+				type: 'manhwa',
+				status,
+				latestChapter,
+				lang: this.defaultLang
+			});
+		};
+
+		$(this.cardSelector).each((_, el) => {
+			const $el = $(el);
+			const $a = $el
+				.find('a[href*="/komik/"]')
+				.filter((_, a) => {
+					const h = (($(a).attr('href') || '').split('?')[0] || '').replace(
+						/\/+$/,
+						''
+					);
+					return /\/komik\/[^/]+$/i.test(h) && !/\/chapter-/i.test(h);
+				})
+				.first();
+			if (!$a.length) return;
+
+			const id = this.cleanId($a.attr('href') || '');
+			const title =
+				$el.find('.post-title a, .post-title h3, .post-title h4, .post-title h5, .post-title')
+					.first()
+					.text() ||
+				$a.attr('title') ||
+				$el.find('img').attr('alt') ||
+				'';
+
+			const cover = this.imgSrc($el.find('img').first());
+
+			let latestChapter: string | undefined;
+			$el.find('a[href*="/chapter-"]').each((_, a) => {
+				const n = this.parseChapterNumber(
+					$(a).text(),
+					$(a).attr('href') || ''
+				);
+				if (n > 0 && (!latestChapter || n > parseFloat(latestChapter))) {
+					latestChapter = String(n);
+				}
+			});
+			if (!latestChapter) {
+				const chText = $el
+					.find('.chapter-item, .list-chapter, .chapter, .font-meta.chapter')
+					.first()
+					.text();
+				const n = this.parseChapterNumber(chText);
+				if (n > 0) latestChapter = String(n);
+			}
+
+			const badge = $el.find('.manga-title-badges').text().toLowerCase();
+			const status = /end|tamat|complete/.test(badge) ? 'Completed' : 'Ongoing';
+
+			push(id, title, cover, latestChapter, status);
+		});
+
+		if (mangas.length < 8) {
+			$('a[href*="/komik/"]').each((_, el) => {
+				const href = ($(el).attr('href') || '').split('?')[0];
+				const id = this.cleanId(href);
+				if (!/^\/komik\/[^/]+$/i.test(id) || seen.has(id)) return;
+				if (/\/chapter-/i.test(id)) return;
+
+				const $a = $(el);
+				const $item = $a.closest('.slider__item, .page-item-detail, .manga').length
+					? $a.closest('.slider__item, .page-item-detail, .manga')
+					: $a.parent();
+
+				const $img = $a.find('img').first().length
+					? $a.find('img').first()
+					: $item.find('img').first();
+
+				const title =
+					$item.find('.post-title').first().text() ||
+					$a.attr('title') ||
+					$img.attr('alt') ||
+					id;
+
+				push(id, title, this.imgSrc($img));
+			});
+		}
+
+		return mangas;
 	}
 
 	private async fetchMadaraPage(ajaxPage: number): Promise<Manga[]> {
