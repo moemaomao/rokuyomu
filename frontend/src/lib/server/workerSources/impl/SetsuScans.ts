@@ -1,16 +1,20 @@
 /**
- * Setsu Scans (setsuscans.com) — Themesia / mangareader → extends ThemesiaSource
- * Catatan: Cloudflare Turnstile — fetchHtml override + deteksi challenge.
+ * Setsu Scans (setsuscans.com)
+ * Theme: WordPress Madara (bukan Themesia — confirmed via /wp-content/themes/madara/)
+ * → extends MadaraSource
  *
- * Latest  : /manga/?page=N&order=update
- * Search  : /?s=
+ * Latest  : /manga/?m_orderby=latest  |  /manga/page/{n}/?m_orderby=latest
+ * Search  : /?s={q}&post_type=wp-manga
  * Detail  : /manga/{slug}/
- * Chapter : /manga/{slug}/chapter-{n}/ atau /{slug}-chapter-{n}/
+ * Chapters: ajax/chapters (Madara)
+ * Pages   : .reading-content img / .wp-manga-chapter-img
+ *
+ * Catatan: Cloudflare Turnstile sering aktif.
  */
 
-import { ThemesiaSource } from '../family/ThemesiaSource';
+import { MadaraSource } from '../family/MadaraSource';
 
-export class SetsuScansSource extends ThemesiaSource {
+export class SetsuScansSource extends MadaraSource {
 	id = 'setsuscans';
 	name = 'Setsu Scans';
 	baseUrl = 'https://setsuscans.com';
@@ -18,6 +22,7 @@ export class SetsuScansSource extends ThemesiaSource {
 	protected seriesPath = '/manga';
 	protected defaultLang = 'en';
 	protected perPage = 24;
+	protected useAjaxChapters = true;
 
 	protected headers: Record<string, string> = {
 		'User-Agent':
@@ -35,15 +40,17 @@ export class SetsuScansSource extends ThemesiaSource {
 	};
 
 	protected listPath(page: number): string {
-		const p = Math.max(1, page || 1);
-		return `${this.seriesPath}/?page=${p}&order=update`;
+		if (page <= 1) return `${this.seriesPath}/?m_orderby=latest`;
+		return `${this.seriesPath}/page/${page}/?m_orderby=latest`;
 	}
 
 	protected searchPath(query: string, page: number): string {
 		const q = encodeURIComponent(query);
-		return page <= 1 ? `/?s=${q}` : `/?s=${q}&page=${page}`;
+		const base = `/?s=${q}&post_type=wp-manga`;
+		return page <= 1 ? base : `/page/${page}/?s=${q}&post_type=wp-manga`;
 	}
 
+	/** Cloudflare-aware fetch */
 	protected async fetchHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
 		const response = await fetch(url, {
@@ -69,20 +76,6 @@ export class SetsuScansSource extends ThemesiaSource {
 			);
 		}
 		return html;
-	}
-
-	protected parseChapterNumber(text: string, path = ''): number {
-		const fromPath =
-			path.match(/(?:ch|chapter)[_-]?(\d+)(?:[.-](\d+))?/i) ||
-			path.match(/-(\d+)(?:[.-](\d+))?\/?$/i);
-		if (fromPath) {
-			const major = parseInt(fromPath[1], 10);
-			if (fromPath[2] != null && fromPath[2].length <= 2) {
-				return parseFloat(`${major}.${fromPath[2]}`);
-			}
-			return major;
-		}
-		return super.parseChapterNumber(text, path);
 	}
 
 	protected normalizeTitle(raw: string): string {
