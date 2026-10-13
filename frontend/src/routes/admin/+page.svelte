@@ -17,13 +17,21 @@
 		RefreshCw,
 		CheckCircle2,
 		XCircle,
-		AlertTriangle,
 		BookMarked,
 		BookOpen,
 		StickyNote,
 		Activity,
 		ExternalLink,
-		HardDrive
+		HardDrive,
+		Megaphone,
+		Users,
+		BarChart3,
+		Trash2,
+		Flag,
+		Database,
+		Info,
+		Server,
+		AlertTriangle
 	} from 'lucide-svelte';
 
 	type SourceRow = { id: string; name: string; enabled: boolean; note?: string };
@@ -48,6 +56,40 @@
 	let successMsg = $state('');
 	let search = $state('');
 	let filter = $state<'all' | 'enabled' | 'disabled' | 'reported'>('all');
+
+	type AdminSection =
+		| 'sources'
+		| 'reports'
+		| 'health'
+		| 'cache'
+		| 'announcements'
+		| 'users'
+		| 'analytics'
+		| 'backups'
+		| 'flags'
+		| 'about';
+
+	let adminSection = $state<AdminSection>('sources');
+
+	const ADMIN_NAV: {
+		id: AdminSection;
+		label: string;
+		desc: string;
+		icon: typeof Shield;
+		ready: boolean;
+	}[] = [
+		{ id: 'sources', label: 'Sources', desc: 'Enable, notes, bulk actions', icon: BookMarked, ready: true },
+		{ id: 'reports', label: 'Reports', desc: 'User report inbox', icon: AlertTriangle, ready: false },
+		{ id: 'health', label: 'Health', desc: 'Scraper & source ping', icon: Activity, ready: true },
+		{ id: 'cache', label: 'Cache', desc: 'Purge KV / Worker cache', icon: Trash2, ready: false },
+		{ id: 'announcements', label: 'Announcements', desc: 'Site-wide banners', icon: Megaphone, ready: false },
+		{ id: 'users', label: 'Users', desc: 'Ban & moderation', icon: Users, ready: false },
+		{ id: 'analytics', label: 'Analytics', desc: 'Traffic & top sources', icon: BarChart3, ready: false },
+		{ id: 'backups', label: 'Backups', desc: 'Rebuild meta snapshots', icon: HardDrive, ready: true },
+		{ id: 'flags', label: 'Feature flags', desc: 'Toggle experimental features', icon: Flag, ready: false },
+		{ id: 'about', label: 'About', desc: 'Admin panel info', icon: Info, ready: true }
+	];
+
 	let selectedKind = $state<ContentKind>('comic');
 	let authChecked = $state(false);
 	let reportCountMap = $state<Record<string, number>>({});
@@ -460,13 +502,14 @@
 		if (!h || h.status === 'idle') return null;
 		return h;
 	}
+
 </script>
 
 <svelte:head>
-	<title>Admin — Source Management | Rokuyomu</title>
+	<title>Admin — Rokuyomu</title>
 </svelte:head>
 
-<div class="mx-auto max-w-4xl p-4 md:p-6">
+<div class="mx-auto max-w-6xl p-4 md:p-6">
 	{#if !authChecked || isLoading()}
 		<div class="flex items-center justify-center gap-2 py-24 text-zinc-500">
 			<Loader2 class="h-5 w-5 animate-spin" />
@@ -479,7 +522,7 @@
 			<Shield class="mx-auto mb-3 h-10 w-10 text-zinc-400" />
 			<h1 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Admin only</h1>
 			<p class="mt-2 text-sm text-zinc-500">
-				Log in with an admin account to access Source Management.
+				Log in with an admin account to access the admin panel.
 			</p>
 			<button
 				type="button"
@@ -490,7 +533,53 @@
 			</button>
 		</div>
 	{:else}
-		<div
+		<div class="mb-5">
+			<h1 class="flex items-center gap-2 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+				<Shield class="h-6 w-6 text-violet-600 dark:text-violet-400" />
+				Admin
+			</h1>
+			<p class="mt-1 text-sm text-zinc-500">Sources, reports, cache, and site operations.</p>
+		</div>
+
+		<div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+			<!-- Left nav (Nyora-style) -->
+			<nav
+				class="w-full shrink-0 rounded-2xl border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950/60 lg:w-56"
+				aria-label="Admin sections"
+			>
+				<ul class="space-y-0.5">
+					{#each ADMIN_NAV as item}
+						{@const Icon = item.icon}
+						<li>
+							<button
+								type="button"
+								onclick={() => (adminSection = item.id)}
+								class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm transition
+									{adminSection === item.id
+									? 'bg-violet-100 font-semibold text-violet-900 dark:bg-violet-950/60 dark:text-violet-200'
+									: 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900'}"
+							>
+								<Icon class="h-4 w-4 shrink-0 opacity-80" />
+								<span class="min-w-0 flex-1 truncate">{item.label}</span>
+								{#if !item.ready}
+									<span
+										class="rounded-md bg-zinc-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+										>Soon</span
+									>
+								{/if}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</nav>
+
+			<!-- Right panel -->
+			<div
+				class="min-w-0 flex-1 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/40 md:p-6"
+			>
+				{#if adminSection === 'sources'}
+					
+<div
 			class="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-800"
 		>
 			<div>
@@ -902,5 +991,127 @@
 				1 + tulis <code class="rounded bg-zinc-100 px-1 dark:bg-zinc-800">backup:meta:*</code> ke KV.
 			</span>
 		</p>
+
+				{:else if adminSection === 'health'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Health</h2>
+						<p class="mt-1 text-sm text-zinc-500">
+							Ping scraper endpoints for sources currently filtered on the Sources tab (max 15).
+						</p>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-sky-300/70 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-800 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60"
+							onclick={runHealthFiltered}
+							disabled={loading || healthRunning || backupRunning}
+						>
+							<Activity class="h-4 w-4 {healthRunning ? 'animate-pulse' : ''}" />
+							{healthRunning ? 'Running…' : 'Health-check filtered sources'}
+						</button>
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							onclick={() => (adminSection = 'sources')}
+						>
+							Open Sources filters
+						</button>
+					</div>
+					<p class="mt-4 text-xs text-zinc-500">
+						Results appear as badges on each source row under <strong>Sources</strong>. Timeout 8s per
+						source.
+					</p>
+
+				{:else if adminSection === 'backups'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Backups</h2>
+						<p class="mt-1 text-sm text-zinc-500">
+							Rebuild popular-page metadata into KV (<code class="text-xs">backup:meta:*</code>).
+						</p>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-violet-300/70 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-800 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
+							onclick={() => rebuildBackups(false)}
+							disabled={loading || backupRunning || healthRunning}
+						>
+							<HardDrive class="h-4 w-4 {backupRunning ? 'animate-pulse' : ''}" />
+							{backupRunning ? 'Rebuilding…' : 'Rebuild all backups'}
+						</button>
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							onclick={() => rebuildBackups(true)}
+							disabled={loading || backupRunning || healthRunning || filtered.length === 0}
+						>
+							Backup filtered only
+						</button>
+					</div>
+					{#if successMsg}
+						<p class="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{successMsg}</p>
+					{/if}
+					{#if errorMsg}
+						<p class="mt-3 text-sm text-red-600 dark:text-red-400">{errorMsg}</p>
+					{/if}
+
+				{:else if adminSection === 'about'}
+					<div class="mb-4">
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">About</h2>
+						<p class="mt-1 text-sm text-zinc-500">Rokuyomu admin panel</p>
+					</div>
+					<ul class="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Sources</strong> — hide/show adapters, notes, bulk actions</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Health</strong> — scraper ping for filtered sources</li>
+						<li>• <strong class="text-zinc-800 dark:text-zinc-200">Backups</strong> — rebuild KV metadata snapshots</li>
+						<li class="pt-2 text-xs text-zinc-500">Sections marked Soon are planned and not wired yet.</li>
+					</ul>
+
+				{:else}
+					<!-- Coming soon panels -->
+					{@const navItem = ADMIN_NAV.find((n) => n.id === adminSection)}
+					<div class="flex flex-col items-center justify-center px-4 py-16 text-center">
+						<div
+							class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950/50 dark:text-violet-300"
+						>
+							{#if navItem}
+								{@const Icon = navItem.icon}
+								<Icon class="h-7 w-7" />
+							{:else}
+								<Server class="h-7 w-7" />
+							{/if}
+						</div>
+						<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+							{navItem?.label ?? 'Section'}
+						</h2>
+						<p class="mt-2 max-w-md text-sm text-zinc-500">
+							{navItem?.desc ?? ''}
+						</p>
+						<span
+							class="mt-4 rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+						>
+							Coming soon
+						</span>
+						<p class="mt-6 max-w-sm text-xs leading-relaxed text-zinc-400">
+							{#if adminSection === 'reports'}
+								Inbox for open user reports: resolve, link to source, leave admin notes.
+							{:else if adminSection === 'cache'}
+								Purge Worker KV by source, title, or global browse cache without redeploy.
+							{:else if adminSection === 'announcements'}
+								Site-wide banner for maintenance, broken sources, or feature updates.
+							{:else if adminSection === 'users'}
+								Ban UIDs, moderate community posts, review abuse signals.
+							{:else if adminSection === 'analytics'}
+								Top sources, search terms, error rates, and cron health at a glance.
+							{:else if adminSection === 'flags'}
+								Toggle experimental features (download modes, PWA prompts, etc.) remotely.
+							{:else}
+								This module is planned for a future release.
+							{/if}
+						</p>
+					</div>
+				{/if}
+			</div>
+		</div>
 	{/if}
 </div>
