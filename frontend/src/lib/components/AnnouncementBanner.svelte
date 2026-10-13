@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { X, Info, AlertTriangle, AlertOctagon } from 'lucide-svelte';
+	import { X, Info, AlertTriangle, AlertOctagon, ChevronDown, ChevronUp, Megaphone } from 'lucide-svelte';
 	import { browser } from '$app/environment';
 
 	type Level = 'info' | 'warning' | 'danger';
@@ -14,34 +14,56 @@
 		updatedAt?: string;
 	} = $props();
 
-	const DISMISS_KEY = 'rokuyomu_ann_dismiss';
+	const COLLAPSE_KEY = 'rokuyomu_ann_collapsed';
 
-	let dismissed = $state(false);
+	let expanded = $state(true);
 
 	$effect(() => {
 		if (!browser || !message) return;
 		try {
-			const raw = sessionStorage.getItem(DISMISS_KEY);
+			const raw = sessionStorage.getItem(COLLAPSE_KEY);
 			if (!raw) return;
-			const parsed = JSON.parse(raw) as { message?: string; updatedAt?: string };
-			if (parsed.message === message && (parsed.updatedAt || '') === (updatedAt || '')) {
-				dismissed = true;
+			const parsed = JSON.parse(raw) as {
+				message?: string;
+				updatedAt?: string;
+				collapsed?: boolean;
+			};
+			if (
+				parsed.message === message &&
+				(parsed.updatedAt || '') === (updatedAt || '') &&
+				parsed.collapsed
+			) {
+				expanded = false;
+			} else {
+				expanded = true;
 			}
 		} catch {
-			/* ignore */
 		}
 	});
 
-	function dismiss() {
-		dismissed = true;
+	function persist(collapsed: boolean) {
 		if (!browser) return;
 		try {
 			sessionStorage.setItem(
-				DISMISS_KEY,
-				JSON.stringify({ message, updatedAt: updatedAt || '' })
+				COLLAPSE_KEY,
+				JSON.stringify({
+					message,
+					updatedAt: updatedAt || '',
+					collapsed
+				})
 			);
 		} catch {
 		}
+	}
+
+	function collapse() {
+		expanded = false;
+		persist(true);
+	}
+
+	function expand() {
+		expanded = true;
+		persist(false);
 	}
 
 	const styles = $derived.by(() => {
@@ -49,47 +71,78 @@
 			case 'danger':
 				return {
 					wrap: 'border-red-300/80 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/80 dark:text-red-100',
-					icon: 'text-red-600 dark:text-red-400'
+					icon: 'text-red-600 dark:text-red-400',
+					chip: 'bg-red-600 text-white'
 				};
 			case 'warning':
 				return {
 					wrap: 'border-amber-300/80 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-100',
-					icon: 'text-amber-600 dark:text-amber-400'
+					icon: 'text-amber-600 dark:text-amber-400',
+					chip: 'bg-amber-500 text-white'
 				};
 			default:
 				return {
 					wrap: 'border-sky-300/80 bg-sky-50 text-sky-950 dark:border-sky-800 dark:bg-sky-950/70 dark:text-sky-100',
-					icon: 'text-sky-600 dark:text-sky-400'
+					icon: 'text-sky-600 dark:text-sky-400',
+					chip: 'bg-sky-600 text-white'
 				};
 		}
 	});
+
+	const preview = $derived(
+		message.length > 60 ? message.slice(0, 60).trimEnd() + '…' : message
+	);
 </script>
 
-{#if message && !dismissed}
-	<div
-		class="w-full border-b px-3 py-2.5 sm:px-4 {styles.wrap}"
-		role="status"
-		aria-live="polite"
-	>
-		<div class="mx-auto flex max-w-6xl items-start gap-2.5 sm:items-center">
-			<span class="mt-0.5 shrink-0 sm:mt-0 {styles.icon}">
-				{#if level === 'danger'}
-					<AlertOctagon class="h-4 w-4" />
-				{:else if level === 'warning'}
-					<AlertTriangle class="h-4 w-4" />
-				{:else}
-					<Info class="h-4 w-4" />
-				{/if}
-			</span>
-			<p class="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-snug">{message}</p>
-			<button
-				type="button"
-				class="shrink-0 rounded-md p-1 opacity-70 transition hover:opacity-100"
-				aria-label="Close"
-				onclick={dismiss}
-			>
-				<X class="h-4 w-4" />
-			</button>
+{#if message}
+	{#if expanded}
+		<div
+			class="w-full border-b px-3 py-2.5 sm:px-4 {styles.wrap}"
+			role="status"
+			aria-live="polite"
+		>
+			<div class="mx-auto flex max-w-6xl items-start gap-2.5 sm:items-center">
+				<span class="mt-0.5 shrink-0 sm:mt-0 {styles.icon}">
+					{#if level === 'danger'}
+						<AlertOctagon class="h-4 w-4" />
+					{:else if level === 'warning'}
+						<AlertTriangle class="h-4 w-4" />
+					{:else}
+						<Info class="h-4 w-4" />
+					{/if}
+				</span>
+				<p class="min-w-0 flex-1 whitespace-pre-wrap text-sm leading-snug">{message}</p>
+				<button
+					type="button"
+					class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium opacity-80 transition hover:opacity-100"
+					aria-label="Sembunyikan pengumuman"
+					title="Sembunyikan (bisa dibuka lagi)"
+					onclick={collapse}
+				>
+					<span class="hidden sm:inline">Hide</span>
+					<ChevronUp class="h-4 w-4" />
+				</button>
+			</div>
 		</div>
-	</div>
+	{:else}
+
+		<button
+			type="button"
+			class="flex w-full items-center gap-2 border-b px-3 py-1.5 text-left transition hover:brightness-95 sm:px-4 {styles.wrap}"
+			aria-label="Tampilkan pengumuman"
+			aria-expanded="false"
+			onclick={expand}
+		>
+			<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {styles.chip}">
+				<Megaphone class="h-3 w-3" />
+			</span>
+			<span class="min-w-0 flex-1 truncate text-xs font-medium sm:text-sm">
+				Announcemment: {preview}
+			</span>
+			<span class="inline-flex shrink-0 items-center gap-0.5 text-xs opacity-80">
+				<span class="hidden sm:inline">Show</span>
+				<ChevronDown class="h-4 w-4" />
+			</span>
+		</button>
+	{/if}
 {/if}
