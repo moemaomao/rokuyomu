@@ -237,6 +237,20 @@ export abstract class MadaraSource extends BaseSource {
 		}
 	}
 
+	protected isChapterLocked(
+		$a: cheerio.Cheerio<any>,
+		$li: cheerio.Cheerio<any>
+	): boolean {
+		const cls = `${$li.attr('class') || ''} ${$a.attr('class') || ''}`.toLowerCase();
+		if (/premium|locked|vip|paywall|coin|paid/.test(cls)) return true;
+		if ($li.find('.premium, .lock, .locked, .coin, .c-icon-lock, [data-coin], .premium-star').length)
+			return true;
+		const target = ($a.attr('data-bs-target') || $a.attr('data-target') || '').toLowerCase();
+		if (target.includes('lock') || target.includes('premium') || target.includes('coin')) return true;
+		if ($a.attr('data-coin') || $li.attr('data-coin')) return true;
+		return false;
+	}
+
 	protected parseChapterList($: cheerio.CheerioAPI): Chapter[] {
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
@@ -249,14 +263,29 @@ export abstract class MadaraSource extends BaseSource {
 			if (seen.has(id)) return;
 			seen.add(id);
 
+			const $li = $a.closest('li');
 			const rawText = $a.text().replace(/\s+/g, ' ').trim();
 			const number = this.parseChapterNumber(rawText || id, id);
 			const title = number > 0 ? `Chapter ${number}` : rawText || id;
 			const date =
-				$a.closest('li').find('.chapter-release-date').text().trim() ||
+				$li
+					.find('.chapter-release-date, .chapterdate, .chapter-date, .dt, time, .date')
+					.first()
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim() ||
+				$li.find('time').attr('datetime') ||
 				undefined;
+			const isLocked = this.isChapterLocked($a, $li);
 
-			chapters.push({ id, title, number, date, lang: this.defaultLang });
+			chapters.push({
+				id,
+				title,
+				number,
+				date: date || undefined,
+				lang: this.defaultLang,
+				...(isLocked ? { isLocked: true } : {})
+			});
 		});
 
 		return chapters;
@@ -274,9 +303,26 @@ export abstract class MadaraSource extends BaseSource {
 			this.name
 		);
 
-		const $img = $('.summary_image img, .thumb img, .manga-thumb img').first();
+		const $img = $(
+			[
+				'.summary_image img',
+				'.thumb img',
+				'.manga-thumb img',
+				'.manga-poster img',
+				'img.wp-post-image',
+				'.post-thumbnail img',
+				'.thumbook img'
+			].join(', ')
+		).first();
 		let cover =
-			$img.attr('data-src') || $img.attr('data-lazy-src') || $img.attr('src') || '';
+			$img.attr('data-src') ||
+			$img.attr('data-lazy-src') ||
+			$img.attr('data-srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
+			$img.attr('src') ||
+			$('meta[property="og:image"]').attr('content') ||
+			$('meta[name="twitter:image"]').attr('content') ||
+			'';
+		if (cover.startsWith('data:')) cover = '';
 		cover = this.preferFullCover(this.absUrl(cover));
 
 		const description = $(
