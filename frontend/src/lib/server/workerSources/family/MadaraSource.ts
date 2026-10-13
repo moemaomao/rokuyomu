@@ -90,23 +90,27 @@ export abstract class MadaraSource extends BaseSource {
 	}
 
 	protected seriesPath = '/manga';
+	protected listOrderby = 'latest';
+	protected useAjaxChapters = true;
+	protected sitePerPage = 0;
+
 	protected listPath(page: number): string {
-		const p = page <= 1 ? '' : `page/${page}/`;
-		return `${this.seriesPath}/${p}?m_orderby=latest`;
+		const p = Math.max(1, page || 1);
+		if (p <= 1) return `${this.seriesPath}/?m_orderby=${this.listOrderby}`;
+		return `${this.seriesPath}/page/${p}/?m_orderby=${this.listOrderby}`;
 	}
 	protected searchPath(query: string, page: number): string {
 		const q = encodeURIComponent(query);
 		const base = `/?s=${q}&post_type=wp-manga`;
-		return page <= 1 ? base : `/page/${page}/${base.replace(/^\//, '')}`;
+		return page <= 1 ? base : `/page/${page}/?s=${q}&post_type=wp-manga`;
 	}
 
 	protected cardSelector =
-		'.page-item-detail, .manga, .c-tabs-item__content, .badge-pos-1';
+		'.page-item-detail, .manga, .c-tabs-item__content, .badge-pos-1, li.mrm-r-item, .mrm-r-item, .bs, .listupd .bs';
 	protected chapterListSelector =
 		'li.wp-manga-chapter a, .listing-chapters_wrap a, .version-chap a, .main.version-chap li a';
 	protected pageImageSelector =
-		'.reading-content img, .page-break img, .wp-manga-chapter-img';
-	protected useAjaxChapters = true;
+		'.reading-content img, .page-break img, .wp-manga-chapter-img, img.wp-manga-chapter-img';
 
 	protected parseCards($: cheerio.CheerioAPI): Manga[] {
 		const res: Manga[] = [];
@@ -133,7 +137,11 @@ export abstract class MadaraSource extends BaseSource {
 			seen.add(id);
 
 			const title = this.normalizeTitle(
-				$a.attr('title') || $a.text() || $card.find('img').attr('alt') || '',
+				$a.attr('title') ||
+					$card.find('.mrm-r-item__title, .post-title, h3, h5, .tt').first().text() ||
+					$a.text() ||
+					$card.find('img').attr('alt') ||
+					'',
 				this.name
 			);
 			if (!title) return;
@@ -149,7 +157,9 @@ export abstract class MadaraSource extends BaseSource {
 
 			let latestChapter: string | undefined;
 			const chText = $card
-				.find('.chapter-item a, .list-chapter a, .font-meta.chapter a, .chapter a')
+				.find(
+					'.chapter-item a, .list-chapter a, .font-meta.chapter a, .chapter a, .mrm-r-item__chapter, .epxs, .epx'
+				)
 				.first()
 				.text()
 				.replace(/\s+/g, ' ')
@@ -174,17 +184,64 @@ export abstract class MadaraSource extends BaseSource {
 		return res;
 	}
 
+	protected async fetchCatalogPages(
+		buildPath: (sitePage: number) => string,
+		appPage: number
+	): Promise<Manga[]> {
+		const p = Math.max(1, Number(appPage) || 1);
+		if (!this.sitePerPage || this.sitePerPage >= this.perPage) {
+			const html = await this.fetchHtml(buildPath(p));
+			return this.parseCards(cheerio.load(html)).slice(0, this.perPage);
+		}
+		const start = (p - 1) * this.perPage;
+		const siteStart = Math.floor(start / this.sitePerPage) + 1;
+		const offsetInFirst = start % this.sitePerPage;
+		const merged: Manga[] = [];
+		const seen = new Set<string>();
+		for (
+			let sp = siteStart;
+			sp <= siteStart + 4 && merged.length < offsetInFirst + this.perPage;
+			sp++
+		) {
+			try {
+				const list = this.parseCards(cheerio.load(await this.fetchHtml(buildPath(sp))));
+				for (const m of list) {
+					if (seen.has(m.id)) continue;
+					seen.add(m.id);
+					merged.push(m);
+				}
+				if (list.length === 0) break;
+			} catch {
+				break;
+			}
+		}
+		return merged.slice(offsetInFirst, offsetInFirst + this.perPage);
+	}
+
 	async getLatestManga(page: number): Promise<Manga[]> {
-		const html = await this.fetchHtml(this.listPath(Math.max(1, page || 1)));
-		const $ = cheerio.load(html);
-		return this.parseCards($);
+		try {
+			const list = await this.fetchCatalogPages((sp) => this.listPath(sp), page);
+			console.log(`[${this.id}] latest page=${Math.max(1, page || 1)} → ${list.length}`);
+			return list;
+		} catch (e) {
+			console.error(`[${this.id}] getLatestManga`, e);
+			return [];
+		}
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
+		const q = (query || '').trim();
 		const page = Math.max(1, opts?.page || 1);
-		const html = await this.fetchHtml(this.searchPath(query, page));
-		const $ = cheerio.load(html);
-		return this.parseCards($);
+		if (!q) return this.getLatestManga(page);
+		try {
+			const html = await this.fetchHtml(this.searchPath(q, page));
+			const list = this.parseCards(cheerio.load(html)).slice(0, this.perPage);
+			console.log(`[${this.id}] search "${q}" page=${page} → ${list.length}`);
+			return list;
+		} catch (e) {
+			console.error(`[${this.id}] searchManga`, e);
+			return [];
+		}
 	}
 
 	protected async fetchChaptersAjax(mangaPath: string): Promise<Chapter[]> {

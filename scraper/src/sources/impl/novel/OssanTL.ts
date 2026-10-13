@@ -8,7 +8,7 @@
  * Detail  : /series/{slug}/
  * Chapter : /{slug}-chapter-{n}/  (root path)
  * Content : .epcontent / .entry-content / .reading-content (TEXT)
- * Bahasa default: id
+ * Bahasa default: en
  */
 
 import * as cheerio from 'cheerio';
@@ -21,7 +21,7 @@ export class OssanTLSource extends ThemesiaSource {
 	baseUrl = 'https://ossantl.my.id';
 
 	protected seriesPath = '/series';
-	protected defaultLang = 'id';
+	protected defaultLang = 'en';
 	protected perPage = 24;
 
 	protected listPath(page: number): string {
