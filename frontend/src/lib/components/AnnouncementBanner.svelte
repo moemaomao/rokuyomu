@@ -3,7 +3,6 @@
         Info,
         AlertTriangle,
         AlertOctagon,
-        ChevronDown,
         X,
         Megaphone
     } from 'lucide-svelte';
@@ -22,147 +21,175 @@
         updatedAt?: string;
     } = $props();
 
-    const COLLAPSE_KEY = 'rokuyomu_ann_collapsed';
-    let expanded = $state(true);
-    let containerRef = $state<HTMLDivElement | null>(null);
+    const SEEN_KEY = 'rokuyomu_ann_seen';
+    let open = $state(false);
+    let unreadCount = $state(0);
 
     $effect(() => {
-        if (!browser || !message) return;
+        if (!browser || !message) {
+            unreadCount = 0;
+            return;
+        }
         try {
-            const raw = sessionStorage.getItem(COLLAPSE_KEY);
-            if (!raw) return;
+            const raw = localStorage.getItem(SEEN_KEY);
+            if (!raw) {
+                unreadCount = 1;
+                return;
+            }
             const parsed = JSON.parse(raw) as {
                 message?: string;
                 updatedAt?: string;
-                collapsed?: boolean;
             };
-            if (
-                parsed.message === message &&
-                (parsed.updatedAt || '') === (updatedAt || '') &&
-                parsed.collapsed
-            ) {
-                expanded = false;
-            } else {
-                expanded = true;
-            }
+            const isNew =
+                parsed.message !== message ||
+                (parsed.updatedAt || '') !== (updatedAt || '');
+            unreadCount = isNew ? 1 : 0;
         } catch {
-            /* ignore */
+            unreadCount = 1;
         }
     });
 
-    function persist(collapsed: boolean) {
+    function markSeen() {
         if (!browser) return;
         try {
-            sessionStorage.setItem(
-                COLLAPSE_KEY,
-                JSON.stringify({ message, updatedAt: updatedAt || '', collapsed })
+            localStorage.setItem(
+                SEEN_KEY,
+                JSON.stringify({ message, updatedAt: updatedAt || '' })
             );
+            unreadCount = 0;
         } catch {
             /* ignore */
         }
     }
 
-    function collapse() {
-        expanded = false;
-        persist(true);
+    function openModal() {
+        open = true;
+        markSeen();
     }
-    function expand() {
-        expanded = true;
-        persist(false);
+
+    function closeModal() {
+        open = false;
     }
 
     onMount(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (expanded && containerRef && !containerRef.contains(event.target as Node)) {
-                collapse();
-            }
+        function onKey(e: KeyboardEvent) {
+            if (e.key === 'Escape' && open) closeModal();
         }
-
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
     });
 
     const styles = $derived.by(() => {
         switch (level) {
             case 'danger':
                 return {
-                    wrap: 'border-red-400 bg-red-100/95 text-red-950 dark:border-red-600/60 dark:bg-red-950/80 dark:text-red-50 backdrop-blur-md',
-                    icon: 'text-red-600 dark:text-red-400',
-                    chip: 'bg-red-600 text-white'
+                    iconBg: 'bg-red-500/15 text-red-600 dark:text-red-400',
+                    border: 'border-red-500/30'
                 };
             case 'warning':
                 return {
-                    wrap: 'border-amber-400 bg-amber-100/95 text-amber-950 dark:border-amber-600/60 dark:bg-amber-950/80 dark:text-amber-50 backdrop-blur-md',
-                    icon: 'text-amber-600 dark:text-amber-400',
-                    chip: 'bg-amber-500 text-white'
+                    iconBg: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                    border: 'border-amber-500/30'
                 };
             default:
                 return {
-                    wrap: 'border-sky-400 bg-sky-100/95 text-sky-950 dark:border-sky-600/60 dark:bg-sky-950/80 dark:text-sky-50 backdrop-blur-md',
-                    icon: 'text-sky-600 dark:text-sky-400',
-                    chip: 'bg-sky-600 text-white'
+                    iconBg: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+                    border: 'border-sky-500/30'
                 };
         }
     });
-
-    const preview = $derived(
-        message.length > 72 ? message.slice(0, 72).trimEnd() + '…' : message
-    );
 </script>
 
 {#if message}
-    <div class="relative z-[45] w-full" bind:this={containerRef}>
-        <div class="h-9 w-full border-b {styles.wrap}" class:opacity-0={expanded} class:pointer-events-none={expanded}>
-            <button
-                type="button"
-                class="flex h-full w-full items-center gap-2 px-3 text-left transition hover:bg-black/5 dark:hover:bg-white/5 sm:px-4"
-                aria-label="Show announcement"
-                aria-expanded={!expanded}
-                onclick={expand}
+    <button
+        type="button"
+        class="fixed bottom-5 right-5 z-[60] flex h-12 w-12 items-center justify-center rounded-full
+            bg-violet-600 text-white shadow-lg
+            transition hover:scale-105 hover:brightness-110
+            focus:outline-none focus:ring-2 focus:ring-offset-2
+            dark:focus:ring-offset-zinc-900"
+        style="box-shadow: 0 10px 25px -5px color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
+            --tw-ring-color: var(--accent, #7c3aed);"
+        aria-label="Announcement{unreadCount > 0 ? ` (${unreadCount} unread)` : ''}"
+        onclick={openModal}
+    >
+        <Megaphone class="h-5 w-5" />
+        {#if unreadCount > 0}
+            <span
+                class="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center
+                    rounded-full bg-red-500 px-1 text-[11px] font-bold leading-none text-white
+                    ring-2 ring-white dark:ring-zinc-900"
             >
-                <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full {styles.chip}">
-                    <Megaphone class="h-3 w-3" />
-                </span>
-                <span class="min-w-0 flex-1 truncate text-xs font-medium sm:text-sm">
-                    Announcement: {preview}
-                </span>
-                <span class="inline-flex shrink-0 items-center gap-0.5 text-xs opacity-80">
-                    <span class="hidden sm:inline">Show</span>
-                    <ChevronDown class="h-4 w-4" />
-                </span>
-            </button>
-        </div>
-
-        {#if expanded}
-            <div
-                class="absolute inset-x-0 top-0 z-[46] border-b px-3 py-2.5 shadow-lg sm:px-4 {styles.wrap}"
-                role="status"
-                aria-live="polite"
-            >
-                <div class="relative mx-auto flex max-w-6xl items-start gap-2.5 sm:items-center">
-                    <span class="mt-0.5 shrink-0 sm:mt-0 {styles.icon}">
-                        {#if level === 'danger'}
-                            <AlertOctagon class="h-4 w-4" />
-                        {:else if level === 'warning'}
-                            <AlertTriangle class="h-4 w-4" />
-                        {:else}
-                            <Info class="h-4 w-4" />
-                        {/if}
-                    </span>
-                    <p class="min-w-0 flex-1 whitespace-pre-wrap text-sm font-medium leading-snug">{message}</p>
-                    <button
-                        type="button"
-                        class="inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-red-600 transition hover:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
-                        aria-label="Hide announcement"
-                        aria-expanded="true"
-                        onclick={collapse}
-                    >
-                        <X class="h-4 w-4" />
-                    </button>
-                </div>
-            </div>
+                {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
         {/if}
-    </div>
+    </button>
+
+    {#if open}
+        <button
+            type="button"
+            class="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm"
+            aria-label="Close announcement"
+            onclick={closeModal}
+        ></button>
+
+        <div
+            class="fixed left-1/2 top-1/2 z-[80] w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2
+                rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl
+                dark:border-zinc-700 dark:bg-zinc-900"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ann-title"
+        >
+            <div class="mb-4 flex items-start gap-3">
+                <span
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl {styles.iconBg}"
+                >
+                    {#if level === 'danger'}
+                        <AlertOctagon class="h-5 w-5" />
+                    {:else if level === 'warning'}
+                        <AlertTriangle class="h-5 w-5" />
+                    {:else}
+                        <Info class="h-5 w-5" />
+                    {/if}
+                </span>
+                <div class="min-w-0 flex-1">
+                    <h2 id="ann-title" class="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                        Announcement
+                    </h2>
+                    <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        From Rokuyomu
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700
+                        dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                    aria-label="Close"
+                    onclick={closeModal}
+                >
+                    <X class="h-4 w-4" />
+                </button>
+            </div>
+
+            <div
+                class="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-xl border {styles.border}
+                    bg-zinc-50 px-4 py-3 text-sm leading-relaxed text-zinc-800
+                    dark:bg-zinc-800/60 dark:text-zinc-200"
+            >
+                {message}
+            </div>
+
+            <div class="mt-4 flex justify-end">
+                <button
+                    type="button"
+                    class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white
+                        transition hover:brightness-110"
+                    onclick={closeModal}
+                >
+                    Got it
+                </button>
+            </div>
+        </div>
+    {/if}
 {/if}
