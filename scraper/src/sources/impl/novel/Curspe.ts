@@ -391,8 +391,11 @@ export class CurspeSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string;
+		novelInfo?: { id: string; title?: string; cover?: string };
 	}> {
 		const path = pathOnly(chapterId);
+		const novelId = seriesIdFromChapter(path) || path.match(/^(\/novels\/[^/]+)/i)?.[1] || '';
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
 
@@ -494,7 +497,9 @@ export class CurspeSource extends BaseSource {
 				parts.join('\n') ||
 				'<p><em>Content empty — chapter may be locked or selector changed.</em></p>',
 			prevChapterId: sanitizeNav(prevHref),
-			nextChapterId: sanitizeNav(nextHref)
+			nextChapterId: sanitizeNav(nextHref),
+			novelId: novelId || undefined,
+			novelInfo: novelId ? { id: novelId } : undefined
 		};
 	}
 
