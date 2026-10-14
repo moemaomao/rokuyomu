@@ -2,7 +2,8 @@
  * Siikomik adapter (siikomik.id)
  * Theme: Madara custom (slider grid + /komik/) → extends MadaraSource
  *
- * Latest     : homepage / ; fill /semua-komik/ ; page 2+ → madara_load_more
+ * Latest     : GET /wp-json/madara/v1/manga?page=N&per_page=24
+ *              (HTML list cards have NO chapter badges — API has latest_chapter)
  * Search     : /?s={q}&post_type=wp-manga
  * Detail     : /komik/{slug}/
  * Chapters   : POST /komik/{slug}/ajax/chapters/
@@ -33,7 +34,10 @@ export class SiikomikSource extends MadaraSource {
 			.replace(/\s*[-|]\s*Siikomik.*$/i, '')
 			.replace(/\s*[-|]\s*Chapter\s*\d+.*$/i, '')
 			.replace(/^(?:18\+?\s*)?(?:HOT\s*)+/i, '')
-			.replace(/\s+(?:Drama|Romance|Smut|Fantasy|Action|Comedy|Horror|Mystery|Historical|Adult|Mature|Slice of Life|School Life|Supernatural)(?:\s+(?:Drama|Romance|Smut|Fantasy|Action|Comedy|Horror|Mystery|Historical|Adult|Mature|Slice of Life|School Life|Supernatural))*\s*$/i, '')
+			.replace(
+				/\s+(?:Drama|Romance|Smut|Fantasy|Action|Comedy|Horror|Mystery|Historical|Adult|Mature|Slice of Life|School Life|Supernatural)(?:\s+(?:Drama|Romance|Smut|Fantasy|Action|Comedy|Horror|Mystery|Historical|Adult|Mature|Slice of Life|School Life|Supernatural))*\s*$/i,
+				''
+			)
 			.trim();
 	}
 
@@ -60,6 +64,16 @@ export class SiikomikSource extends MadaraSource {
 				'';
 		}
 		return (cover || '').trim();
+	}
+
+	private latestFromApi(raw: unknown): string | undefined {
+		const text = String(raw || '')
+			.replace(/<[^>]+>/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
+		if (!text) return undefined;
+		const n = this.parseChapterNumber(text);
+		return n > 0 ? String(n) : undefined;
 	}
 
 	protected parseCards($: cheerio.CheerioAPI): Manga[] {
@@ -107,7 +121,10 @@ export class SiikomikSource extends MadaraSource {
 
 			const id = this.cleanId($a.attr('href') || '');
 			const title =
-				$el.find('.post-title a, .post-title h3, .post-title h4, .post-title h5, .post-title')
+				$el
+					.find(
+						'.post-title a, .post-title h3, .post-title h4, .post-title h5, .post-title'
+					)
 					.first()
 					.text() ||
 				$a.attr('title') ||
@@ -128,7 +145,9 @@ export class SiikomikSource extends MadaraSource {
 			});
 			if (!latestChapter) {
 				const chText = $el
-					.find('.chapter-item, .list-chapter, .chapter, .font-meta.chapter')
+					.find(
+						'.chapter-item, .list-chapter, .chapter, .font-meta.chapter, .chapter-link, .meta-item.latest-chap'
+					)
 					.first()
 					.text();
 				const n = this.parseChapterNumber(chText);
@@ -170,6 +189,64 @@ export class SiikomikSource extends MadaraSource {
 		return mangas;
 	}
 
+	private async fetchMadaraApi(page: number): Promise<Manga[]> {
+		const p = Math.max(1, page || 1);
+		const url = `${this.baseUrl}/wp-json/madara/v1/manga?page=${p}&per_page=${this.perPage}`;
+		const res = await fetch(url, {
+			headers: {
+				...this.headers,
+				Accept: 'application/json',
+				Referer: `${this.baseUrl}/`
+			},
+			redirect: 'follow'
+		});
+		if (!res.ok) throw new Error(`madara api ${res.status}`);
+		const json = (await res.json()) as {
+			success?: boolean;
+			data?: Array<{
+				title?: string;
+				url?: string;
+				thumbnail?: string;
+				status?: string;
+				type?: string;
+				latest_chapter?: string;
+			}>;
+		};
+		const rows = Array.isArray(json?.data) ? json.data : [];
+		const out: Manga[] = [];
+		const seen = new Set<string>();
+
+		for (const row of rows) {
+			const id = this.cleanId(row.url || '');
+			if (!id || !/^\/komik\/[^/]+$/i.test(id) || seen.has(id)) continue;
+			seen.add(id);
+			const title = this.normalizeTitle(row.title || '') || id.split('/').pop() || id;
+			const st = String(row.status || '').toLowerCase();
+			const status = /end|tamat|complete|finish/.test(st) ? 'Completed' : 'Ongoing';
+			const typeRaw = String(row.type || '').toLowerCase();
+			const type =
+				typeRaw.includes('manhwa')
+					? 'manhwa'
+					: typeRaw.includes('manhua')
+						? 'manhua'
+						: typeRaw.includes('novel')
+							? 'novel'
+							: 'manga';
+
+			out.push({
+				id,
+				title,
+				cover: this.preferFullCover(this.absUrl(row.thumbnail || '')),
+				sourceId: this.id,
+				type,
+				status,
+				latestChapter: this.latestFromApi(row.latest_chapter),
+				lang: this.defaultLang
+			});
+		}
+		return out;
+	}
+
 	private async fetchMadaraPage(ajaxPage: number): Promise<Manga[]> {
 		const body = new URLSearchParams({
 			action: 'madara_load_more',
@@ -203,6 +280,16 @@ export class SiikomikSource extends MadaraSource {
 	async getLatestManga(page: number): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
+
+			try {
+				const apiList = await this.fetchMadaraApi(p);
+				if (apiList.length) {
+					console.log(`[${this.id}] madara api page=${p} → ${apiList.length}`);
+					return apiList.slice(0, this.perPage);
+				}
+			} catch (e) {
+				console.warn(`[${this.id}] madara api failed, fallback HTML`, e);
+			}
 
 			if (p === 1) {
 				const homeHtml = await this.fetchHtml('/');
