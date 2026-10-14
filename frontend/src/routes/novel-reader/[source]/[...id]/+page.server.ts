@@ -8,6 +8,7 @@ function novelIdFromChapter(chapterId: string): string {
 	let path = chapterId.replace(/\/+$/, '');
 	if (!path.startsWith('/')) path = '/' + path;
 	const parts = path.split('/').filter(Boolean);
+
 	if (parts.length >= 2) {
 		const last = parts[parts.length - 1];
 		if (
@@ -17,16 +18,13 @@ function novelIdFromChapter(chapterId: string): string {
 		) {
 			return '/' + parts.slice(0, -1).join('/');
 		}
-
-		if (parts.length === 1 && /[-_]chapter[-_]?\d+/i.test(parts[0])) {
-			const slug = parts[0].replace(/[-_]chapter[-_]?\d+.*$/i, '');
-			if (slug) return '/' + slug;
-		}
 	}
+
 	if (parts.length === 1 && /[-_]chapter[-_]?\d+/i.test(parts[0])) {
 		const slug = parts[0].replace(/[-_]chapter[-_]?\d+.*$/i, '');
-		if (slug) return '/' + slug;
+		if (slug) return `/series/${slug}`;
 	}
+
 	if (parts.length >= 2) return '/' + parts.slice(0, -1).join('/');
 	return path;
 }
@@ -82,19 +80,28 @@ export const load: PageServerLoad = async ({ params }) => {
 			throw error(404, 'Chapter not found or empty');
 		}
 
-		const novelPath = novelIdFromChapter(chapterId);
+		const fromScraper =
+			(data as { novelId?: string; novelInfo?: { id?: string } }).novelId ||
+			data.novelInfo?.id ||
+			'';
+		const novelPath = fromScraper
+			? fromScraper.startsWith('/')
+				? fromScraper
+				: `/${fromScraper}`
+			: novelIdFromChapter(chapterId);
+
 		let novelInfo: { title?: string; id?: string; cover?: string } = {
 			...(data.novelInfo ?? {}),
-			id: data.novelInfo?.id || novelPath,
+			id: novelPath,
 			title: data.novelInfo?.title
 		};
 		novelInfo.cover = normalizeCover(novelInfo.cover, source);
 
-		// Always try to fill missing title / cover from detail page
 		const needTitle = !novelInfo.title || looksLikeChapterTitle(novelInfo.title);
 		const needCover = !novelInfo.cover;
+		const needIdConfirm = true;
 
-		if ((needTitle || needCover) && novelPath && novelPath !== '/') {
+		if ((needTitle || needCover || needIdConfirm) && novelPath && novelPath !== '/') {
 			try {
 				const details = await remoteMangaDetails(source, novelPath);
 				if (details) {
