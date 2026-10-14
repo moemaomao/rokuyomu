@@ -19,7 +19,20 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	sektedoujin: '/manga',
 	athreascans: '/manga',
 	violetmanga: '/comics',
-	thunderscans: '/comics'
+	thunderscans: '/comics',
+	// Themesia manga (chapter at /{slug}-chapter-N, series at /manga/{slug})
+	ngomik: '/manga',
+	kiryuu: '/manga',
+	manhwadesu: '/manga',
+	manhwaindo: '/manga',
+	siikomik: '/manga',
+	areakomik: '/manga',
+	softkomik: '/manga',
+	bacakomik: '/manga',
+	holodek: '/manga',
+	lumos: '/manga',
+	luvyaa: '/manga',
+	crotpedia: '/manga'
 };
 
 const NEEDS_REMOTE_MANGA_RESOLVE = new Set([
@@ -115,7 +128,9 @@ async function resolveMangaId(
 
 	const rootParsed = parseRootChapter(chapterId);
 	if (rootParsed?.slug) {
-		return `/${rootParsed.slug}`;
+		const prefix = ROOT_CHAPTER_PREFIX[source];
+		if (prefix) return `${prefix}/${rootParsed.slug}`;
+		return `/manga/${rootParsed.slug}`;
 	}
 
 	return hierarchical.length > 1 ? hierarchical : chapterId;

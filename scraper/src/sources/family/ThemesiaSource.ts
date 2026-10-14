@@ -116,6 +116,8 @@ export abstract class ThemesiaSource extends BaseSource {
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
 
+	// ── Latest badge on list cards ───────────────────────────────────────────
+
 	protected extractLatestChapter(
 		$: cheerio.CheerioAPI,
 		$el: cheerio.Cheerio<any>
@@ -213,11 +215,22 @@ export abstract class ThemesiaSource extends BaseSource {
 
 			const $img = $el.find('img').first();
 			let cover =
+				$img.attr('data-pagespeed-lazy-src') ||
 				$img.attr('data-src') ||
 				$img.attr('data-lazy-src') ||
+				$img.attr('data-original') ||
+				$img.attr('data-srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
+				$img.attr('srcset')?.split(/\s*,\s*/)[0]?.split(/\s+/)[0] ||
 				$img.attr('src') ||
 				'';
-			if (cover.startsWith('data:')) cover = '';
+		
+			if (
+				!cover ||
+				cover.startsWith('data:') ||
+				/pagespeed_static|1\.JiBnMqyl6S\.gif|placeholder|blank\.(gif|png)/i.test(cover)
+			) {
+				cover = '';
+			}
 			cover = this.preferFullCover(this.absUrl(cover));
 
 			const latestChapter = this.extractLatestChapter($, $el);
@@ -605,6 +618,7 @@ export abstract class ThemesiaSource extends BaseSource {
 			.replace(/^\/+/, '')
 			.replace(/[-_](?:chapter|ch|c)[-_]?\d+(?:\.\d+)?.*$/i, '')
 			.replace(/[-_]v\d+c\d+(?:\.\d+)?.*$/i, '');
+	
 		$('a[href]').each((_, a) => {
 			if (novelId) return;
 			const id = this.cleanId($(a).attr('href') || '');
