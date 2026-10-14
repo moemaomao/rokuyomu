@@ -11,6 +11,10 @@
  *       /wp-json/wp/v2/categories?parent=12
  *       /wp-json/wp/v2/posts?categories={id}&per_page=100&page=N
  *       /wp-json/wp/v2/posts?per_page=24&page=N  (latest / search)
+ *
+ * ID format (penting untuk history / tandai sudah dibaca):
+ *   novel   : /wn/{series-slug}
+ *   chapter : /wn/{series-slug}/{episode-slug}
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../../BaseSource';
@@ -34,12 +38,24 @@ function absUrl(href: string | undefined | null): string {
 }
 
 function pathOnly(href: string): string {
+	if (!href) return '';
 	try {
-		const u = new URL(href.startsWith('http') ? href : absUrl(href));
-		return u.pathname.replace(/\/$/, '') || '/';
+		const raw = href.startsWith('http') ? href : absUrl(href);
+		const u = new URL(raw);
+		let p = decodeURIComponent(u.pathname);
+		p = p.replace(/\/+$/, '') || '/';
+		if (!p.startsWith('/')) p = '/' + p;
+		return p;
 	} catch {
-		const p = href.startsWith('/') ? href : `/${href}`;
-		return p.replace(/\/$/, '') || '/';
+		let p = href.split('?')[0].split('#')[0];
+		try {
+			p = decodeURIComponent(p);
+		} catch {
+			/* ignore */
+		}
+		p = p.replace(/\/+$/, '') || '/';
+		if (!p.startsWith('/')) p = '/' + p;
+		return p;
 	}
 }
 
@@ -105,7 +121,7 @@ function parseChapterNumber(text: string, fallback = 0): number {
 function shortChapterTitle(n: number, raw?: string): string {
 	const r = raw || '';
 	if (/prologue/i.test(r) && !(n > 0)) return 'Prologue';
-	if (/epilogue/i.test(r)) return n > 0 && n < 9000 ? `Epilogue` : 'Epilogue';
+	if (/epilogue/i.test(r)) return 'Epilogue';
 	if (/side/i.test(r)) {
 		const m = r.match(/side\s*(\d+)/i);
 		return m ? `Side ${m[1]}` : 'Side';
@@ -118,9 +134,9 @@ function shortChapterTitle(n: number, raw?: string): string {
 
 function seriesPathFromHref(href: string): string | null {
 	const p = pathOnly(href);
-	const m = p.match(/^(\/wn\/[^/]+)/);
+	const m = p.match(/^(\/wn\/[^/]+)/i);
 	if (m) return m[1];
-	const m2 = p.match(/^\/category\/wn\/([^/]+)/);
+	const m2 = p.match(/^\/category\/wn\/([^/]+)/i);
 	if (m2) return `/wn/${m2[1]}`;
 	return null;
 }
@@ -311,6 +327,7 @@ export class DasuiTLSource extends BaseSource {
 				}));
 			}
 		} catch {
+			/* fall through */
 		}
 
 		const seen = new Set<string>();
@@ -342,10 +359,15 @@ export class DasuiTLSource extends BaseSource {
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		let seriesPath = pathOnly(mangaId);
+		// naik dari chapter id → series
+		const fromCh = seriesPathFromHref(seriesPath);
+		if (fromCh && seriesPath !== fromCh) seriesPath = fromCh;
+
 		if (!seriesPath.startsWith('/wn/')) {
 			const m = seriesPath.match(/([^/]+)$/);
 			seriesPath = m ? `/wn/${m[1]}` : seriesPath;
 		}
+		seriesPath = pathOnly(seriesPath);
 		const slug = seriesPath.replace(/^\/wn\//, '').replace(/\/$/, '');
 		if (!slug) throw new Error('Invalid series id');
 
@@ -356,6 +378,7 @@ export class DasuiTLSource extends BaseSource {
 			);
 			if (Array.isArray(data) && data[0]) cat = data[0];
 		} catch {
+			/* ignore */
 		}
 
 		if (!cat) {
@@ -372,6 +395,7 @@ export class DasuiTLSource extends BaseSource {
 				);
 				if (hit) cat = hit;
 			} catch {
+				/* ignore */
 			}
 		}
 
@@ -396,12 +420,14 @@ export class DasuiTLSource extends BaseSource {
 				const fromPost = seriesPathFromHref(data?.[0]?.link || '');
 				if (fromPost) seriesPath = fromPost;
 			} catch {
+				/* ignore */
 			}
 		} else {
 			chapters = await this.fetchChaptersBySeriesPath(seriesPath);
 		}
 
-		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
+
+		chapters.sort((a, b) => (a.number || 0) - (b.number || 0) || a.id.localeCompare(b.id));
 
 		return {
 			id: seriesPath,
@@ -415,10 +441,11 @@ export class DasuiTLSource extends BaseSource {
 			chapters,
 			type: 'novel',
 			lang: 'en',
-			latestChapter:
-				chapters[0] && chapters[0].number < 9000
-					? chapters[0].number
-					: chapters.length || cat?.count || undefined
+			latestChapter: chapters.length
+				? chapters[chapters.length - 1].number < 9000
+					? chapters[chapters.length - 1].number
+					: chapters.length
+				: cat?.count || undefined
 		};
 	}
 
@@ -499,9 +526,12 @@ export class DasuiTLSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string;
+		novelInfo?: { id: string; title?: string; cover?: string };
+		currentChapter?: { id: string; title: string; number: number };
 	}> {
-		let path = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
-		path = path.replace(/\/$/, '');
+		const path = pathOnly(chapterId);
+		const novelId = seriesPathFromHref(path) || '';
 		const slug = path.split('/').filter(Boolean).pop() || '';
 
 		let post: WpPost | null = null;
@@ -510,8 +540,16 @@ export class DasuiTLSource extends BaseSource {
 				const { data } = await this.wpJson<WpPost[]>(
 					`${BASE}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}&_fields=id,slug,link,title,content,date`
 				);
-				if (Array.isArray(data) && data[0]) post = data[0];
+				if (Array.isArray(data) && data[0]) {
+					// pastikan post milik series yang sama (hindari slug bentrok)
+					const candidate = data.find((p) => {
+						const pPath = pathOnly(p.link || '');
+						return pPath === path || (novelId && pPath.startsWith(novelId + '/'));
+					});
+					post = candidate || data[0];
+				}
 			} catch {
+				/* ignore */
 			}
 		}
 
@@ -526,7 +564,10 @@ export class DasuiTLSource extends BaseSource {
 				title,
 				content: '<p>This chapter is password-protected on DasuiTL.</p>',
 				prevChapterId: null,
-				nextChapterId: null
+				nextChapterId: null,
+				novelId: novelId || undefined,
+				novelInfo: novelId ? { id: novelId } : undefined,
+				currentChapter: { id: path, title, number: num > 0 ? num : 0 }
 			};
 		}
 
@@ -544,7 +585,10 @@ export class DasuiTLSource extends BaseSource {
 					title,
 					content: '<p>This chapter is password-protected on DasuiTL.</p>',
 					prevChapterId: null,
-					nextChapterId: null
+					nextChapterId: null,
+					novelId: novelId || undefined,
+					novelInfo: novelId ? { id: novelId } : undefined,
+					currentChapter: { id: path, title, number: num > 0 ? num : 0 }
 				};
 			}
 			const el = $('.entry-content, .post-content, article .content').first();
@@ -560,38 +604,88 @@ export class DasuiTLSource extends BaseSource {
 
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
-		const seriesId = seriesPathFromHref(path);
 
-		if (post?.id && seriesId) {
+		if (post?.id && novelId) {
 			try {
-				const seriesSlug = seriesId.replace(/^\/wn\//, '');
+				const seriesSlug = novelId.replace(/^\/wn\//, '');
 				const { data: cats } = await this.wpJson<WpCategory[]>(
 					`${BASE}/wp-json/wp/v2/categories?slug=${encodeURIComponent(seriesSlug)}`
 				);
 				const catId = cats?.[0]?.id;
 				if (catId) {
-					const { data: siblings } = await this.wpJson<WpPost[]>(
-						`${BASE}/wp-json/wp/v2/posts?categories=${catId}&per_page=100&orderby=date&order=asc&_fields=id,link,slug`
-					);
-					if (Array.isArray(siblings)) {
-						const idx = siblings.findIndex(
-							(s) => pathOnly(s.link || '') === path || s.slug === slug
+					const allIds: string[] = [];
+					let page = 1;
+					let totalPages = 1;
+					while (page <= totalPages && page <= 40) {
+						const { data: siblings, totalPages: tp } = await this.wpJson<WpPost[]>(
+							`${BASE}/wp-json/wp/v2/posts?categories=${catId}&per_page=100&page=${page}&orderby=date&order=asc&_fields=id,link,slug`
 						);
-						if (idx > 0) prevChapterId = pathOnly(siblings[idx - 1].link || '');
-						if (idx >= 0 && idx < siblings.length - 1) {
-							nextChapterId = pathOnly(siblings[idx + 1].link || '');
+						totalPages = tp || 1;
+						if (!Array.isArray(siblings) || !siblings.length) break;
+						for (const s of siblings) {
+							const sid = pathOnly(s.link || '');
+							if (sid) allIds.push(sid);
 						}
+						page += 1;
 					}
+					const idx = allIds.findIndex((id) => id === path);
+					if (idx > 0) prevChapterId = allIds[idx - 1];
+					if (idx >= 0 && idx < allIds.length - 1) nextChapterId = allIds[idx + 1];
 				}
 			} catch {
+				/* ignore */
 			}
 		}
+
+		if ((!prevChapterId || !nextChapterId) && content) {
+			try {
+				const html = await this.fetchHtml(`${BASE}${path}/`);
+				const $ = cheerio.load(html);
+				if (!prevChapterId) {
+					const prevHref =
+						$('a[rel="prev"]').attr('href') ||
+						$('.nav-previous a, .post-navigation .nav-previous a')
+							.first()
+							.attr('href') ||
+						$('a')
+							.filter((_, el) => /previous|prev/i.test($(el).text()))
+							.first()
+							.attr('href') ||
+						'';
+					const pid = pathOnly(prevHref);
+					if (pid && novelId && pid.startsWith(novelId + '/')) prevChapterId = pid;
+				}
+				if (!nextChapterId) {
+					const nextHref =
+						$('a[rel="next"]').attr('href') ||
+						$('.nav-next a, .post-navigation .nav-next a').first().attr('href') ||
+						$('a')
+							.filter((_, el) => /next/i.test($(el).text()) && !/previous/i.test($(el).text()))
+							.first()
+							.attr('href') ||
+						'';
+					const nid = pathOnly(nextHref);
+					if (nid && novelId && nid.startsWith(novelId + '/')) nextChapterId = nid;
+				}
+			} catch {
+				/* ignore */
+			}
+		}
+
+		const chapterCanonicalId = pathOnly(post?.link || path);
 
 		return {
 			title,
 			content,
 			prevChapterId,
-			nextChapterId
+			nextChapterId,
+			novelId: novelId || undefined,
+			novelInfo: novelId ? { id: novelId } : undefined,
+			currentChapter: {
+				id: chapterCanonicalId,
+				title,
+				number: num > 0 ? num : 0
+			}
 		};
 	}
 
