@@ -68,7 +68,7 @@ export class ManhwaDesuSource extends ThemesiaSource {
 			}
 			return major;
 		}
-	
+
 		const glued = String(text || '').match(
 			/(?:chapter|ch\.?)\s*(\d+(?:\.\d+)?)(?=[A-Za-z]|$)/i
 		);
@@ -213,6 +213,7 @@ export class ManhwaDesuSource extends ThemesiaSource {
 		}
 
 		const details = await super.getMangaDetails(path);
+
 		const chapters = (details.chapters || []).filter(
 			(c) =>
 				c?.id &&

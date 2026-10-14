@@ -126,6 +126,7 @@ export class BacaKomikSource extends BaseSource {
 		});
 	}
 
+	/** Site embeds cards as JSON array of HTML strings: const postCards = ["<a class=..."] */
 	private extractPostCardsHtml(html: string): string[] {
 		const m = html.match(/const\s+postCards\s*=\s*(\[[\s\S]*?\]);/);
 		if (!m) return [];

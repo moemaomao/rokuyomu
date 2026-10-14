@@ -23,7 +23,7 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	// Themesia manga (chapter at /{slug}-chapter-N, series at /manga/{slug})
 	ngomik: '/manga',
 	kiryuu: '/manga',
-	manhwadesu: '/manga',
+	manhwadesu: '/komik',
 	manhwaindo: '/manga',
 	siikomik: '/manga',
 	softkomik: '/manga',
