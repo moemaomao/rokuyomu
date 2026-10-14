@@ -73,7 +73,6 @@ export abstract class NextDataSource extends BaseSource {
 		throw lastErr;
 	}
 
-	/** pageProps from Next data response */
 	protected props<T = Record<string, unknown>>(raw: unknown): T {
 		const o = raw as { pageProps?: T };
 		return (o?.pageProps ?? raw) as T;
@@ -99,8 +98,18 @@ export abstract class NextDataSource extends BaseSource {
 		return `${this.baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
 	}
 
-	protected parseChapterNumber(value: unknown): number {
+	protected parseChapterNumber(value: unknown, path = ''): number {
 		if (typeof value === 'number' && Number.isFinite(value)) return value;
+		const fromPath =
+			path.match(/(?:ch|chapter)[_-]?(\d+)(?:[.-](\d+))?/i) ||
+			path.match(/-(\d+)(?:[.-](\d+))?\/?$/i);
+		if (fromPath) {
+			const major = parseInt(fromPath[1], 10);
+			if (fromPath[2] != null && fromPath[2].length <= 2) {
+				return parseFloat(`${major}.${fromPath[2]}`);
+			}
+			return major;
+		}
 		const s = String(value ?? '').trim();
 		if (!s) return 0;
 		const m =
@@ -129,7 +138,6 @@ export abstract class NextDataSource extends BaseSource {
 		return 'manhwa';
 	}
 
-	/** Dedupe by manga.id, keep order */
 	protected dedupeManga(items: (Manga | null | undefined)[]): Manga[] {
 		const seen = new Set<string>();
 		const out: Manga[] = [];
@@ -147,7 +155,6 @@ export abstract class NextDataSource extends BaseSource {
 		return items.slice(start, start + this.perPage);
 	}
 
-	/** Collect unique string names from mixed author/genre fields */
 	protected collectNames(raw: unknown, maxLen = 40): string[] {
 		const out: string[] = [];
 		const push = (v: unknown) => {
