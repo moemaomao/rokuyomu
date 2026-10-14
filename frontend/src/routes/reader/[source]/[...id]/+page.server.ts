@@ -24,7 +24,7 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	ngomik: '/manga',
 	kiryuu: '/manga',
 	manhwadesu: '/komik',
-	manhwaindo: '/manga',
+	manhwaindo: '/series',
 	siikomik: '/manga',
 	softkomik: '/manga',
 	bacakomik: '/manga',
