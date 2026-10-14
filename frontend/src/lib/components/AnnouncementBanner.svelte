@@ -22,7 +22,7 @@
 
 	let {
 		items = [] as AnnouncementPublic[],
-		/** @deprecated single-message mode*/
+		/** @deprecated single-message mode — diisi otomatis dari items[0] jika items kosong */
 		message = '',
 		level = 'info' as Level,
 		updatedAt = '' as string | undefined
@@ -72,7 +72,7 @@
 				const arr = JSON.parse(raw) as string[];
 				return new Set(Array.isArray(arr) ? arr.map(String) : []);
 			}
-
+		
 			const leg = localStorage.getItem(SEEN_LEGACY);
 			if (leg && list[0]) {
 				const parsed = JSON.parse(leg) as { message?: string; updatedAt?: string };

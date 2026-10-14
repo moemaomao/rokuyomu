@@ -119,13 +119,20 @@ export async function saveAnnouncementsStore(
 	kv?: KVNamespace | null
 ): Promise<AnnouncementsStore> {
 	if (!kv) throw new Error('KV not available');
-	const items = store.items.filter((i) => i.message?.trim());
+	const items = (store.items || []).filter((i) => i && String(i.message || '').trim());
 	const activeId =
 		store.activeId && items.some((i) => i.id === store.activeId)
 			? store.activeId
 			: null;
 	const next: AnnouncementsStore = { items, activeId };
-	await kv.put(KV_ANNOUNCEMENTS, JSON.stringify(next));
+	const payload = JSON.stringify(next);
+	try {
+		await kv.put(KV_ANNOUNCEMENTS, payload);
+	} catch (e) {
+		throw new Error(
+			`kv.put(${KV_ANNOUNCEMENTS}) failed: ${e instanceof Error ? e.message : String(e)}`
+		);
+	}
 
 	const active = activeId ? items.find((i) => i.id === activeId) : null;
 	const legacy: Announcement = active
@@ -136,7 +143,13 @@ export async function saveAnnouncementsStore(
 				updatedAt: active.updatedAt
 			}
 		: { enabled: false, message: '', level: 'info' };
-	await kv.put(KV_ANNOUNCEMENT_LEGACY, JSON.stringify(legacy));
+	try {
+		await kv.put(KV_ANNOUNCEMENT_LEGACY, JSON.stringify(legacy));
+	} catch (e) {
+		throw new Error(
+			`kv.put(${KV_ANNOUNCEMENT_LEGACY}) failed: ${e instanceof Error ? e.message : String(e)}`
+		);
+	}
 
 	return next;
 }
@@ -156,6 +169,7 @@ export async function getActiveAnnouncement(
 	};
 }
 
+/** Public list for banner: newest first, capped. Includes active highlight. */
 export async function getPublicAnnouncements(
 	kv?: KVNamespace | null,
 	limit = 30
