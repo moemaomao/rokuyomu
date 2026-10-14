@@ -127,7 +127,6 @@ export async function saveAnnouncementsStore(
 	const next: AnnouncementsStore = { items, activeId };
 	await kv.put(KV_ANNOUNCEMENTS, JSON.stringify(next));
 
-	// Keep legacy key in sync for older readers
 	const active = activeId ? items.find((i) => i.id === activeId) : null;
 	const legacy: Announcement = active
 		? {
@@ -154,6 +153,22 @@ export async function getActiveAnnouncement(
 		message: item.message,
 		level: item.level,
 		updatedAt: item.updatedAt
+	};
+}
+
+export async function getPublicAnnouncements(
+	kv?: KVNamespace | null,
+	limit = 30
+): Promise<{ items: AnnouncementItem[]; activeId: string | null }> {
+	const store = await getAnnouncementsStore(kv);
+	const items = [...store.items].sort((a, b) => {
+		const ta = Date.parse(b.updatedAt || b.createdAt || '') || 0;
+		const tb = Date.parse(a.updatedAt || a.createdAt || '') || 0;
+		return ta - tb;
+	});
+	return {
+		items: items.slice(0, Math.max(1, limit)),
+		activeId: store.activeId
 	};
 }
 
