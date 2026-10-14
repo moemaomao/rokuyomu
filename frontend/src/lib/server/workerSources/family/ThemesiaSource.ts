@@ -58,7 +58,8 @@ export abstract class ThemesiaSource extends BaseSource {
 	protected parseChapterNumber(text: string, path = ''): number {
 		const fromPath =
 			path.match(/(?:chapter|chap|ch)[-_.\s]*(\d+)(?:[.-](\d+))?/i) ||
-			path.match(/-chapter-(\d+)(?:[.-](\d+))?/i);
+			path.match(/-chapter-(\d+)(?:[.-](\d+))?(?:-end)?/i) ||
+			path.match(/-(\d+)(?:[.-](\d+))?(?:-end)?\/?$/i);
 		if (fromPath) {
 			const major = parseInt(fromPath[1], 10);
 			if (fromPath[2] != null && fromPath[2].length <= 2) {
@@ -66,6 +67,11 @@ export abstract class ThemesiaSource extends BaseSource {
 			}
 			return major;
 		}
+
+		const glued = String(text).match(
+			/(?:chapter|chap|ch\.?)\s*[.\-_:]?\s*(\d+(?:\.\d+)?)(?=[A-Za-zÀ-ÿ]|$)/i
+		);
+		if (glued) return parseFloat(glued[1]);
 		const m = String(text).match(/(?:chapter|chap|ch\.?)\s*[.\-_:]?\s*(\d+)(?:[.,](\d+))?/i);
 		if (m) {
 			if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
@@ -307,11 +313,22 @@ export abstract class ThemesiaSource extends BaseSource {
 
 		$(this.chapterListSelector).each((_, a) => {
 			const $a = $(a);
-			const href = $a.attr('href') || '';
+			const href = ($a.attr('href') || '').trim();
 			if (!href || href === '#' || href.includes('{{')) return;
+
+			if (
+				/safe\.komik\.one|pdf\.gilakomik|\/dl\/\?|drive\.google|mediafire|zippyshare|download/i.test(
+					href
+				)
+			) {
+				return;
+			}
 
 			const id = this.cleanId(href);
 			if (seen.has(id)) return;
+			if (/^https?:\/\//i.test(href) && !/-chapter-[\d.]+/i.test(id) && !/-ch-[\d.]+/i.test(id)) {
+				return;
+			}
 			seen.add(id);
 
 			const $li = $a.closest('li').length ? $a.closest('li') : $a.parent();
@@ -462,24 +479,52 @@ export abstract class ThemesiaSource extends BaseSource {
 
 		const push = (src?: string | null) => {
 			if (!src || src.startsWith('data:')) return;
-			const url = this.absUrl(src.split(/\s+/)[0]);
+			const url = this.absUrl(src.split(/\s+/)[0].split('?')[0]);
 			if (!url || seen.has(url)) return;
-			if (/logo|icon|avatar|emoji|spinner|loading|dummy/i.test(url)) return;
+			if (/logo|icon|avatar|emoji|spinner|loading|dummy|histats|yandex|1x1|pixel/i.test(url))
+				return;
 			seen.add(url);
 			pages.push(url);
 		};
 
-		const m = html.match(/ts_reader\.run\((\{[\s\S]*?\})\);/);
-		if (m?.[1]) {
-			try {
-				const data = JSON.parse(m[1]) as {
-					sources?: Array<{ images?: string[] }>;
-				};
-				for (const src of data.sources || []) {
-					for (const img of src.images || []) push(img);
+		const tsIdx = html.search(/ts_reader\.run\s*\(/i);
+		if (tsIdx >= 0) {
+			const start = html.indexOf('{', tsIdx);
+			if (start >= 0) {
+				let depth = 0;
+				let end = -1;
+				for (let i = start; i < html.length; i++) {
+					const ch = html[i];
+					if (ch === '{') depth++;
+					else if (ch === '}') {
+						depth--;
+						if (depth === 0) {
+							end = i;
+							break;
+						}
+					}
 				}
-			} catch {
-				/* fall through */
+				if (end > start) {
+					const raw = html.slice(start, end + 1);
+					try {
+						const data = JSON.parse(raw) as {
+							sources?: Array<{ images?: string[] }>;
+						};
+						for (const src of data.sources || []) {
+							for (const img of src.images || []) push(img);
+						}
+					} catch {
+						/* fall through to DOM */
+					}
+				}
+			}
+		}
+
+		if (pages.length === 0) {
+			const imgArr = html.matchAll(/"images"\s*:\s*\[([^\]]+)\]/g);
+			for (const m of imgArr) {
+				const urls = [...m[1].matchAll(/"(https?:[^"]+)"/g)].map((x) => x[1]);
+				for (const u of urls) push(u);
 			}
 		}
 
@@ -490,6 +535,7 @@ export abstract class ThemesiaSource extends BaseSource {
 				push(
 					$img.attr('data-src') ||
 						$img.attr('data-lazy-src') ||
+						$img.attr('data-original') ||
 						$img.attr('src')
 				);
 			});

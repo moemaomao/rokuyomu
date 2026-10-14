@@ -1,3 +1,15 @@
+/**
+ * BacaKomik (bacakomik.pics)
+ *
+ * FIXES (2026-10-14):
+ * - postCards: robust JSON.parse of escaped HTML card strings
+ * - list: merge 2 site pages per app page + homepage fallback
+ * - detail: chapterData is source of truth; chapter-id → series for history
+ * - chapter pages: prefer warungkomikcdn/gudangkomik, strip banners/ads
+ * - always set lang = 'id'
+ * - cleanId strips query strings
+ */
+
 import { BaseSource } from '../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../types-manga';
 import * as cheerio from 'cheerio';
@@ -28,7 +40,7 @@ export class BacaKomikSource extends BaseSource {
 			}
 		}
 		if (!id.startsWith('/')) id = `/${id}`;
-		return id.replace(/\/+$/, '') || '/';
+		return id.replace(/\/+$/, '').split('?')[0] || '/';
 	}
 
 	private parseChapterNumber(text: string): number {
@@ -74,7 +86,6 @@ export class BacaKomikSource extends BaseSource {
 			}
 			return max > 0 ? max : undefined;
 		} catch {
-
 			const nums = [...html.matchAll(/chapter[\s_-]*(\d+(?:\.\d+)?)/gi)].map((x) =>
 				parseFloat(x[1])
 			);
@@ -85,7 +96,9 @@ export class BacaKomikSource extends BaseSource {
 
 	private async fillLatestChapters(list: Manga[]): Promise<Manga[]> {
 		const need = list.filter((m) => m.latestChapter == null || m.latestChapter === 0);
-		if (!need.length) return list;
+		if (!need.length) {
+			return list.map((m) => ({ ...m, lang: this.LIST_LANG }));
+		}
 
 		const concurrency = 6;
 		const results = new Map<string, number>();
@@ -108,9 +121,7 @@ export class BacaKomikSource extends BaseSource {
 
 		return list.map((m) => {
 			const n = results.get(m.id);
-			if (n == null) {
-				return { ...m, lang: this.LIST_LANG };
-			}
+			if (n == null) return { ...m, lang: this.LIST_LANG };
 			return { ...m, latestChapter: n, lang: this.LIST_LANG };
 		});
 	}
@@ -119,7 +130,7 @@ export class BacaKomikSource extends BaseSource {
 		const m = html.match(/const\s+postCards\s*=\s*(\[[\s\S]*?\]);/);
 		if (!m) return [];
 		try {
-			const arr = JSON.parse(m[1].replace(/\\'/g, "'")) as string[];
+			const arr = JSON.parse(m[1]) as string[];
 			return Array.isArray(arr) ? arr : [];
 		} catch {
 			const parts: string[] = [];
@@ -127,7 +138,11 @@ export class BacaKomikSource extends BaseSource {
 			let x: RegExpExecArray | null;
 			while ((x = re.exec(m[1])) !== null) {
 				parts.push(
-					x[0].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\r/g, '')
+					x[0]
+						.replace(/\\"/g, '"')
+						.replace(/\\\//g, '/')
+						.replace(/\\n/g, '\n')
+						.replace(/\\r/g, '')
 				);
 			}
 			return parts;
@@ -157,10 +172,13 @@ export class BacaKomikSource extends BaseSource {
 		if (!title) return null;
 
 		const cover =
-			a.find('img').attr('src') || a.find('img').attr('data-src') || '';
+			a.find('img').attr('src') ||
+			a.find('img').attr('data-src') ||
+			a.find('img').attr('data-lazy-src') ||
+			'';
 		const typeText = a.find('.cpt-label').text() || a.attr('class') || '';
 		const statusText = a.find('.status-label').text() || '';
-		const status = /complete|finished|end/i.test(statusText)
+		const status = /complete|finished|end|tamat/i.test(statusText)
 			? 'Completed'
 			: 'Ongoing';
 
@@ -218,8 +236,7 @@ export class BacaKomikSource extends BaseSource {
 					$a.find('img').attr('data-src') ||
 					$a.closest('div, article').find('img').first().attr('src') ||
 					'';
-				const typeText =
-					$a.find('.cpt-label').text() || $a.attr('class') || '';
+				const typeText = $a.find('.cpt-label').text() || $a.attr('class') || '';
 				const statusText = $a.find('.status-label').text() || '';
 				const parentText = $a.parent().text();
 				const chFromCard = this.parseChapterNumber(
@@ -234,7 +251,7 @@ export class BacaKomikSource extends BaseSource {
 					title,
 					cover: this.absUrl((cover || '').split('?')[0]),
 					type: this.detectType(typeText),
-					status: /complete/i.test(statusText) ? 'Completed' : 'Ongoing',
+					status: /complete|tamat/i.test(statusText) ? 'Completed' : 'Ongoing',
 					lang: this.LIST_LANG,
 					...(chFromCard > 0 ? { latestChapter: chFromCard } : {})
 				});
@@ -283,7 +300,6 @@ export class BacaKomikSource extends BaseSource {
 				}
 			}
 
-			// homepage fallback
 			if (!merged.length && p <= 1) {
 				const home = await this.fetchListPage(`/`);
 				for (const m of home) {
@@ -295,7 +311,6 @@ export class BacaKomikSource extends BaseSource {
 			}
 
 			const filled = await this.fillLatestChapters(merged.slice(0, this.PER_PAGE));
-
 			console.log(
 				`[bacakomik] latest page=${p} → ${filled.length} (with ch=${filled.filter((x) => x.latestChapter).length})`
 			);
@@ -410,9 +425,9 @@ export class BacaKomikSource extends BaseSource {
 		}
 
 		let status = 'Ongoing';
-		const stM = bodyText.match(/Status\s*:\s*(Ongoing|Completed|Hiatus)/i);
+		const stM = bodyText.match(/Status\s*:\s*(Ongoing|Completed|Hiatus|Tamat)/i);
 		if (stM) {
-			status = /complete/i.test(stM[1]) ? 'Completed' : stM[1];
+			status = /complete|tamat/i.test(stM[1]) ? 'Completed' : stM[1];
 		}
 
 		const genres: string[] = [];
@@ -424,7 +439,7 @@ export class BacaKomikSource extends BaseSource {
 		});
 
 		let synopsis = '';
-		const sinM = bodyText.match(/Sinopsis\s*:\s*(.+?)(?:Dae Ho|Chapter|Favorit|$)/i);
+		const sinM = bodyText.match(/Sinopsis\s*:\s*(.+?)(?:Chapter|Favorit|Related|$)/i);
 		$('p').each((_, el) => {
 			const t = $(el).text().replace(/\s+/g, ' ').trim();
 			if (t.length > 80 && !synopsis && !/genre|author|status|alternatif/i.test(t)) {
@@ -486,7 +501,6 @@ export class BacaKomikSource extends BaseSource {
 		}
 
 		chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
-
 		const latestChapter = chapters[chapters.length - 1]?.number;
 
 		const description = [
@@ -509,7 +523,8 @@ export class BacaKomikSource extends BaseSource {
 			authors,
 			genres,
 			chapters,
-			latestChapter
+			latestChapter,
+			lang: this.LIST_LANG
 		};
 	}
 
@@ -528,16 +543,16 @@ export class BacaKomikSource extends BaseSource {
 
 			const pick = (src: string) => {
 				if (!src || src.startsWith('data:')) return;
-				src = this.absUrl(src.split('?')[0]);
+				src = this.absUrl(src.split('?')[0].split(/\s+/)[0]);
 				if (!/^https?:\/\//i.test(src)) return;
 
 				if (
-					/logo|icon|avatar|emoji|banner|\.gif$|ads|wp-content\/uploads\/2025\/10\/bacakomik|histats|yandex/i.test(
+					/logo|icon|avatar|emoji|banner|\.gif$|ads|histats|yandex|wp-content\/uploads\/2025\/10\/bacakomik|wp-content\/uploads\/2025\/10\/Untitled/i.test(
 						src
 					)
-				)
+				) {
 					return;
-
+				}
 				if (/r2\.dev\//i.test(src) && !/warungkomik|gudangkomik/i.test(src)) return;
 
 				if (seen.has(src)) return;
@@ -559,7 +574,7 @@ export class BacaKomikSource extends BaseSource {
 			});
 
 			const preferred = urls.filter((u) =>
-				/gudangkomik|warungkomikcdn|warungkomik/i.test(u)
+				/gudangkomik|warungkomikcdn|warungkomik|comicshelf/i.test(u)
 			);
 			const finalUrls = preferred.length ? preferred : urls;
 
