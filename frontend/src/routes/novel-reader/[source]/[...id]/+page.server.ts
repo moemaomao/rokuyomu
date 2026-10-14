@@ -14,15 +14,25 @@ function novelIdFromChapter(chapterId: string): string {
 		if (
 			/^(chapter|ch|episode|ep|bab)[-_.]?\d?/i.test(last) ||
 			/^\d+(\.\d+)?$/.test(last) ||
-			/[-_]chapter[-_]?\d+/i.test(last)
+			/[-_]chapter[-_]?\d+/i.test(last) ||
+			/^v\d+c\d+/i.test(last)
 		) {
 			return '/' + parts.slice(0, -1).join('/');
 		}
 	}
 
-	if (parts.length === 1 && /[-_]chapter[-_]?\d+/i.test(parts[0])) {
-		const slug = parts[0].replace(/[-_]chapter[-_]?\d+.*$/i, '');
-		if (slug) return `/series/${slug}`;
+	if (parts.length === 1) {
+		const seg = parts[0];
+		if (
+			/[-_]chapter[-_]?\d+/i.test(seg) ||
+			/[-_]ch[-_]?\d+/i.test(seg) ||
+			/[-_]v\d+c\d+/i.test(seg)
+		) {
+			const slug = seg
+				.replace(/[-_](?:chapter|ch)[-_]?\d+.*$/i, '')
+				.replace(/[-_]v\d+c\d+.*$/i, '');
+			if (slug) return `/series/${slug}`;
+		}
 	}
 
 	if (parts.length >= 2) return '/' + parts.slice(0, -1).join('/');

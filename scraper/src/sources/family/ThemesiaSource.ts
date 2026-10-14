@@ -603,15 +603,33 @@ export abstract class ThemesiaSource extends BaseSource {
 			`^${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+$`,
 			'i'
 		);
+		const chapterSlug = path
+			.replace(/^\/+/, '')
+			.replace(/[-_](?:chapter|ch|c)[-_]?\d+(?:\.\d+)?.*$/i, '')
+			.replace(/[-_]v\d+c\d+(?:\.\d+)?.*$/i, '');
+
 		$('a[href]').each((_, a) => {
 			if (novelId) return;
 			const id = this.cleanId($(a).attr('href') || '');
-			if (seriesRe.test(id)) novelId = id;
+			if (!seriesRe.test(id)) return;
+			if (chapterSlug && id.toLowerCase().includes(chapterSlug.toLowerCase())) {
+				novelId = id;
+			}
 		});
 		if (!novelId) {
-			const m = path.match(/^\/(.+?)[-_]chapter[-_]?\d+/i);
+			$('a[href]').each((_, a) => {
+				if (novelId) return;
+				const id = this.cleanId($(a).attr('href') || '');
+				if (seriesRe.test(id)) novelId = id;
+			});
+		}
+		if (!novelId) {
+			const m =
+				path.match(/^\/(.+?)[-_](?:chapter|ch)[-_]?\d+/i) ||
+				path.match(/^\/(.+?)[-_]v\d+c\d+/i) ||
+				path.match(/^\/(.+?)[-_]c\d+/i);
 			if (m?.[1]) {
-				novelId = `${this.seriesPath}/${m[1]}`.replace(/\/+/g, '/');
+				novelId = `${this.seriesPath}/${m[1]}`.replace(/\/{2,}/g, '/');
 				if (!novelId.startsWith('/')) novelId = `/${novelId}`;
 			}
 		}
