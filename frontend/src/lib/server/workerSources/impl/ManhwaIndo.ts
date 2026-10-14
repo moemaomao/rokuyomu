@@ -8,7 +8,10 @@
  * - Chapters API : /wp-json/agc/v1/chapters?series={postId}
  * - Chapter pages: /{slug}-chapter-{n}/  (img @ imgx-id.gmbr.pro)
  *
- * This file is for: scraper/src/sources/impl/manga/ManhwaIndo.ts
+ * This file is for: frontend/src/lib/server/workerSources/impl/ManhwaIndo.ts
+ * manhwaindo is in WORKER_SOURCE_IDS — live site uses THIS file, not scraper.
+ *
+ * Scraper copy needs: ../../family/ThemesiaSource & ../../types-manga
  */
 
 import * as cheerio from 'cheerio';
@@ -262,6 +265,7 @@ export class ManhwaIndoSource extends ThemesiaSource {
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		let path = this.cleanId(mangaId);
 
+		// Chapter URL → series path
 		if (/-chapter-[\d.]+/i.test(path) && !path.startsWith('/series/')) {
 			const slug = path
 				.replace(/^\//, '')
@@ -349,64 +353,90 @@ export class ManhwaIndoSource extends ThemesiaSource {
 
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		const path = this.cleanId(chapterId);
-		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
-		const $ = cheerio.load(html);
+		const candidates = [
+			path.endsWith('/') ? path : `${path}/`,
+			path.replace(/\/+$/, '')
+		];
+
+		let html = '';
+		let lastErr: unknown;
+		for (const p of candidates) {
+			try {
+				html = await this.fetchHtml(p);
+				if (html && html.length > 2000) break;
+			} catch (e) {
+				lastErr = e;
+			}
+		}
+		if (!html || html.length < 500) {
+			console.error('[manhwaindo] getChapterPages empty html', path, lastErr);
+			return [];
+		}
+
 		const out: string[] = [];
 		const seen = new Set<string>();
 
-		const push = (raw: string) => {
-			let src = (raw || '').trim().split(/\s+/)[0];
-			if (!src || src.startsWith('data:')) return;
+		const normalize = (raw: string): string => {
+			let src = (raw || '').trim().split(/\s+/)[0].replace(/^['"]|['"]$/g, '');
+			if (!src || src.startsWith('data:')) return '';
 			if (src.startsWith('//')) src = `https:${src}`;
-			if (src.startsWith('http://')) src = src.replace(/^http:\/\//i, 'https://');
-			src = this.absUrl(src);
-			if (!src || seen.has(src)) return;
-			if (/logo|icon|avatar|emoji|spinner|histats|yandex|banner|iklan|ads?|gif$/i.test(src))
-				return;
-			if (
-				!/imgx|gmbr\.pro|manga-images|uploads\/manga|chapter-\d+/i.test(src) &&
-				out.length > 0
-			) {
-				return;
-			}
-			seen.add(src);
-			out.push(src);
+			if (src.startsWith('http://')) src = 'https://' + src.slice(7);
+			if (!src.startsWith('http')) src = this.absUrl(src);
+			return src;
 		};
 
-		$('img').each((_, img) => {
-			const $img = $(img);
-			const alt = ($img.attr('alt') || '').toLowerCase();
-			const src =
-				$img.attr('data-src') ||
-				$img.attr('data-lazy-src') ||
-				$img.attr('src') ||
-				'';
-			if (/chapter\s*\d+/i.test(alt) || /manga-images|chapter-\d+/i.test(src)) {
-				push(src);
-			}
-		});
+		const accept = (src: string): boolean => {
+			if (!src || seen.has(src)) return false;
+			if (/logo|icon|avatar|emoji|spinner|histats|yandex|banner|iklan|ads?|\.gif$/i.test(src))
+				return false;
+			if (/thumbnail\.(jpg|jpeg|png|webp)/i.test(src)) return false;
+			// Must be manga CDN / chapter page image
+			if (!/imgx[^/]*\.gmbr\.pro|gmbr\.pro\/uploads\/manga|manga-images\/.+\/chapter-/i.test(src))
+				return false;
+			return true;
+		};
 
-		if (out.length) return out;
-
-		$('img').each((_, img) => {
-			const $img = $(img);
-			const src =
-				$img.attr('data-src') ||
-				$img.attr('data-lazy-src') ||
-				$img.attr('src') ||
-				'';
-			if (/imgx|gmbr\.pro\/uploads\/manga/i.test(src)) push(src);
-		});
-
-		if (out.length) return out;
-
-		try {
-			const parentPages = await super.getChapterPages(path);
-			if (parentPages.length) return parentPages;
-		} catch {
-			/* ignore */
+		const re =
+			/(?:data-src|data-lazy-src|src)\s*=\s*['"]([^'"]+)['"]/gi;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(html)) !== null) {
+			const src = normalize(m[1]);
+			if (!accept(src)) continue;
+			seen.add(src);
+			out.push(src);
 		}
 
-		return out;
+		if (out.length) {
+			out.sort((a, b) => {
+				const na = parseInt(a.match(/\/(\d+)\.(?:webp|jpg|jpeg|png)/i)?.[1] || '0', 10);
+				const nb = parseInt(b.match(/\/(\d+)\.(?:webp|jpg|jpeg|png)/i)?.[1] || '0', 10);
+				return na - nb;
+			});
+			console.log(`[manhwaindo] getChapterPages ${path} → ${out.length} (regex)`);
+			return out;
+		}
+
+		// 2) Cheerio fallback
+		const $ = cheerio.load(html);
+		$('img').each((_, img) => {
+			const $img = $(img);
+			const src = normalize(
+				$img.attr('data-src') ||
+					$img.attr('data-lazy-src') ||
+					$img.attr('src') ||
+					''
+			);
+			if (!accept(src)) return;
+			seen.add(src);
+			out.push(src);
+		});
+
+		if (out.length) {
+			console.log(`[manhwaindo] getChapterPages ${path} → ${out.length} (dom)`);
+			return out;
+		}
+
+		console.error('[manhwaindo] getChapterPages no images', path, 'htmlLen=', html.length);
+		return [];
 	}
 }
