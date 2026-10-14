@@ -30,8 +30,6 @@ const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	bacakomik: '/manga',
 	holodek: '/manga',
 	lumos: '/manga',
-	luvyaa: '/manga',
-	crotpedia: '/manga'
 };
 
 const NEEDS_REMOTE_MANGA_RESOLVE = new Set([
