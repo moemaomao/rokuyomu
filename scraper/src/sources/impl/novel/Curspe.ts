@@ -2,16 +2,17 @@
  * Curspe — https://curspe.com/
  * Novel translations (WordPress custom theme)
  *
- * List   : /novels/  |  /novels/?pg={n}     → article.jarc-card (24/page)
- * Search : /?s=QUERY                        → dedupe link /novels/{slug}/
+ * List   : Homepage section.jshow-updates → article.jshow-update (Latest Updates)
+ *          /novels/?pg={n} fallback (archive cards)
+ * Search : /?s=QUERY
  * Detail : /novels/{slug}/
  * Chapter: /novels/{slug}/chapter-…/  (also prologue-…)
  * Content: .chapter-content / .prose
  * Nav    : a.jrb-nav-link / "Previous Chapter" / "Next Chapter"
  *
- * ID format:
+ * ID format (penting untuk history / tandai sudah dibaca):
  *   novel   : /novels/{slug}
- *   chapter : /novels/{slug}/{chapter-slug}
+ *   chapter : /novels/{slug}/{chapter-slug}   ← selalu tanpa trailing slash
  *
  * Bahasa default: English
  *
@@ -26,6 +27,12 @@ import type { Chapter, Manga, MangaDetails } from '../../types-manga';
 const BASE = 'https://curspe.com';
 const PER_PAGE = 24;
 
+function toAsciiDigits(s: string): string {
+	return String(s || '').replace(/[０-９]/g, (ch) =>
+		String.fromCharCode(ch.charCodeAt(0) - 0xfee0)
+	);
+}
+
 function absUrl(href: string | undefined): string {
 	if (!href) return '';
 	if (href.startsWith('//')) return `https:${href}`;
@@ -38,11 +45,24 @@ function absUrl(href: string | undefined): string {
 }
 
 function pathOnly(href: string): string {
+	if (!href) return '';
 	try {
-		const u = new URL(href.startsWith('http') ? href : absUrl(href));
-		return u.pathname.replace(/\/+$/, '') || '/';
+		const raw = href.startsWith('http') ? href : absUrl(href);
+		const u = new URL(raw);
+		let p = decodeURIComponent(u.pathname);
+		p = p.replace(/\/+$/, '') || '/';
+		if (!p.startsWith('/')) p = '/' + p;
+		return p;
 	} catch {
-		return href.startsWith('/') ? href.replace(/\/+$/, '') || '/' : `/${href}`;
+		let p = href.split('?')[0].split('#')[0];
+		try {
+			p = decodeURIComponent(p);
+		} catch {
+			/* ignore */
+		}
+		p = p.replace(/\/+$/, '') || '/';
+		if (!p.startsWith('/')) p = '/' + p;
+		return p;
 	}
 }
 
@@ -55,26 +75,32 @@ function escapeHtml(s: string): string {
 }
 
 function parseChapterNumber(text: string, path = '', fallback = 0): number {
+	const t = toAsciiDigits(text);
+	const p = toAsciiDigits(path);
+
 	const fromPath =
-		path.match(/\/chapter-(\d+)(?:[.-](\d+))?/i) ||
-		path.match(/\/ch-?(\d+)(?:[.-](\d+))?/i) ||
-		path.match(/-chapter-(\d+)(?:[.-](\d+))?/i);
+		p.match(/\/chapter-(\d+)(?:[.-](\d+))?/i) ||
+		p.match(/\/ch-?(\d+)(?:[.-](\d+))?/i) ||
+		p.match(/-chapter-(\d+)(?:[.-](\d+))?/i) ||
+		p.match(/\/prologue-?(\d+)?/i);
+
 	if (fromPath) {
+		if (/prologue/i.test(p)) return 0;
 		const major = parseInt(fromPath[1], 10);
 		if (fromPath[2] != null) return parseFloat(`${major}.${fromPath[2]}`);
 		return major;
 	}
 
 	const m =
-		String(text).match(/(?:chapter|ch\.?)\s*(\d+)(?:[.,](\d+))?/i) ||
-		String(text).match(/\b(\d+(?:\.\d+)?)\b/);
+		t.match(/(?:chapter|ch\.?)\s*(\d+)(?:[.,](\d+))?/i) ||
+		t.match(/\b(\d+(?:\.\d+)?)\b/);
 	if (m) {
 		if (m[2] != null) return parseFloat(`${m[1]}.${m[2]}`);
 		return parseFloat(m[1]);
 	}
 
-	if (/prologue/i.test(path + text)) return 0;
-	if (/epilogue/i.test(path + text)) return 99999;
+	if (/prologue/i.test(p + t)) return 0;
+	if (/epilogue/i.test(p + t)) return 99999;
 	return fallback;
 }
 
@@ -87,6 +113,11 @@ function isChapterPath(path: string): boolean {
 		/^\/novels\/[^/]+\/.+/i.test(path) &&
 		(/chapter|prologue|epilogue|extra|side/i.test(path) || path.split('/').length >= 4)
 	);
+}
+
+function seriesIdFromChapter(chapterPath: string): string {
+	const m = pathOnly(chapterPath).match(/^(\/novels\/[^/]+)/i);
+	return m ? m[1] : '';
 }
 
 export class CurspeSource extends BaseSource {
@@ -109,13 +140,24 @@ export class CurspeSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		const p = Math.max(1, Number(page) || 1);
-		const path = p <= 1 ? '/novels/' : `/novels/?pg=${p}`;
 
 		try {
+			if (p === 1) {
+				const html = await this.fetchHtml('/');
+				const $ = cheerio.load(html);
+				const list = this.parseLatestUpdates($);
+				if (list.length) {
+					console.log(`[curspe] latest (homepage updates) → ${list.length}`);
+					return list.slice(0, PER_PAGE);
+				}
+				// fallback kalau selector berubah
+			}
+
+			const path = p <= 1 ? '/novels/' : `/novels/?pg=${p}`;
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
 			const list = this.parseArchiveCards($);
-			console.log(`[curspe] latest page=${p} → ${list.length}`);
+			console.log(`[curspe] latest page=${p} (archive) → ${list.length}`);
 			return list.slice(0, PER_PAGE);
 		} catch (e) {
 			console.error('[curspe] getLatestManga', e);
@@ -147,14 +189,12 @@ export class CurspeSource extends BaseSource {
 				const id = pathOnly(href);
 				if (!isNovelSeriesPath(id) || seen.has(id)) return;
 
-				let title = ($(a).attr('title') || $(a).text() || '')
+				let title = ($(a).attr('title') || $(a).attr('aria-label') || $(a).text() || '')
 					.replace(/\s+/g, ' ')
 					.trim();
 				if (!title || title.length < 2) return;
 				if (/^(from|home|novels?)$/i.test(title)) return;
-				if (/^chapter\s+\d+/i.test(title)) {
-					return;
-				}
+				if (/^chapter\s+\d+/i.test(title)) return;
 
 				seen.add(id);
 				list.push({
@@ -203,13 +243,13 @@ export class CurspeSource extends BaseSource {
 		let path = pathOnly(mangaId);
 
 		if (isChapterPath(path)) {
-			const m = path.match(/^(\/novels\/[^/]+)/i);
-			if (m) path = m[1];
+			const series = seriesIdFromChapter(path);
+			if (series) path = series;
 		}
 		if (!path.startsWith('/novels/')) {
 			path = `/novels/${path.replace(/^\//, '')}`;
 		}
-		path = path.replace(/\/+$/, '');
+		path = pathOnly(path);
 
 		const html = await this.fetchHtml(path + '/');
 		const $ = cheerio.load(html);
@@ -292,6 +332,11 @@ export class CurspeSource extends BaseSource {
 			else if (/hiatus/i.test(tagStatus)) status = 'Hiatus';
 		}
 
+		const completedBadge = $('.wn-status-badge, [class*="completed"]')
+			.text()
+			.toLowerCase();
+		if (/completed|complete|tamat/.test(completedBadge)) status = 'Completed';
+
 		const genres: string[] = [];
 		$('a.wn-genre, .wn-genre a, a[href*="/genre/"]').each((_, a) => {
 			const g = $(a).text().replace(/\s+/g, ' ').trim();
@@ -313,7 +358,7 @@ export class CurspeSource extends BaseSource {
 		}
 
 		const chapters = this.parseChapterList($);
-		chapters.sort((a, b) => a.number - b.number);
+		chapters.sort((a, b) => a.number - b.number || a.id.localeCompare(b.id));
 
 		const details: MangaDetails & {
 			artists?: string[];
@@ -355,13 +400,13 @@ export class CurspeSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-		const path = pathOnly(chapterId.startsWith('/') ? chapterId : `/${chapterId}`);
+		const path = pathOnly(chapterId);
 		const html = await this.fetchHtml(path.endsWith('/') ? path : `${path}/`);
 		const $ = cheerio.load(html);
 
 		const rawTitle =
 			$('.chapter-content h1').first().text().replace(/\s+/g, ' ').trim() ||
-			$('h1').first().text().replace(/\s+/g, ' ').trim() ||
+			$('h1.entry-title, h1.wn-title, h1').first().text().replace(/\s+/g, ' ').trim() ||
 			$('title').text().split(/[-–—|]/)[0].trim() ||
 			'Chapter';
 
@@ -387,7 +432,7 @@ export class CurspeSource extends BaseSource {
 			const clone = container.clone();
 			clone
 				.find(
-					'script, style, iframe, nav, .ads, .ad, .jrb-nav, .chapter-nav, .comments, button, form'
+					'script, style, iframe, nav, .ads, .ad, .jrb-nav, .chapter-nav, .comments, button, form, .share, .related'
 				)
 				.remove();
 
@@ -396,7 +441,7 @@ export class CurspeSource extends BaseSource {
 			clone.find('p').each((_, p) => {
 				const t = $(p).text().replace(/\s+/g, ' ').trim();
 				if (!t) return;
-				if (/curspe\.com|login required|buy full novel|cloudflare/i.test(t)) return;
+				if (/curspe\.com|login required|buy full novel|cloudflare|support us/i.test(t)) return;
 				parts.push(`<p>${escapeHtml(t)}</p>`);
 			});
 
@@ -409,7 +454,7 @@ export class CurspeSource extends BaseSource {
 			}
 		}
 
-		let prevHref =
+		const prevHref =
 			$('a.jrb-nav-link')
 				.filter((_, el) => /prev/i.test($(el).text()))
 				.first()
@@ -424,7 +469,7 @@ export class CurspeSource extends BaseSource {
 				.attr('href') ||
 			'';
 
-		let nextHref =
+		const nextHref =
 			$('a.jrb-nav-link')
 				.filter((_, el) => /next/i.test($(el).text()))
 				.first()
@@ -439,10 +484,11 @@ export class CurspeSource extends BaseSource {
 				.attr('href') ||
 			'';
 
-		const seriesPrefix = path.match(/^(\/novels\/[^/]+)/i)?.[1] || '';
+		const seriesPrefix = seriesIdFromChapter(path);
 		const sanitizeNav = (href: string): string | null => {
 			if (!href) return null;
 			const id = pathOnly(href);
+			if (!id || id === path) return null;
 			if (seriesPrefix && !id.startsWith(seriesPrefix)) return null;
 			if (!isChapterPath(id) && !/\/novels\/[^/]+\/(prologue|epilogue)/i.test(id)) {
 				if (!/^\/novels\/[^/]+\//i.test(id)) return null;
@@ -462,6 +508,77 @@ export class CurspeSource extends BaseSource {
 
 	// ── Parsers ──────────────────────────────────────────────────────────────
 
+	private parseLatestUpdates($: cheerio.CheerioAPI): Manga[] {
+		const out: Manga[] = [];
+		const seen = new Set<string>();
+
+		const $scope =
+			$('section.jshow-updates').length > 0
+				? $('section.jshow-updates')
+				: $('section.jshow-section').filter((_, el) =>
+						/latest\s*updates/i.test($(el).find('h2,h3').first().text())
+					);
+
+		$scope.find('article.jshow-update').each((_, el) => {
+			const $el = $(el);
+
+			const a =
+				$el.find('a.jshow-update-title[href*="/novels/"]').first().length > 0
+					? $el.find('a.jshow-update-title[href*="/novels/"]').first()
+					: $el.find('a.jshow-update-cover[href*="/novels/"]').first().length > 0
+						? $el.find('a.jshow-update-cover[href*="/novels/"]').first()
+						: $el.find('a[href*="/novels/"]').filter((__, link) =>
+								isNovelSeriesPath(pathOnly($(link).attr('href') || ''))
+							).first();
+
+			const href = a.attr('href') || '';
+			const id = pathOnly(href);
+			if (!isNovelSeriesPath(id) || seen.has(id)) return;
+			seen.add(id);
+
+			const title = (
+				a.attr('aria-label') ||
+				a.attr('title') ||
+				$el.find('.jshow-update-title').text() ||
+				a.text() ||
+				''
+			)
+				.replace(/\s+/g, ' ')
+				.trim();
+			if (!title) return;
+
+			let cover =
+				$el.find('.jshow-update-cover img').attr('src') ||
+				$el.find('img').attr('data-src') ||
+				$el.find('img').attr('src') ||
+				'';
+			cover = absUrl((cover || '').split('?')[0]);
+
+			let latestChapter: number | undefined;
+			$el.find('a.jshow-ch-link, .jshow-ch-label').each((__, ch) => {
+				const t = toAsciiDigits($(ch).text());
+				const m = t.match(/(?:ch\.?|chapter)\s*(\d+)/i) || t.match(/\b(\d+)\b/);
+				if (m) {
+					const n = parseInt(m[1], 10);
+					if (!latestChapter || n > latestChapter) latestChapter = n;
+				}
+			});
+
+			out.push({
+				id,
+				sourceId: this.id,
+				title,
+				cover,
+				type: 'novel',
+				status: 'Ongoing',
+				latestChapter,
+				lang: 'en'
+			});
+		});
+
+		return out;
+	}
+
 	private parseArchiveCards($: cheerio.CheerioAPI): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();
@@ -480,7 +597,13 @@ export class CurspeSource extends BaseSource {
 			if (!isNovelSeriesPath(id) || seen.has(id)) return;
 			seen.add(id);
 
-			const title = (a.text() || a.attr('aria-label') || a.attr('title') || '')
+			const title = (
+				a.attr('aria-label') ||
+				a.attr('title') ||
+				$el.find('.jarc-name').text() ||
+				a.text() ||
+				''
+			)
 				.replace(/\s+/g, ' ')
 				.trim();
 			if (!title) return;
@@ -496,10 +619,11 @@ export class CurspeSource extends BaseSource {
 			const statusTag = $el.find('.jarc-tag-status').text().replace(/\s+/g, ' ').trim();
 			if (/complete/i.test(statusTag)) status = 'Completed';
 			else if (/hiatus/i.test(statusTag)) status = 'Hiatus';
+			else if (/translat/i.test(statusTag)) status = 'Ongoing';
 
 			let latestChapter: number | undefined;
 			$el.find('.jarc-tag').each((__, tag) => {
-				const t = $(tag).text();
+				const t = toAsciiDigits($(tag).text());
 				const m = t.match(/(\d+)\s*chapters?/i);
 				if (m) latestChapter = parseInt(m[1], 10);
 			});
@@ -524,8 +648,9 @@ export class CurspeSource extends BaseSource {
 		const seen = new Set<string>();
 
 		$('a.wn-chapter-item, .wn-chapter-item').each((i, el) => {
-			const $a = $(el).is('a') ? $(el) : $(el).find('a').first();
-			const href = $a.attr('href') || $(el).attr('href') || '';
+			const $el = $(el);
+			const $a = $el.is('a') ? $el : $el.find('a').first();
+			const href = $a.attr('href') || $el.attr('href') || '';
 			if (!href) return;
 
 			const id = pathOnly(href);
@@ -534,12 +659,12 @@ export class CurspeSource extends BaseSource {
 			seen.add(id);
 
 			const rawTitle =
-				$(el).attr('data-title') ||
-				$(el).find('.wn-chapter-title').text() ||
+				$el.attr('data-title') ||
+				$el.find('.wn-chapter-title').text() ||
 				$a.attr('title') ||
 				$a.text() ||
 				'';
-			const cleanRaw = rawTitle.replace(/\s+/g, ' ').trim();
+			const cleanRaw = toAsciiDigits(rawTitle).replace(/\s+/g, ' ').trim();
 			const number = parseChapterNumber(cleanRaw, id, i + 1);
 
 			let title: string;
@@ -554,17 +679,17 @@ export class CurspeSource extends BaseSource {
 			}
 
 			const date =
-				$(el)
-					.find('.wn-chapter-meta span')
+				$el
+					.find('.wn-chapter-meta span, .wn-chapter-date, time')
 					.first()
 					.text()
 					.replace(/\s+/g, ' ')
 					.trim() || '';
 
 			const locked =
-				$(el).attr('data-locked') === '1' ||
-				$(el).hasClass('locked') ||
-				$(el).find('.wn-chapter-lock').length > 0;
+				$el.attr('data-locked') === '1' ||
+				$el.hasClass('locked') ||
+				$el.find('.wn-chapter-lock, .lock, [class*="lock"]').length > 0;
 
 			const ch: Chapter & { isLocked?: boolean } = {
 				id,
@@ -577,12 +702,12 @@ export class CurspeSource extends BaseSource {
 		});
 
 		if (!out.length) {
-			$('a[href*="/novels/"][href*="chapter"]').each((i, a) => {
+			$('a[href*="/novels/"]').each((i, a) => {
 				const href = $(a).attr('href') || '';
 				const id = pathOnly(href);
 				if (seen.has(id) || !isChapterPath(id)) return;
 				seen.add(id);
-				const raw = ($(a).text() || '').replace(/\s+/g, ' ').trim();
+				const raw = toAsciiDigits($(a).text() || '').replace(/\s+/g, ' ').trim();
 				const number = parseChapterNumber(raw, id, i + 1);
 				out.push({
 					id,
