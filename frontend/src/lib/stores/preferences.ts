@@ -170,6 +170,22 @@ export function applyThemeFromPreferences(theme?: ThemeMode): boolean {
 	localStorage.setItem('darkMode', String(dark));
 	localStorage.setItem('rokuyomu_theme', resolved);
 
+	try {
+		const accent =
+			getComputedStyle(document.documentElement)
+				.getPropertyValue('--accent')
+				.trim() || (dark ? '#09090b' : '#7c3aed');
+		let meta = document.querySelector('meta[name="theme-color"]');
+		if (!meta) {
+			meta = document.createElement('meta');
+			meta.setAttribute('name', 'theme-color');
+			document.head.appendChild(meta);
+		}
+		meta.setAttribute('content', accent);
+	} catch {
+		/* ignore */
+	}
+
 	return dark;
 }
 
