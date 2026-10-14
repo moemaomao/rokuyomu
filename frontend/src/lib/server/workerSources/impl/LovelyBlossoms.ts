@@ -24,7 +24,7 @@ export class LovelyBlossomsSource extends MadaraNovelSource {
 
 	protected listPath(page: number): string {
 		const p = Math.max(1, page || 1);
-		if (p <= 1) return `/`;
+		if (p <= 1) return `${this.seriesPath}/?m_orderby=${this.listOrderby}`;
 		return `${this.seriesPath}/page/${p}/?m_orderby=${this.listOrderby}`;
 	}
 

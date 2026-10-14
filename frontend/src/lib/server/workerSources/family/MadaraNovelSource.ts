@@ -12,13 +12,16 @@
 
 import * as cheerio from 'cheerio';
 import { MadaraSource } from './MadaraSource';
-import type { Manga, MangaDetails } from '../types-manga';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
 export abstract class MadaraNovelSource extends MadaraSource {
 	protected contentType: 'novel' = 'novel';
 	protected mergeHomeOnPage1 = true;
 	protected contentSelector =
 		'.reading-content .text-left, .reading-content, .text-left, .entry-content, .epcontent, #readerarea';
+
+	protected cardSelector =
+		'.page-item-detail, .manga, .c-tabs-item__content, .badge-pos-1, li.mrm-r-item, .mrm-r-item, .bs, .listupd .bs, .slider__item, .page-listing-item .page-item-detail, .lb-library-item';
 
 	protected mapType(_raw?: string): string {
 		return this.contentType;
@@ -41,13 +44,144 @@ export abstract class MadaraNovelSource extends MadaraSource {
 	}
 
 	protected parseCards($: cheerio.CheerioAPI): Manga[] {
-		return super.parseCards($).map((m) => ({ ...m, type: this.contentType }));
+		const res: Manga[] = [];
+		const seen = new Set<string>();
+		const seriesRe = new RegExp(
+			`${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+\\/?$`
+		);
+
+		$(this.cardSelector).each((_, card) => {
+			const $card = $(card);
+			let $a = $card
+				.find(`a[href*="${this.seriesPath}/"]`)
+				.filter((_, el) => {
+					const h = ($(el).attr('href') || '').split('?')[0];
+					return seriesRe.test(h.replace(this.baseUrl, ''));
+				})
+				.first();
+
+			if (!$a.length) {
+				$a = $card
+					.find(
+						'.post-title a, h3 a, h5 a, a.mrm-r-item__link, a.lb-title-link, .lb-title a'
+					)
+					.filter((_, el) => {
+						const h = ($(el).attr('href') || '').split('?')[0];
+						return (
+							seriesRe.test(h.replace(this.baseUrl, '')) ||
+							new RegExp(
+								`${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+`,
+								'i'
+							).test(h)
+						);
+					})
+					.first();
+			}
+
+			const href = $a.attr('href') || '';
+			if (!href) return;
+
+			const id = this.cleanId(href);
+			if (seen.has(id) || /\/(page|genre|tag|author)\//i.test(id)) return;
+			seen.add(id);
+
+			const title = this.normalizeTitle(
+				$a.attr('title') ||
+					$card
+						.find(
+							'.mrm-r-item__title, .post-title a, .post-title, h3 a, h3, h5 a, h5, .tt, .lb-title a, .lb-title'
+						)
+						.first()
+						.text() ||
+					$a.text() ||
+					$card.find('img').attr('alt') ||
+					'',
+				this.name
+			);
+			if (!title) return;
+
+			const $img = $card.find('img').first();
+			let cover =
+				$img.attr('data-src') ||
+				$img.attr('data-lazy-src') ||
+				$img.attr('src') ||
+				'';
+			if (cover.startsWith('data:')) cover = '';
+			cover = this.preferFullCover(this.absUrl(cover));
+
+			let latestChapter: string | undefined;
+			const chTexts = $card
+				.find(
+					[
+						'.chapter-item a',
+						'.list-chapter a',
+						'.font-meta.chapter a',
+						'.chapter.font-meta a',
+						'span.chapter a',
+						'.chapter a',
+						'.lb-chapter-list a',
+						'a.btn-link',
+						'a[href*="/chapter"]',
+						'.mrm-r-item__chapter',
+						'.epxs',
+						'.epx'
+					].join(', ')
+				)
+				.map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+				.get()
+				.filter((t) => t.length > 0);
+
+			for (const chText of chTexts) {
+				const n = this.parseChapterNumber(chText);
+				if (n > 0) {
+					latestChapter = String(n);
+					break;
+				}
+			}
+
+			if (!latestChapter) {
+				const meta = $card
+					.find(
+						'.list-chapter, .lb-chapter-list, .chapter-item, .item-summary .list-chapter'
+					)
+					.first()
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim();
+				const n = this.parseChapterNumber(meta);
+				if (n > 0) latestChapter = String(n);
+			}
+
+			res.push({
+				id,
+				title,
+				cover,
+				sourceId: this.id,
+				type: this.contentType,
+				status: 'Ongoing',
+				latestChapter,
+				lang: this.defaultLang
+			});
+		});
+
+		return res;
+	}
+
+	protected parseChapterList($: cheerio.CheerioAPI): Chapter[] {
+		return super.parseChapterList($).map(({ lang: _lang, ...ch }) => ch);
 	}
 
 	async getLatestManga(page: number): Promise<Manga[]> {
 		try {
 			const p = Math.max(1, Number(page) || 1);
-			let list = await this.fetchCatalogPages((sp) => this.listPath(sp), p);
+			let list: Manga[] = [];
+
+			try {
+				list = await this.fetchCatalogPages((sp) => this.listPath(sp), p);
+			} catch (e) {
+				console.warn(`[${this.id}] listPath failed page=${p}`, e);
+				list = [];
+			}
 
 			if (this.mergeHomeOnPage1 && p === 1 && list.length < this.perPage) {
 				try {
@@ -59,6 +193,16 @@ export abstract class MadaraNovelSource extends MadaraSource {
 						list.push(m);
 						if (list.length >= this.perPage) break;
 					}
+				} catch (e) {
+					console.warn(`[${this.id}] homepage merge failed`, e);
+				}
+			}
+
+			if (list.length === 0 && p === 1) {
+				try {
+					list = this.parseCards(
+						cheerio.load(await this.fetchHtml(`${this.seriesPath}/`))
+					);
 				} catch {
 					/* ignore */
 				}
@@ -74,7 +218,8 @@ export abstract class MadaraNovelSource extends MadaraSource {
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		const details = await super.getMangaDetails(mangaId);
-		return { ...details, type: this.contentType };
+		const chapters = (details.chapters || []).map(({ lang: _lang, ...ch }) => ch);
+		return { ...details, type: this.contentType, chapters };
 	}
 
 	async getChapterContent(chapterId: string): Promise<{
@@ -194,10 +339,10 @@ export abstract class MadaraNovelSource extends MadaraSource {
 		if (!Number.isFinite(n) || n <= 0) return { prev: null, next: null };
 		const prevN = n > 1 ? (Number.isInteger(n) ? n - 1 : Math.floor(n)) : null;
 		const nextN = Number.isInteger(n) ? n + 1 : Math.ceil(n);
-		const prefix = m[1].endsWith('chapter-') || m[1].endsWith('chapter_')
-			? m[1]
-			: `${m[1]}chapter-`;
-		// Re-match with chapter- in path
+		const prefix =
+			m[1].endsWith('chapter-') || m[1].endsWith('chapter_')
+				? m[1]
+				: `${m[1]}chapter-`;
 		const m2 = path.match(/^(.*?\/)(chapter[-_])(\d+(?:\.\d+)?)\/?$/i);
 		if (m2) {
 			const pre = m2[1];
