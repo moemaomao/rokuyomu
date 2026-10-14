@@ -512,6 +512,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string | null;
 	}> {
 		const path = this.cleanId(chapterId);
 		const adj = this.adjacentChapterIds(path);
@@ -597,6 +598,24 @@ export abstract class ThemesiaSource extends BaseSource {
 		if (!prevChapterId && adj.prev) prevChapterId = adj.prev;
 		if (!nextChapterId && adj.next) nextChapterId = adj.next;
 
-		return { title, content, prevChapterId, nextChapterId };
+		let novelId: string | null = null;
+		const seriesRe = new RegExp(
+			`^${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+$`,
+			'i'
+		);
+		$('a[href]').each((_, a) => {
+			if (novelId) return;
+			const id = this.cleanId($(a).attr('href') || '');
+			if (seriesRe.test(id)) novelId = id;
+		});
+		if (!novelId) {
+			const m = path.match(/^\/(.+?)[-_]chapter[-_]?\d+/i);
+			if (m?.[1]) {
+				novelId = `${this.seriesPath}/${m[1]}`.replace(/\/+/g, '/');
+				if (!novelId.startsWith('/')) novelId = `/${novelId}`;
+			}
+		}
+
+		return { title, content, prevChapterId, nextChapterId, novelId };
 	}
 }
