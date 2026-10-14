@@ -11,11 +11,16 @@ function novelIdFromChapter(chapterId: string): string {
 
 	const withSeriesPrefix = (slugOrPath: string): string => {
 		const s = slugOrPath.replace(/^\/+/, '');
-		if (/^(series|manga|novel|comics)\//i.test(s)) return `/${s}`;
+		if (/^(series|manga|novel|comics|story|book)\//i.test(s)) return `/${s}`;
 		return `/series/${s}`;
 	};
 
-	if (parts.length >= 2 && /^(series|manga|novel|comics)$/i.test(parts[0])) {
+	const storyIdx = parts.findIndex((p) => /^(chapter|ch|episode|ep|bab)$/i.test(p));
+	if (storyIdx > 0 && /^(story|book|series|manga|novel|comics)$/i.test(parts[0])) {
+		return '/' + parts.slice(0, storyIdx).join('/');
+	}
+
+	if (parts.length >= 2 && /^(series|manga|novel|comics|story|book)$/i.test(parts[0])) {
 		const last = parts[parts.length - 1];
 		if (
 			/^(chapter|ch|episode|ep|bab)[-_.]?\d?/i.test(last) ||

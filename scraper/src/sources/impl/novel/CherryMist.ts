@@ -1,33 +1,27 @@
 /**
- * Cherrymist Cafe (cherrymist.cafe) — SPA + JSON API novel site
- * Path: scraper/src/sources/impl/CherryMist.ts
+ * Cherrymist Cafe (cherrymist.cafe) — SPA + JSON API novel
  *
- * API:
- *   GET  /api/series                              → semua series (array)
- *   GET  /api/series/{slug|id}                    → detail series
- *   GET  /api/chapters?series_id={id}             → daftar chapter
- *   GET  /api/chapters?limit=&order=recent&published=1 → latest updates
- *   GET  /api/chapters/{id}                       → body chapter (HTML / cipher)
- *   POST /api/chapters/{id}/reveal                → unlock body when bodyWithheld
- *        body: { ticket, frames, elapsedMs, visible, focused }
+ * GET  /api/series | /api/series/{slug|id}
+ * GET  /api/chapters?series_id= | order=recent
+ * GET  /api/chapters/{id}  → content often empty + bodyWithheld + revealTicket
+ * POST /api/chapters/{id}/reveal
+ *      body: { ticket, frames, elapsedMs, visible, focused, proof }
+ *      proof = HMAC-SHA256(key, `chapter-reveal.v1.{chapterId}.{jti}`) hex
+ *        key  from site JS (textLayout bundle)
+ *        jti  from revealTicket JWT payload
  *
- * Anti-scrape: GET chapter sering mengembalikan content="" + bodyWithheld=true
- * + revealTicket. Unlock via POST /reveal dengan ticket + presence proof
- * (frames >= 24, elapsedMs >= 600, visible/focused true) — sama seperti
- * browser site (requestAnimationFrame check).
- *
- * Chapter content memakai font-cipher (PUA + /fonts/cipher/*-{seed}.woff2).
- * inject @font-face + class cm-ciphered agar WebView/reader browser
- * menampilkan teks dengan benar. Plain-text offline tanpa font = tidak terbaca.
- *
+ * Cipher font: wrap content with @font-face cm-ciphered when cipher.seed set.
  */
 import { BaseSource } from '../../BaseSource';
 import type { Manga, MangaDetails, Chapter } from '../../types-manga';
 
 const PAGE_SIZE = 30;
-
 const REVEAL_MIN_FRAMES = 28;
 const REVEAL_MIN_ELAPSED_MS = 650;
+
+const REVEAL_HMAC_KEY =
+	'457698978af0c511a6ebfd44efc0679651c0b0485fec76fe9a5acab91a26eb02';
+const REVEAL_PROOF_VER = 'v1';
 
 type CmSeries = {
 	id: number;
@@ -45,10 +39,8 @@ type CmSeries = {
 	total_chapters?: number | null;
 	last_release_at?: string | null;
 	updated_at?: string | null;
-	created_at?: string | null;
 	genres?: string[] | null;
 	tags?: string[] | null;
-	age_rating?: string | null;
 	translator?: { name?: string; username?: string } | null;
 };
 
@@ -65,7 +57,7 @@ type CmChapterListItem = {
 	created_at?: string | null;
 	status?: string | null;
 	is_locked?: number | boolean;
-	word_count?: number | null;
+	is_unlocked?: boolean;
 };
 
 type CmChapterDetail = CmChapterListItem & {
@@ -73,8 +65,6 @@ type CmChapterDetail = CmChapterListItem & {
 	foreword?: string | null;
 	afterword?: string | null;
 	cipher?: { seed?: number } | null;
-	is_unlocked?: boolean;
-	series_title?: string;
 	bodyWithheld?: boolean;
 	revealTicket?: string | null;
 };
@@ -111,8 +101,7 @@ function mapStatus(s?: string | null): string {
 }
 
 function seriesIdPath(s: CmSeries): string {
-	const slug = (s.slug || '').trim();
-	return `/story/${slug || s.id}`;
+	return `/story/${(s.slug || '').trim() || s.id}`;
 }
 
 function isChapterLocked(c: CmChapterListItem): boolean {
@@ -122,28 +111,42 @@ function isChapterLocked(c: CmChapterListItem): boolean {
 }
 
 function cipherFontCss(seed: number): string {
-	const families = ['opensans'] as const;
-	const faces = families.flatMap((fam) =>
-		(['regular', 'bold', 'italic'] as const).map((style) => {
-			const weight = style === 'bold' ? 700 : 400;
-			const fontStyle = style === 'italic' ? 'italic' : 'normal';
-			return `@font-face{font-family:"cmc-${fam}-${seed}";src:url("https://cherrymist.cafe/fonts/cipher/${fam}-${style}-${seed}.woff2") format("woff2");font-weight:${weight};font-style:${fontStyle};font-display:block;}`;
-		})
-	);
+	const faces = (['regular', 'bold', 'italic'] as const).map((style) => {
+		const weight = style === 'bold' ? 700 : 400;
+		const fontStyle = style === 'italic' ? 'italic' : 'normal';
+		return `@font-face{font-family:"cmc-opensans-${seed}";src:url("https://cherrymist.cafe/fonts/cipher/opensans-${style}-${seed}.woff2") format("woff2");font-weight:${weight};font-style:${fontStyle};font-display:block;}`;
+	});
 	return (
 		faces.join('') +
 		`.cm-ciphered,.cm-ciphered *{font-family:"cmc-opensans-${seed}","Open Sans",system-ui,sans-serif !important;}`
 	);
 }
 
+function formatChapterHtml(raw: string): string {
+	const s = (raw || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+	if (!s) return '';
+	if (/<(?:p|div|br|h[1-6]|li|blockquote)\b/i.test(s)) {
+		return s
+			.replace(/\n{2,}/g, '<br/><br/>')
+			.replace(/\n/g, '<br/>');
+	}
+	const blocks = s.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+	return blocks
+		.map((b) => {
+			if (/^<h[1-6]\b/i.test(b) || /^<(?:ul|ol|blockquote)\b/i.test(b)) return b;
+			const withBreaks = b.replace(/\n/g, '<br/>');
+			return `<p>${withBreaks}</p>`;
+		})
+		.join('\n');
+}
+
 function wrapCipherContent(html: string, seed?: number | null): string {
-	const body = (html || '').trim();
+	const body = formatChapterHtml(html);
 	if (!body) return '';
 	if (seed == null || Number.isNaN(Number(seed))) {
 		return `<div class="cm-ciphered">${body}</div>`;
 	}
-	const css = cipherFontCss(Number(seed));
-	return `<style>${css}</style><div class="cm-ciphered" data-cm-ciphered data-cipher-seed="${seed}">${body}</div>`;
+	return `<style>${cipherFontCss(Number(seed))}</style><div class="cm-ciphered" data-cm-ciphered data-cipher-seed="${seed}">${body}</div>`;
 }
 
 function hasUsableBody(data: {
@@ -164,10 +167,61 @@ function makeRevealProof(): {
 	visible: boolean;
 	focused: boolean;
 } {
-	
-	const frames = REVEAL_MIN_FRAMES + Math.floor(Math.random() * 12);
-	const elapsedMs = REVEAL_MIN_ELAPSED_MS + Math.floor(Math.random() * 200);
-	return { frames, elapsedMs, visible: true, focused: true };
+	return {
+		frames: REVEAL_MIN_FRAMES + Math.floor(Math.random() * 12),
+		elapsedMs: REVEAL_MIN_ELAPSED_MS + Math.floor(Math.random() * 200),
+		visible: true,
+		focused: true
+	};
+}
+
+function ticketJti(ticket: string): string | null {
+	try {
+		const part = ticket.split('.')[1];
+		if (!part) return null;
+		const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+		const pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+		const json =
+			typeof atob === 'function'
+				? atob(pad)
+				: Buffer.from(pad, 'base64').toString('utf8');
+		const jti = (JSON.parse(json) as { jti?: string }).jti;
+		return typeof jti === 'string' && jti ? jti : null;
+	} catch {
+		return null;
+	}
+}
+
+async function computeRevealProof(chapterId: string, ticket: string): Promise<string | null> {
+	const jti = ticketJti(ticket);
+	if (!jti) return null;
+	const msg = `chapter-reveal.${REVEAL_PROOF_VER}.${chapterId}.${jti}`;
+	try {
+		const subtle = globalThis.crypto?.subtle;
+		if (subtle) {
+			const enc = new TextEncoder();
+			const key = await subtle.importKey(
+				'raw',
+				enc.encode(REVEAL_HMAC_KEY),
+				{ name: 'HMAC', hash: 'SHA-256' },
+				false,
+				['sign']
+			);
+			const sig = await subtle.sign('HMAC', key, enc.encode(msg));
+			return Array.from(new Uint8Array(sig))
+				.map((b) => b.toString(16).padStart(2, '0'))
+				.join('');
+		}
+	} catch {
+		/* fall through */
+	}
+	// Node fallback
+	try {
+		const { createHmac } = await import('node:crypto');
+		return createHmac('sha256', REVEAL_HMAC_KEY).update(msg).digest('hex');
+	} catch {
+		return null;
+	}
 }
 
 export class CherryMistSource extends BaseSource {
@@ -182,7 +236,6 @@ export class CherryMistSource extends BaseSource {
 		'Accept-Language': 'en-US,en;q=0.9',
 		Referer: 'https://cherrymist.cafe/',
 		Origin: 'https://cherrymist.cafe',
-	
 		'X-CM-Reader': '1'
 	};
 
@@ -216,7 +269,7 @@ export class CherryMistSource extends BaseSource {
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');
 			throw new Error(
-				`Failed to POST ${url}: ${response.status} ${response.statusText}${text ? ` — ${text.slice(0, 200)}` : ''}`
+				`Failed to POST ${url}: ${response.status}${text ? ` — ${text.slice(0, 200)}` : ''}`
 			);
 		}
 		return (await response.json()) as T;
@@ -225,26 +278,27 @@ export class CherryMistSource extends BaseSource {
 	private async fetchChapterDetail(chapId: string): Promise<CmChapterDetail> {
 		const path = `/api/chapters/${chapId}`;
 		let last: CmChapterDetail | null = null;
-		const maxAttempts = 3;
 
-		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		for (let attempt = 0; attempt < 3; attempt++) {
 			const data = await this.fetchJson<CmChapterDetail>(path);
 			last = data;
+			if (!data?.id) throw new Error('Chapter not found');
 
-			if (!data?.id) {
-				throw new Error('Chapter not found');
-			}
-
-			if (hasUsableBody(data) && !data.bodyWithheld) {
-				return data;
-			}
+			if (hasUsableBody(data) && !data.bodyWithheld) return data;
 
 			if (data.bodyWithheld && data.revealTicket) {
 				try {
-					const proof = makeRevealProof();
+					const proof = await computeRevealProof(chapId, data.revealTicket);
+					const presence = makeRevealProof();
+					const body: Record<string, unknown> = {
+						ticket: data.revealTicket,
+						...presence
+					};
+					if (proof) body.proof = proof;
+
 					const revealed = await this.postJson<CmRevealResponse>(
 						`/api/chapters/${chapId}/reveal`,
-						{ ticket: data.revealTicket, ...proof }
+						body
 					);
 					const merged: CmChapterDetail = {
 						...data,
@@ -255,22 +309,15 @@ export class CherryMistSource extends BaseSource {
 						bodyWithheld: false,
 						revealTicket: null
 					};
-					if (hasUsableBody(merged)) {
-						return merged;
-					}
+					if (hasUsableBody(merged)) return merged;
 				} catch (e) {
 					console.error('[CherryMist] reveal failed', chapId, e);
 				}
 			}
 
-			if (attempt < maxAttempts - 1) {
-				await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
-			}
+			if (attempt < 2) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
 		}
 
-		if (last && !last.id) {
-			throw new Error('Chapter not found');
-		}
 		return last!;
 	}
 
@@ -278,7 +325,6 @@ export class CherryMistSource extends BaseSource {
 		if (!s?.id && !s?.slug) return null;
 		const title = (s.title || '').replace(/\s+/g, ' ').trim();
 		if (!title) return null;
-		const cover = s.cover_image_url || s.cover_thumb_url || '';
 		const latest =
 			typeof s.total_chapters === 'number' && s.total_chapters > 0
 				? s.total_chapters
@@ -286,15 +332,12 @@ export class CherryMistSource extends BaseSource {
 		return {
 			id: seriesIdPath(s),
 			title,
-			cover,
+			cover: s.cover_image_url || s.cover_thumb_url || '',
 			sourceId: this.id,
 			type: 'novel',
 			status: mapStatus(s.story_status || s.status),
 			lang: 'en',
-			...(latest != null ? { latestChapter: latest } : {}),
-			...(s.last_release_at
-				? { updatedAt: Date.parse(s.last_release_at) || undefined }
-				: {})
+			...(latest != null ? { latestChapter: latest } : {})
 		};
 	}
 
@@ -355,14 +398,10 @@ export class CherryMistSource extends BaseSource {
 		const all = await this.getAllSeries();
 		const hits = all.filter((s) => {
 			const title = (s.title || '').toLowerCase();
-			const alt = (s as any).alternative_title
-				? String((s as any).alternative_title).toLowerCase()
-				: '';
 			const author = (s.author_name || s.original_author || '').toLowerCase();
 			const tags = [...(s.genres || []), ...(s.tags || [])].join(' ').toLowerCase();
 			return (
 				title.includes(q) ||
-				alt.includes(q) ||
 				author.includes(q) ||
 				tags.includes(q) ||
 				(s.slug || '').toLowerCase().includes(q)
@@ -376,13 +415,11 @@ export class CherryMistSource extends BaseSource {
 	}
 
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
-		let key = mangaId.replace(/^\/story\//, '').replace(/^\//, '').replace(/\/$/, '');
+		const key = mangaId.replace(/^\/story\//, '').replace(/^\//, '').replace(/\/$/, '');
 		if (!key) throw new Error('Invalid manga id');
 
 		const series = await this.fetchJson<CmSeries>(`/api/series/${encodeURIComponent(key)}`);
-		if (!series?.id && !series?.title) {
-			throw new Error('Series not found');
-		}
+		if (!series?.id && !series?.title) throw new Error('Series not found');
 
 		const title = (series.title || '').replace(/\s+/g, ' ').trim();
 		const cover = series.cover_image_url || series.cover_thumb_url || '';
@@ -400,11 +437,8 @@ export class CherryMistSource extends BaseSource {
 		if (series.author_name && !authors.includes(series.author_name)) {
 			authors.push(series.author_name);
 		}
-		const translator =
-			series.translator?.name || series.translator_name || undefined;
-		if (translator && !authors.includes(translator)) {
-			authors.push(`TL: ${translator}`);
-		}
+		const translator = series.translator?.name || series.translator_name || undefined;
+		if (translator && !authors.includes(translator)) authors.push(`TL: ${translator}`);
 
 		const genres = [
 			...(Array.isArray(series.genres) ? series.genres : []),
@@ -441,15 +475,10 @@ export class CherryMistSource extends BaseSource {
 
 		for (const c of list) {
 			if (c.status && c.status !== 'published') continue;
-			const num =
-				typeof c.chapter_number === 'number'
-					? c.chapter_number
-					: out.length + 1;
-
+			const num = typeof c.chapter_number === 'number' ? c.chapter_number : out.length + 1;
 			const id = `/story/${seriesSlug}/chapter/${c.id}`;
 			if (seen.has(id)) continue;
 			seen.add(id);
-
 			out.push({
 				id,
 				title: (c.title || `Chapter ${num}`).replace(/\s+/g, ' ').trim(),
@@ -458,7 +487,6 @@ export class CherryMistSource extends BaseSource {
 				isLocked: isChapterLocked(c)
 			});
 		}
-
 		out.sort((a, b) => b.number - a.number);
 		return out;
 	}
@@ -473,14 +501,9 @@ export class CherryMistSource extends BaseSource {
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
 	}> {
-
-		const m =
-			chapterId.match(/\/chapter\/(\d+)/) ||
-			chapterId.match(/(?:^|\/)(\d+)$/);
+		const m = chapterId.match(/\/chapter\/(\d+)/) || chapterId.match(/(?:^|\/)(\d+)$/);
 		const chapId = m?.[1];
-		if (!chapId) {
-			throw new Error(`Invalid chapter id: ${chapterId}`);
-		}
+		if (!chapId) throw new Error(`Invalid chapter id: ${chapterId}`);
 
 		const data = await this.fetchChapterDetail(chapId);
 		if (!data?.id) throw new Error('Chapter not found');
@@ -498,9 +521,7 @@ export class CherryMistSource extends BaseSource {
 		if (data.content) parts.push(String(data.content));
 		if (data.afterword) parts.push(String(data.afterword));
 
-		const seed = data.cipher?.seed;
-		const content = wrapCipherContent(parts.join('\n'), seed);
-
+		const content = wrapCipherContent(parts.join('\n'), data.cipher?.seed);
 		if (!content.trim()) {
 			throw new Error(
 				'Chapter body is empty (withheld or unavailable). Try again later or open on cherrymist.cafe.'
@@ -512,9 +533,7 @@ export class CherryMistSource extends BaseSource {
 		try {
 			const seriesId = data.series_id;
 			if (seriesId != null) {
-				let seriesSlug = '';
-				const seriesPath = chapterId.match(/^\/story\/([^/]+)\//);
-				seriesSlug = seriesPath?.[1] || '';
+				let seriesSlug = chapterId.match(/^\/story\/([^/]+)\//)?.[1] || '';
 				if (!seriesSlug) {
 					const s = await this.fetchJson<CmSeries>(`/api/series/${seriesId}`);
 					seriesSlug = s.slug || String(seriesId);
@@ -530,12 +549,7 @@ export class CherryMistSource extends BaseSource {
 			/* optional */
 		}
 
-		return {
-			title,
-			content,
-			prevChapterId,
-			nextChapterId
-		};
+		return { title, content, prevChapterId, nextChapterId };
 	}
 }
 
