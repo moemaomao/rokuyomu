@@ -921,13 +921,14 @@
 				</div>
 			</header>
 
-			{#if !isReaderPage && data.announcement}
-				<AnnouncementBanner
-					message={data.announcement.message}
-					level={data.announcement.level}
-					updatedAt={data.announcement.updatedAt}
-				/>
-			{/if}
+			{#if !isReaderPage && (data.announcements?.length || data.announcement)}
+             <AnnouncementBanner
+               items={data.announcements ?? []}
+               message={data.announcement?.message ?? ''}
+               level={data.announcement?.level ?? 'info'}
+               updatedAt={data.announcement?.updatedAt}
+             />
+            {/if}
 
 			<!-- Page content -->
 			<main class="flex-1">
