@@ -1,447 +1,176 @@
 /**
- * Ainz Scans ID adapter (v3 API)
- *
- * List/Latest : GET /api/comic/latest-updates?limit=
- * Search      : GET /api/search?q=&page=&limit=
- * Detail      : GET /api/series/comic/{slug}
- * Chapters    : GET /api/series/comic/{slug}/chapters?page=&limit=
- * Pages       : GET /api/series/comic/{slug}/chapter/{chapterSlug}
- *               → chapter.pages[].image_url
- *
- * ID format:
- *   manga   : "/comic/{slug}"
- *   chapter : "/comic/{slug}/chapter/{chapterSlug}"
- *
- * Bahasa default: Indonesian (badge homepage = ID)
+ * Ainz Scans (v3 JSON API) — ApiJsonSource
+ * manga: /comic/{slug} | chapter: /comic/{slug}/chapter/{chSlug}
  */
+import { ApiJsonSource } from '../family/ApiJsonSource';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
-import { BaseSource } from '../BaseSource';
-import type { Chapter, Manga, MangaDetails } from '../types-manga'
-
-export class AinzScansSource extends BaseSource {
+export class AinzScansSource extends ApiJsonSource {
 	id = 'ainzscans';
 	name = 'Ainz Scans';
 	baseUrl = 'https://v3.ainzscans01.com';
+	protected apiBase = 'https://v3.ainzscans01.com';
+	protected perPage = 24;
 
-	private readonly apiBase = 'https://v3.ainzscans01.com';
-	private readonly PER_PAGE = 24;
-	private readonly DEFAULT_LANG = 'id';
-
-	// ── HTTP ─────────────────────────────────────────────────────────────────
-
-	private async apiGet<T = any>(
-		path: string,
-		params?: Record<string, string | number | boolean | undefined | null>
-	): Promise<T> {
-		const url = new URL(
-			path.startsWith('http') ? path : `${this.apiBase}${path}`
-		);
-
-		if (params) {
-			for (const [key, val] of Object.entries(params)) {
-				if (val === undefined || val === null || val === '') continue;
-				url.searchParams.set(key, String(val));
-			}
-		}
-
-		const headers: Record<string, string> = {
-			'User-Agent':
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-			Accept: 'application/json, text/plain, */*',
-			'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-			Origin: this.baseUrl,
-			Referer: `${this.baseUrl}/`,
-			'Cache-Control': 'no-cache'
-		};
-
-		const maxAttempts = 3;
-		let lastErr: unknown;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			try {
-				const res = await fetch(url.toString(), { headers });
-				const text = await res.text();
-				const trimmed = text.trim();
-
-				if (
-					trimmed.startsWith('<') ||
-					trimmed.toLowerCase().includes('<!doctype')
-				) {
-					console.error(
-						`[ainzscans] HTML response attempt=${attempt}`,
-						url.pathname,
-						trimmed.slice(0, 120)
-					);
-					lastErr = new Error('AinzScans blocked: response is HTML, not JSON');
-					await new Promise((r) => setTimeout(r, 400 * attempt));
-					continue;
-				}
-
-				if (!res.ok) {
-					console.error(
-						`[ainzscans] HTTP ${res.status} ${url.pathname}`,
-						trimmed.slice(0, 300)
-					);
-					if (res.status === 429 || res.status === 503) {
-						lastErr = new Error(`AinzScans HTTP ${res.status}`);
-						await new Promise((r) => setTimeout(r, 600 * attempt));
-						continue;
-					}
-					throw new Error(`AinzScans HTTP ${res.status}`);
-				}
-
-				try {
-					return JSON.parse(trimmed) as T;
-				} catch {
-					console.error('[ainzscans] invalid JSON', trimmed.slice(0, 200));
-					throw new Error('AinzScans invalid JSON');
-				}
-			} catch (e) {
-				lastErr = e;
-				if (attempt < maxAttempts) {
-					await new Promise((r) => setTimeout(r, 400 * attempt));
-					continue;
-				}
-			}
-		}
-
-		throw lastErr instanceof Error
-			? lastErr
-			: new Error('AinzScans request failed');
+	private slug(id: string): string {
+		const p = id.replace(/^\/+/, '').split('/').filter(Boolean);
+		return p[0] === 'comic' ? p[1] || '' : p[0] || '';
 	}
 
-	// ── Helpers ──────────────────────────────────────────────────────────────
-
-	private toMangaId(slug: string): string {
-		const s = String(slug || '')
-			.replace(/^\/+|\/+$/g, '')
-			.replace(/^comic\//i, '');
-		return `/comic/${s}`;
+	private chParts(id: string): { series: string; chapter: string } {
+		const m = id.replace(/^\/+/, '').match(/^comic\/([^/]+)\/chapter\/(.+)$/i);
+		if (m) return { series: m[1], chapter: m[2] };
+		const p = id.replace(/^\/+/, '').split('/').filter(Boolean);
+		return { series: p[0] === 'comic' ? p[1] || '' : p[0] || '', chapter: p.at(-1) || '' };
 	}
 
-	private extractSlug(mangaId: string): string {
-		const parts = String(mangaId)
-			.replace(/^\/+/, '')
-			.split('/')
-			.filter(Boolean);
-		if (parts[0]?.toLowerCase() === 'comic' && parts[1]) return parts[1];
-		return parts[0] || '';
-	}
-
-	private toChapterId(seriesSlug: string, chapterSlug: string): string {
-		return `/comic/${seriesSlug}/chapter/${chapterSlug}`;
-	}
-
-	private extractChapterParts(chapterId: string): {
-		seriesSlug: string;
-		chapterSlug: string;
-	} {
-		const s = String(chapterId).replace(/^\/+/, '');
-		const m = s.match(/^comic\/([^/]+)\/chapter\/(.+)$/i);
-		if (m) return { seriesSlug: m[1], chapterSlug: m[2] };
-		const parts = s.split('/').filter(Boolean);
-		return {
-			seriesSlug: parts[0] === 'comic' ? parts[1] || '' : parts[0] || '',
-			chapterSlug: parts[parts.length - 1] || ''
-		};
-	}
-
-	private mapStatus(status?: string | null): string {
-		const s = String(status || '').toUpperCase();
-		if (s === 'COMPLETED' || s === 'COMPLETE' || s === 'SELESAI')
-			return 'Completed';
-		if (s === 'HIATUS') return 'Hiatus';
-		if (s === 'CANCELLED' || s === 'DROPPED') return 'Cancelled';
+	private status(s?: string | null): string {
+		const u = String(s || '').toUpperCase();
+		if (/COMPLETE|SELESAI/.test(u)) return 'Completed';
+		if (u === 'HIATUS') return 'Hiatus';
 		return 'Ongoing';
 	}
 
-	private mapType(subtype?: string | null): string {
-		const t = String(subtype || '').toUpperCase();
-		if (t === 'MANHWA') return 'manhwa';
-		if (t === 'MANHUA') return 'manhua';
-		if (t === 'MANGA') return 'manga';
+	private type(s?: string | null): string {
+		const u = String(s || '').toUpperCase();
+		if (u === 'MANHWA') return 'manhwa';
+		if (u === 'MANGA') return 'manga';
 		return 'manhua';
 	}
 
-	private formatDate(iso?: string | null): string {
-		if (!iso) return '';
-		try {
-			return new Date(iso).toISOString().slice(0, 10);
-		} catch {
-			return String(iso).slice(0, 10);
+	protected mapListItem(raw: unknown): Manga | null {
+		const it = raw as any;
+		if (it?.series_slug) {
+			const title = String(it.series_title || '').trim();
+			if (!title) return null;
+			const n = this.parseChapterNumber(it.chapters?.[0]?.number);
+			return {
+				id: `/comic/${it.series_slug}`,
+				sourceId: this.id,
+				title,
+				cover: it.poster_image_url || '',
+				type: this.type(it.series_comic_type),
+				status: 'Ongoing',
+				latestChapter: Number.isFinite(n) ? String(n) : undefined,
+				lang: 'id'
+			};
 		}
-	}
-
-	private parseChapterNumber(raw: unknown): number {
-		const n = parseFloat(String(raw ?? ''));
-		return Number.isFinite(n) ? n : NaN;
-	}
-
-	private mapListFromLatest(item: any): Manga | null {
-		const slug = item?.series_slug;
-		const title = String(item?.series_title || '').trim();
+	
+		const slug = it?.slug;
+		const title = String(it?.title || '').trim();
 		if (!slug || !title) return null;
-
-		const chs = Array.isArray(item?.chapters) ? item.chapters : [];
-		const latestRaw = chs[0]?.number;
-		const latestNum = this.parseChapterNumber(latestRaw);
-		const latestChapter = Number.isFinite(latestNum)
-			? String(latestNum)
-			: latestRaw != null
-				? String(latestRaw).replace(/\.00$/, '')
-				: undefined;
-
 		return {
-			id: this.toMangaId(slug),
+			id: `/comic/${slug}`,
 			sourceId: this.id,
 			title,
-			cover: item?.poster_image_url || '',
-			type: this.mapType(item?.series_comic_type),
-			status: 'Ongoing',
-			latestChapter,
-			lang: this.DEFAULT_LANG
-		} as Manga & { lang?: string };
-	}
-
-	private mapListFromSearch(item: any): Manga | null {
-		const slug = item?.slug;
-		const title = String(item?.title || '').trim();
-		if (!slug || !title) return null;
-
-		return {
-			id: this.toMangaId(slug),
-			sourceId: this.id,
-			title,
-			cover: item?.poster_image_url || '',
-			type: this.mapType(item?.comic_subtype),
-			status: this.mapStatus(item?.comic_status || item?.series_status),
-			lang: this.DEFAULT_LANG
-		} as Manga & { lang?: string };
-	}
-
-	// ── Catalog ──────────────────────────────────────────────────────────────
-
-	async getLatestManga(
-		page: number,
-		_opts?: { lang?: string; type?: string }
-	): Promise<Manga[]> {
-		const p = Math.max(1, Number(page) || 1);
-		const fetchLimit = Math.min(200, p * this.PER_PAGE + this.PER_PAGE);
-
-		try {
-			const batch = await this.apiGet<any[]>('/api/comic/latest-updates', {
-				limit: fetchLimit,
-				chapterLimit: 1
-			});
-			const rows = Array.isArray(batch) ? batch : [];
-			const seen = new Set<string>();
-			const list: Manga[] = [];
-
-			for (const it of rows) {
-				const m = this.mapListFromLatest(it);
-				if (!m || seen.has(m.id)) continue;
-				seen.add(m.id);
-				list.push(m);
-			}
-
-			const start = (p - 1) * this.PER_PAGE;
-			const pageList = list.slice(start, start + this.PER_PAGE);
-
-			console.log(
-				`[ainzscans] latest page=${p} → ${pageList.length} (pool=${list.length})`
-			);
-			return pageList;
-		} catch (e) {
-			console.error('[ainzscans] getLatestManga', e);
-			return [];
-		}
-	}
-
-	async searchManga(
-		query: string,
-		opts?: { page?: number; lang?: string; type?: string }
-	): Promise<Manga[]> {
-		const q = (query || '').trim();
-		const page = Math.max(1, opts?.page || 1);
-		if (!q) return this.getLatestManga(page, opts);
-
-		try {
-			const data = await this.apiGet<{ data?: any[] }>('/api/search', {
-				q,
-				page,
-				limit: this.PER_PAGE
-			});
-			const rows = Array.isArray(data?.data) ? data.data : [];
-			const list = rows
-				.map((it) => this.mapListFromSearch(it))
-				.filter(Boolean) as Manga[];
-
-			console.log(`[ainzscans] search "${q}" page=${page} → ${list.length}`);
-			return list;
-		} catch (e) {
-			console.error('[ainzscans] searchManga', e);
-			return [];
-		}
-	}
-
-	// ── Details ──────────────────────────────────────────────────────────────
-
-	async getMangaDetails(
-		mangaId: string,
-		_opts?: { lang?: string }
-	): Promise<MangaDetails> {
-		const slug = this.extractSlug(mangaId);
-		if (!slug) throw new Error(`Invalid ainzscans id: ${mangaId}`);
-
-		const data = await this.apiGet<any>(
-			`/api/series/comic/${encodeURIComponent(slug)}`
-		);
-		if (!data?.id && !data?.slug) {
-			throw new Error(`Manga not found: ${slug}`);
-		}
-
-		const title = String(data.title || slug).trim();
-		const cover = data.poster_image_url || '';
-		const status = this.mapStatus(data.comic_status || data.series_status);
-		const type = this.mapType(data.comic_subtype);
-		const synopsis = String(data.synopsis || '')
-			.replace(/\s+/g, ' ')
-			.trim();
-
-		const authors: string[] = [];
-		for (const name of [data.author_name, data.artist_name]) {
-			const n = String(name || '').trim();
-			if (n && n !== '-' && !authors.includes(n)) authors.push(n);
-		}
-
-		const genres: string[] = [];
-		for (const g of data.genres || []) {
-			const name = String(g?.name || '').trim();
-			if (name && name.length < 40 && !genres.includes(name)) genres.push(name);
-		}
-
-		const alt =
-			typeof data.alternative_titles === 'string'
-				? data.alternative_titles.trim()
-				: Array.isArray(data.alternative_titles)
-					? data.alternative_titles.filter(Boolean).join(' · ')
-					: '';
-
-		// Chapters (paginate)
-		const chapters: Chapter[] = [];
-		const seen = new Set<string>();
-		let page = 1;
-		const limit = 100;
-
-		while (page <= 50) {
-			const chJson = await this.apiGet<{ units?: any[] }>(
-				`/api/series/comic/${encodeURIComponent(slug)}/chapters`,
-				{ page, limit }
-			);
-			const units = Array.isArray(chJson?.units) ? chJson.units : [];
-			if (!units.length) break;
-
-			for (const u of units) {
-				const chSlug = String(u?.slug || '').trim();
-				const cid = String(u?.id || '');
-				if (!chSlug || seen.has(chSlug)) continue;
-				seen.add(chSlug);
-
-				const number = this.parseChapterNumber(u?.number ?? u?.sort_number);
-				const num = Number.isFinite(number) ? number : chapters.length + 1;
-				const chTitle =
-					String(u?.title || '').trim() || `Chapter ${num}`;
-
-				chapters.push({
-					id: this.toChapterId(slug, chSlug),
-					title: chTitle,
-					number: num,
-					date: this.formatDate(u?.created_at)
-				});
-			}
-
-			if (units.length < limit) break;
-			page += 1;
-		}
-
-		chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
-		const latestChapter =
-			chapters[0]?.number != null ? String(chapters[0].number) : undefined;
-
-		const rating =
-			data.rating_average != null && !Number.isNaN(Number(data.rating_average))
-				? Number(data.rating_average).toFixed(1)
-				: null;
-
-		const metaLines = [
-			alt && `Alternative: ${alt}`,
-			rating && `Rating: ${rating}`,
-			authors[0] && `Author: ${authors.join(' · ')}`,
-			`Language: Indonesian`,
-			data.release_year && `Year: ${data.release_year}`,
-			`Type: ${type}`
-		].filter(Boolean);
-
-		const description = [...metaLines, synopsis].filter(Boolean).join('\n');
-
-		console.log(`[ainzscans] details ${slug} → ch=${chapters.length}`);
-
-		return {
-			id: this.toMangaId(slug),
-			sourceId: this.id,
-			title,
-			cover,
-			type,
-			status,
-			description,
-			authors,
-			genres,
-			chapters,
-			latestChapter
+			cover: it.poster_image_url || '',
+			type: this.type(it.comic_subtype),
+			status: this.status(it.comic_status || it.series_status),
+			lang: 'id'
 		};
 	}
 
-	// ── Pages ────────────────────────────────────────────────────────────────
+	protected mapDetails(raw: unknown, mangaId: string): MangaDetails {
+		const d = raw as any;
+		const slug = this.slug(mangaId) || d.slug || '';
+		const authors: string[] = [d.author_name, d.artist_name]
+			.map((x) => String(x || '').trim())
+			.filter((n): n is string => Boolean(n) && n !== '-');
+		const genres: string[] = (d.genres || [])
+			.map((g: any) => String(g?.name || '').trim())
+			.filter((n: string): n is string => Boolean(n) && n.length < 40);
+		return {
+			id: `/comic/${slug}`,
+			sourceId: this.id,
+			title: String(d.title || slug).trim(),
+			cover: d.poster_image_url || '',
+			type: this.type(d.comic_subtype),
+			status: this.status(d.comic_status || d.series_status),
+			description: String(d.synopsis || '').replace(/\s+/g, ' ').trim(),
+			authors: [...new Set(authors)],
+			genres: [...new Set(genres)],
+			chapters: [],
+			lang: 'id'
+		};
+	}
 
-	async getChapterPages(chapterId: string): Promise<string[]> {
-		const { seriesSlug, chapterSlug } = this.extractChapterParts(chapterId);
-		if (!seriesSlug || !chapterSlug) {
-			console.error('[ainzscans] getChapterPages bad id:', chapterId);
-			return [];
+	protected mapChapters(raw: unknown, mangaId: string): Chapter[] {
+		const units = this.extractList(raw);
+		const slug = this.slug(mangaId);
+		const out: Chapter[] = [];
+		const seen = new Set<string>();
+		for (const u of units as any[]) {
+			const chSlug = String(u?.slug || u?.chapter_slug || '').trim();
+			if (!chSlug || seen.has(chSlug)) continue;
+			seen.add(chSlug);
+			const number = this.parseChapterNumber(u?.number ?? u?.sort_number);
+			out.push({
+				id: `/comic/${slug}/chapter/${chSlug}`,
+				title: String(u?.title || '').trim() || `Chapter ${number || ''}`,
+				number: number || out.length + 1,
+				date: u?.created_at ? String(u.created_at).slice(0, 10) : undefined
+			});
 		}
+		return out;
+	}
 
-		try {
-			const data = await this.apiGet<{
-				chapter?: { pages?: Array<{ image_url?: string; page_number?: number }> };
-			}>(
-				`/api/series/comic/${encodeURIComponent(seriesSlug)}/chapter/${encodeURIComponent(chapterSlug)}`
-			);
+	protected mapPages(raw: unknown, _chapterId?: string): string[] {
+		const pages = Array.isArray((raw as any)?.chapter?.pages)
+			? (raw as any).chapter.pages
+			: [];
+		return pages
+			.slice()
+			.sort((a: any, b: any) => (Number(a.page_number) || 0) - (Number(b.page_number) || 0))
+			.map((p: any) => String(p.image_url || '').trim())
+			.filter((u: string) => /^https?:\/\//i.test(u));
+	}
 
-			const pages = Array.isArray(data?.chapter?.pages)
-				? data.chapter.pages
-				: [];
+	protected latestEndpoint(page: number) {
+		return {
+			path: '/api/comic/latest-updates',
+			params: { limit: Math.min(200, page * this.perPage + this.perPage), chapterLimit: 1 }
+		};
+	}
 
-			const urls = pages
-				.slice()
-				.sort(
-					(a, b) =>
-						(Number(a.page_number) || 0) - (Number(b.page_number) || 0)
-				)
-				.map((p) => String(p.image_url || '').trim())
-				.filter((u) => /^https?:\/\//i.test(u));
+	protected sliceLatest(list: Manga[], page: number): Manga[] {
+		const start = (page - 1) * this.perPage;
+		return list.slice(start, start + this.perPage);
+	}
 
-			console.log(
-				`[ainzscans] ${urls.length} pages → ${seriesSlug}/${chapterSlug}`
-			);
-			return urls;
-		} catch (e) {
-			console.error(
-				'[ainzscans] getChapterPages failed',
-				seriesSlug,
-				chapterSlug,
-				e
-			);
-			return [];
+	protected searchEndpoint(query: string, page: number) {
+		return { path: '/api/search', params: { q: query, page, limit: this.perPage } };
+	}
+
+	protected detailEndpoint(mangaId: string) {
+		return `/api/series/comic/${encodeURIComponent(this.slug(mangaId))}`;
+	}
+
+	protected pagesEndpoint(chapterId: string) {
+		const { series, chapter } = this.chParts(chapterId);
+		return `/api/series/comic/${encodeURIComponent(series)}/chapter/${encodeURIComponent(chapter)}`;
+	}
+
+	protected async fetchAllChapters(mangaId: string): Promise<Chapter[]> {
+		const slug = this.slug(mangaId);
+		const out: Chapter[] = [];
+		const seen = new Set<string>();
+		let page = 1;
+		const limit = 100;
+		while (page <= 30) {
+			const raw = await this.apiGet(`/api/series/comic/${encodeURIComponent(slug)}/chapters`, {
+				page,
+				limit
+			});
+			const batch = this.mapChapters(raw, mangaId);
+			if (!batch.length) break;
+			for (const ch of batch) {
+				if (seen.has(ch.id)) continue;
+				seen.add(ch.id);
+				out.push(ch);
+			}
+			if (batch.length < limit) break;
+			page++;
 		}
+		return out;
 	}
 }
