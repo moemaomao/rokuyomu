@@ -21,6 +21,7 @@
 	} from 'lucide-svelte';
 	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
 	import { getOfflineNovelChapter } from '$lib/utils/offlineChapter';
+import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	import {
 		getOfflineChapterIds,
 		ensureLibraryLoaded
@@ -697,6 +698,26 @@ onMount(() => {
 		stopAutoScroll();
 		stopTTS();
 	});
+
+	$effect(() => {
+		if (!browser) return;
+		if (offlineNovelMode) return;
+		const src = String(source || '');
+		const cid = String(chapterId || '');
+		const html = String(content || '').trim();
+		if (!src || !cid || html.length < 40) return;
+
+		void autoDownloadNovelChapter({
+			source: src,
+			chapterId: cid,
+			chapterTitle: String(title || 'Chapter'),
+			novelTitle: (novelInfo as { title?: string } | null)?.title || '',
+			mangaId: (novelInfo as { id?: string } | null)?.id || '',
+			cover: (novelInfo as { cover?: string } | null)?.cover || '',
+			content: html
+		});
+	});
+
 </script>
 
 <svelte:head>
@@ -1389,8 +1410,6 @@ onMount(() => {
 		border-color: var(--accent, #a855f7) !important;
 		color: var(--accent, #a855f7) !important;
 	}
-	.reader-link-dark { color: color-mix(in srgb, var(--accent, #c4b5fd) 90%, white) !important; }
-	.reader-link-light { color: var(--accent, #7c3aed) !important; }
 	.reader-accent-input { accent-color: var(--accent, #9333ea); }
 	.reader-spinner {
 		border-color: var(--accent, #8b5cf6);

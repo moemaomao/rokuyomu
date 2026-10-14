@@ -12,6 +12,7 @@
 	import { saveReading } from '$lib/stores/history';
 	import { markChapterRead } from '$lib/utils/readChapters';
 	import { downloadChapter } from '$lib/utils/downloadChapter';
+import { autoDownloadMangaChapter } from '$lib/utils/autoDownloadOnRead';
 	import {
 		getOfflineMangaChapter,
 		mangaPagesToObjectUrls
@@ -31,7 +32,6 @@ let {
 } = $derived(data);
 
 let pages = $state<string[]>([]);
-	/** True when pages are blob: URLs from IndexedDB */
 	let offlineMode = $state(false);
 	let offlineObjectUrls = $state<string[]>([]);
 
@@ -68,7 +68,6 @@ $effect(() => {
 
 	let cancelled = false;
 	(async () => {
-		// Prefer offline IDB so airplane mode / ✓ offline uses same /reader URL
 		try {
 			if (src && cid) {
 				const row = await getOfflineMangaChapter(src, cid);
@@ -145,7 +144,6 @@ $effect(() => {
 	function proxyImage(url: string, forDownload = false): string {
 		if (!url) return '';
 		let u = url.trim();
-		// Offline IDB object URLs — do not proxy
 		if (u.startsWith('blob:') || u.startsWith('data:')) return u;
 		if (u.startsWith('//')) u = `https:${u}`;
 		else if (u.startsWith('/')) u = `https://weloma.net${u}`;
@@ -435,6 +433,30 @@ $effect(() => {
 			? String(mangaInfo.cover).trim()
 			: ''
 	);
+
+	$effect(() => {
+		if (!browser || offlineMode) return;
+		const src = String(source || '');
+		const cid = String(chapterId ?? '');
+		const list = pages;
+		if (!src || !cid || !Array.isArray(list) || list.length === 0) return;
+		if (list.some((u) => String(u).startsWith('blob:'))) return;
+
+		const chTitle =
+			(currentChapter && typeof currentChapter === 'object' && 'title' in currentChapter
+				? String((currentChapter as { title?: string }).title || '')
+				: '') || 'Chapter';
+		void autoDownloadMangaChapter({
+			source: src,
+			chapterId: cid,
+			chapterTitle: chTitle,
+			mangaTitle: (mangaInfo as { title?: string } | null)?.title || 'Manga',
+			mangaId: (mangaInfo as { id?: string } | null)?.id || '',
+			cover: (mangaInfo as { cover?: string } | null)?.cover || '',
+			pageUrls: list.filter(Boolean)
+		});
+	});
+
 </script>
 
 <svelte:window onkeydown={handleKeydown} onscroll={handleScroll} />

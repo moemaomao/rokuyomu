@@ -614,6 +614,31 @@
 				</span>
 			</label>
 		</div>
+
+		<label class="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+			<input
+				type="checkbox"
+				class="mt-1 h-4 w-4 shrink-0 rounded border-zinc-400 text-violet-600 accent-violet-600 focus:ring-violet-500"
+				checked={prefs.autoDownloadOnRead}
+				onchange={(e) => {
+	              const on = (e.currentTarget as HTMLInputElement).checked;
+	              prefs = setPreferences({ autoDownloadOnRead: on });
+	              storageMsg = on
+		          ? 'Auto-download on: chapters save to Offline Library while reading'
+		          : 'Auto-download off';
+	              setTimeout(() => (storageMsg = ''), 2500);
+               }}
+			/>
+			<span class="flex flex-col gap-0.5">
+				<span class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+					Auto-download while reading
+				</span>
+				<span class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+					Manga and novel chapters open in the reader are saved to Offline Library automatically
+					(no Download button). Uses more storage for image manga.
+				</span>
+			</span>
+		</label>
 	</section>
 
 	<!-- Privacy -->

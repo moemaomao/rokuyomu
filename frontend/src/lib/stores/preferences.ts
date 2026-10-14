@@ -34,6 +34,7 @@ export type AppPreferences = {
 	autoClearHistoryDays: number;
 	incognitoSession: boolean;
 	downloadMode: DownloadMode;
+	autoDownloadOnRead: boolean;
 };
 
 const STORAGE_KEY = 'rokuyomu_preferences';
@@ -47,7 +48,8 @@ const DEFAULTS: AppPreferences = {
 	dontSaveHistory: false,
 	autoClearHistoryDays: 0,
 	incognitoSession: false,
-	downloadMode: 'disk'
+	downloadMode: 'disk',
+	autoDownloadOnRead: false
 };
 
 const DARK_THEMES: ThemeMode[] = [
@@ -66,7 +68,6 @@ function load(): AppPreferences {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) return { ...DEFAULTS, hideBadges: { ...DEFAULTS.hideBadges } };
 		const parsed = JSON.parse(raw) as Partial<AppPreferences>;
-		// migrate removed themes
 		const t = parsed.theme as string | undefined;
 		if (t === 'amoled' || t === 'sepia' || t === 'midnight' || t === 'cyan' || t === 'pink') {
 			parsed.theme = 'dark';
@@ -74,7 +75,8 @@ function load(): AppPreferences {
 		return {
 			...DEFAULTS,
 			...parsed,
-			hideBadges: { ...DEFAULTS.hideBadges, ...(parsed.hideBadges || {}) }
+			hideBadges: { ...DEFAULTS.hideBadges, ...(parsed.hideBadges || {}) },
+			autoDownloadOnRead: Boolean(parsed.autoDownloadOnRead)
 		};
 	} catch {
 		return { ...DEFAULTS, hideBadges: { ...DEFAULTS.hideBadges } };
@@ -197,4 +199,8 @@ export function shouldSaveHistory(): boolean {
 export function prefersDiskDownload(): boolean {
 	const mode = getPreferences().downloadMode;
 	return mode !== 'zip';
+}
+
+export function shouldAutoDownloadOnRead(): boolean {
+	return Boolean(getPreferences().autoDownloadOnRead);
 }
