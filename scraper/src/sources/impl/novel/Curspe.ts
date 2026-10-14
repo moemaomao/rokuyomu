@@ -2,8 +2,8 @@
  * Curspe — https://curspe.com/
  * Novel translations (WordPress custom theme)
  *
- * List   : Homepage section.jshow-updates → article.jshow-update (Latest Updates)
- *          /novels/?pg={n} fallback (archive cards)
+ * List   : /novels/?orderby=date | /novels/?orderby=date&pg={n}  → article.jarc-card (24/page)
+ *          (Latest Update sort — BUKAN New Series homepage)
  * Search : /?s=QUERY
  * Detail : /novels/{slug}/
  * Chapter: /novels/{slug}/chapter-…/  (also prologue-…)
@@ -140,24 +140,16 @@ export class CurspeSource extends BaseSource {
 		_opts?: { lang?: string; type?: string }
 	): Promise<Manga[]> {
 		const p = Math.max(1, Number(page) || 1);
+		const path =
+			p <= 1
+				? '/novels/?orderby=date'
+				: `/novels/?orderby=date&pg=${p}`;
 
 		try {
-			if (p === 1) {
-				const html = await this.fetchHtml('/');
-				const $ = cheerio.load(html);
-				const list = this.parseLatestUpdates($);
-				if (list.length) {
-					console.log(`[curspe] latest (homepage updates) → ${list.length}`);
-					return list.slice(0, PER_PAGE);
-				}
-				// fallback kalau selector berubah
-			}
-
-			const path = p <= 1 ? '/novels/' : `/novels/?pg=${p}`;
 			const html = await this.fetchHtml(path);
 			const $ = cheerio.load(html);
 			const list = this.parseArchiveCards($);
-			console.log(`[curspe] latest page=${p} (archive) → ${list.length}`);
+			console.log(`[curspe] latest page=${p} → ${list.length}`);
 			return list.slice(0, PER_PAGE);
 		} catch (e) {
 			console.error('[curspe] getLatestManga', e);
