@@ -7,11 +7,6 @@
  * - Detail : /series/{slug}/
  * - Chapters API : /wp-json/agc/v1/chapters?series={postId}
  * - Chapter pages: /{slug}-chapter-{n}/  (img @ imgx-id.gmbr.pro)
- *
- * This file is for: frontend/src/lib/server/workerSources/impl/ManhwaIndo.ts
- * manhwaindo is in WORKER_SOURCE_IDS — live site uses THIS file, not scraper.
- *
- * Scraper copy needs: ../../family/ThemesiaSource & ../../types-manga
  */
 
 import * as cheerio from 'cheerio';
@@ -265,7 +260,6 @@ export class ManhwaIndoSource extends ThemesiaSource {
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		let path = this.cleanId(mangaId);
 
-		// Chapter URL → series path
 		if (/-chapter-[\d.]+/i.test(path) && !path.startsWith('/series/')) {
 			const slug = path
 				.replace(/^\//, '')
@@ -387,11 +381,19 @@ export class ManhwaIndoSource extends ThemesiaSource {
 
 		const accept = (src: string): boolean => {
 			if (!src || seen.has(src)) return false;
-			if (/logo|icon|avatar|emoji|spinner|histats|yandex|banner|iklan|ads?|\.gif$/i.test(src))
+			if (
+				/\/logo|\/icon|avatar|emoji|spinner|histats|yandex|\/banner|iklan|\/ads?\/|\.gif$/i.test(
+					src
+				)
+			)
 				return false;
 			if (/thumbnail\.(jpg|jpeg|png|webp)/i.test(src)) return false;
 			// Must be manga CDN / chapter page image
-			if (!/imgx[^/]*\.gmbr\.pro|gmbr\.pro\/uploads\/manga|manga-images\/.+\/chapter-/i.test(src))
+			if (
+				!/imgx[^/]*\.gmbr\.pro|gmbr\.pro\/uploads\/manga|manga-images\/.+\/chapter-/i.test(
+					src
+				)
+			)
 				return false;
 			return true;
 		};
@@ -416,7 +418,6 @@ export class ManhwaIndoSource extends ThemesiaSource {
 			return out;
 		}
 
-		// 2) Cheerio fallback
 		const $ = cheerio.load(html);
 		$('img').each((_, img) => {
 			const $img = $(img);
