@@ -116,8 +116,6 @@ export abstract class ThemesiaSource extends BaseSource {
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
 
-	// ── Latest badge on list cards ───────────────────────────────────────────
-
 	protected extractLatestChapter(
 		$: cheerio.CheerioAPI,
 		$el: cheerio.Cheerio<any>
@@ -607,7 +605,6 @@ export abstract class ThemesiaSource extends BaseSource {
 			.replace(/^\/+/, '')
 			.replace(/[-_](?:chapter|ch|c)[-_]?\d+(?:\.\d+)?.*$/i, '')
 			.replace(/[-_]v\d+c\d+(?:\.\d+)?.*$/i, '');
-
 		$('a[href]').each((_, a) => {
 			if (novelId) return;
 			const id = this.cleanId($(a).attr('href') || '');
@@ -624,12 +621,17 @@ export abstract class ThemesiaSource extends BaseSource {
 			});
 		}
 		if (!novelId) {
+			const parts = path.split('/').filter(Boolean);
 			const m =
 				path.match(/^\/(.+?)[-_](?:chapter|ch)[-_]?\d+/i) ||
 				path.match(/^\/(.+?)[-_]v\d+c\d+/i) ||
 				path.match(/^\/(.+?)[-_]c\d+/i);
-			if (m?.[1]) {
-				novelId = `${this.seriesPath}/${m[1]}`.replace(/\/{2,}/g, '/');
+			let slug = m?.[1] || '';
+			if (!slug && parts.length >= 2 && !path.startsWith(this.seriesPath)) {
+				slug = parts[0];
+			}
+			if (slug) {
+				novelId = `${this.seriesPath}/${slug}`.replace(/\/{2,}/g, '/');
 				if (!novelId.startsWith('/')) novelId = `/${novelId}`;
 			}
 		}

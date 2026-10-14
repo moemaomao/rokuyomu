@@ -1,8 +1,3 @@
-/**
- * Mikoroku Scraper Microservice
- * Heavy Cheerio HTML parsing lives here (Render/Koyeb/Fly free tier).
- * Cloudflare Worker only fetches JSON → < 1 ms CPU.
- */
 import express from 'express';
 import cors from 'cors';
 import { getSource, getSourceList } from './sources/index.js';
@@ -106,13 +101,18 @@ app.get('/:sourceId/novel-chapter/*', async (req, res) => {
       });
     }
     const data = await adapter.getChapterContent(chapterId);
+    // Pass novelId through so novel-reader can key read-markers to the same
+    // manga.id used on the detail page (Themesia: /series/{slug}).
+    const novelId = data?.novelId || data?.novelInfo?.id || null;
     res.json({
       title: data?.title || 'Chapter',
       content: data?.content || '',
       prevChapterId: data?.prevChapterId ?? null,
       nextChapterId: data?.nextChapterId ?? null,
       prevChapter: data?.prevChapterId ? { id: data.prevChapterId } : null,
-      nextChapter: data?.nextChapterId ? { id: data.nextChapterId } : null
+      nextChapter: data?.nextChapterId ? { id: data.nextChapterId } : null,
+      novelId,
+      novelInfo: data?.novelInfo || (novelId ? { id: novelId } : null)
     });
   } catch (e: any) {
     console.error('[novel-chapter]', req.params.sourceId, e);

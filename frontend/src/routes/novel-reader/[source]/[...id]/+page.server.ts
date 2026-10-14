@@ -9,16 +9,28 @@ function novelIdFromChapter(chapterId: string): string {
 	if (!path.startsWith('/')) path = '/' + path;
 	const parts = path.split('/').filter(Boolean);
 
-	if (parts.length >= 2) {
+	const withSeriesPrefix = (slugOrPath: string): string => {
+		const s = slugOrPath.replace(/^\/+/, '');
+		if (/^(series|manga|novel|comics)\//i.test(s)) return `/${s}`;
+		return `/series/${s}`;
+	};
+
+	if (parts.length >= 2 && /^(series|manga|novel|comics)$/i.test(parts[0])) {
 		const last = parts[parts.length - 1];
 		if (
 			/^(chapter|ch|episode|ep|bab)[-_.]?\d?/i.test(last) ||
 			/^\d+(\.\d+)?$/.test(last) ||
 			/[-_]chapter[-_]?\d+/i.test(last) ||
-			/^v\d+c\d+/i.test(last)
+			/^v\d+c\d+/i.test(last) ||
+			/[a-z]+-?\d+/i.test(last)
 		) {
 			return '/' + parts.slice(0, -1).join('/');
 		}
+		return '/' + parts.join('/');
+	}
+
+	if (parts.length >= 2) {
+		return withSeriesPrefix(parts[0]);
 	}
 
 	if (parts.length === 1) {
@@ -31,11 +43,10 @@ function novelIdFromChapter(chapterId: string): string {
 			const slug = seg
 				.replace(/[-_](?:chapter|ch)[-_]?\d+.*$/i, '')
 				.replace(/[-_]v\d+c\d+.*$/i, '');
-			if (slug) return `/series/${slug}`;
+			if (slug) return withSeriesPrefix(slug);
 		}
 	}
 
-	if (parts.length >= 2) return '/' + parts.slice(0, -1).join('/');
 	return path;
 }
 
