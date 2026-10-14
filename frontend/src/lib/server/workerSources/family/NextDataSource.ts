@@ -1,12 +1,19 @@
 /**
  * Family base: Next.js sites using /_next/data/{buildId}/...
- * (FlameComics-style)
+ * (FlameComics, SilentQuill, …)
+ *
+ * Path: scraper/src/sources/family/NextDataSource.ts
+ *
+ * Subclass hanya isi mapping + dataPath site-specific.
+ * HTTP / buildId / helpers umum ada di sini.
  */
 import { BaseSource } from '../BaseSource';
-import type { Manga, MangaDetails } from '../types-manga';
+import type { Chapter, Manga, MangaDetails } from '../types-manga';
 
 export abstract class NextDataSource extends BaseSource {
 	protected buildId = '';
+	protected perPage = 24;
+	protected defaultLang = 'en';
 
 	protected reqHeaders(): Record<string, string> {
 		return {
@@ -46,32 +53,118 @@ export abstract class NextDataSource extends BaseSource {
 			}
 		}
 
-		const maxAttempts = 3;
 		let lastErr: unknown;
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		for (let attempt = 1; attempt <= 3; attempt++) {
 			try {
 				const res = await fetch(url.toString(), { headers: this.reqHeaders() });
 				const text = await res.text();
 				if (!res.ok) throw new Error(`NextData ${res.status}: ${text.slice(0, 120)}`);
 				if (text.includes('NEXT_NOT_FOUND') || res.status === 404) {
 					this.buildId = '';
-					if (attempt < maxAttempts) continue;
+					if (attempt < 3) continue;
 				}
 				return JSON.parse(text) as T;
 			} catch (e) {
 				lastErr = e;
-				if (attempt < maxAttempts) {
-					this.buildId = '';
-					await new Promise((r) => setTimeout(r, 250 * attempt));
-				}
+				this.buildId = '';
+				if (attempt < 3) await new Promise((r) => setTimeout(r, 250 * attempt));
 			}
 		}
 		throw lastErr;
 	}
 
-	protected pageProps<T = Record<string, unknown>>(raw: unknown): T {
+	/** pageProps from Next data response */
+	protected props<T = Record<string, unknown>>(raw: unknown): T {
 		const o = raw as { pageProps?: T };
 		return (o?.pageProps ?? raw) as T;
+	}
+
+	protected cleanId(link: string): string {
+		let id = (link || '').trim();
+		if (id.startsWith('http')) {
+			try {
+				id = new URL(id).pathname;
+			} catch {
+				/* ignore */
+			}
+		}
+		if (!id.startsWith('/')) id = `/${id}`;
+		return id.replace(/\/+$/, '').split('?')[0] || '/';
+	}
+
+	protected absUrl(url: string): string {
+		if (!url) return '';
+		if (url.startsWith('http')) return url;
+		if (url.startsWith('//')) return `https:${url}`;
+		return `${this.baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+	}
+
+	protected parseChapterNumber(value: unknown): number {
+		if (typeof value === 'number' && Number.isFinite(value)) return value;
+		const s = String(value ?? '').trim();
+		if (!s) return 0;
+		const m =
+			s.match(/(?:chapter|ch\.?)\s*[.\-_:]?\s*(\d+(?:\.\d+)?)/i) ||
+			s.match(/^(\d+(?:\.\d+)?)/);
+		return m ? parseFloat(m[1]) : 0;
+	}
+
+	protected mapStatus(raw?: string | null): string {
+		const s = String(raw || '').toLowerCase();
+		if (/complet|finish|end|tamat/.test(s)) return 'Completed';
+		if (/hiatus/.test(s)) return 'Hiatus';
+		if (/drop|cancel/.test(s)) return 'Cancelled';
+		return 'Ongoing';
+	}
+
+	protected mapType(raw?: string | null, country?: string | null): string {
+		const t = String(raw || '').toLowerCase();
+		if (t.includes('manhwa')) return 'manhwa';
+		if (t.includes('manhua')) return 'manhua';
+		if (t.includes('manga')) return 'manga';
+		const c = String(country || '').toUpperCase();
+		if (c === 'KR') return 'manhwa';
+		if (c === 'CN') return 'manhua';
+		if (c === 'JP') return 'manga';
+		return 'manhwa';
+	}
+
+	/** Dedupe by manga.id, keep order */
+	protected dedupeManga(items: (Manga | null | undefined)[]): Manga[] {
+		const seen = new Set<string>();
+		const out: Manga[] = [];
+		for (const m of items) {
+			if (!m?.id || seen.has(m.id)) continue;
+			seen.add(m.id);
+			out.push(m);
+		}
+		return out;
+	}
+
+	protected paginate<T>(items: T[], page: number): T[] {
+		const p = Math.max(1, page || 1);
+		const start = (p - 1) * this.perPage;
+		return items.slice(start, start + this.perPage);
+	}
+
+	/** Collect unique string names from mixed author/genre fields */
+	protected collectNames(raw: unknown, maxLen = 40): string[] {
+		const out: string[] = [];
+		const push = (v: unknown) => {
+			if (v == null) return;
+			if (Array.isArray(v)) {
+				for (const x of v) push(x);
+				return;
+			}
+			if (typeof v === 'object') {
+				push((v as any).name ?? (v as any).title);
+				return;
+			}
+			const n = String(v).trim();
+			if (n && n.length < maxLen && !out.includes(n)) out.push(n);
+		};
+		push(raw);
+		return out;
 	}
 
 	abstract getLatestManga(page: number): Promise<Manga[]>;
