@@ -10,6 +10,7 @@
 		whenHistoryReady,
 		applyHistoryStorageMode,
 		exportHistoryToDisk,
+		reloadHistoryFromStorage,
 		type ReadingEntry
 	} from '$lib/stores/history';
 	import { getPreferences, subscribePreferences, type HistoryStorageMode } from '$lib/stores/preferences';
@@ -31,6 +32,7 @@
 	async function handleRefresh() {
 		refreshing = true;
 		try {
+			await reloadHistoryFromStorage();
 			loadHistory();
 			await new Promise((r) => setTimeout(r, 200));
 		} finally {
@@ -43,7 +45,12 @@
 		storageMode = getPreferences().historyStorageMode || 'cache';
 		(async () => {
 			await whenHistoryReady();
-			if (!cancelled) loadHistory();
+			if (!cancelled) {
+				if ((getPreferences().historyStorageMode || 'cache') === 'disk') {
+					await reloadHistoryFromStorage();
+				}
+				loadHistory();
+			}
 		})();
 		window.addEventListener('history-changed', loadHistory);
 		const unsub = subscribePreferences((p) => {
@@ -74,14 +81,15 @@
 			}
 			await applyHistoryStorageMode(mode);
 			storageMode = mode;
+			await reloadHistoryFromStorage();
 			loadHistory();
 			if (mode === 'disk') {
 				const res = await exportHistoryToDisk();
 				modeMsg = res.ok
-					? `Disk mode on — ${res.count} entries saved under History/ (unlimited).`
-					: 'Disk mode on. Grant the Rokuyomu folder to write history.json + covers.';
+					? `Disk mode on — ${history.length} titles (no 80 cap). Saved to History/history.json.`
+					: 'Disk mode on. Grant the folder to write history.json + covers.';
 			} else {
-				modeMsg = 'Browser cache mode — up to 80 titles in IndexedDB only.';
+				modeMsg = `Browser cache — max 80 titles (${history.length} shown).`;
 			}
 		} catch (e: any) {
 			modeMsg = e?.message || 'Failed to change storage mode';
@@ -141,7 +149,14 @@
             <h1 class="text-xl font-bold text-[var(--color-primary)] md:text-2xl">
                 Reading History
             </h1>
-            <p class="mt-1 text-sm text-zinc-500">{history.length} entries</p>
+            <p class="mt-1 text-sm text-zinc-500">
+				{history.length} entries
+				{#if storageMode === 'disk'}
+					<span class="text-emerald-700 dark:text-emerald-500/80">· unlimited (disk)</span>
+				{:else}
+					<span class="text-zinc-600">· max 80 (cache)</span>
+				{/if}
+			</p>
         </div>
 
         <div class="flex items-center gap-2">
@@ -170,21 +185,21 @@
 
 	<!-- Storage mode toggle -->
 	<div
-		class="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4"
+		class="mb-6 rounded-xl border border-zinc-200 bg-zinc-50/90 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
 	>
 		<div class="mb-3 flex items-start gap-2">
-			<Info class="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
-			<div class="text-sm text-zinc-400">
-				<p class="font-medium text-zinc-300">Where is history stored?</p>
-				<p class="mt-1 text-xs leading-relaxed text-zinc-500">
-					<strong class="text-zinc-400">Browser cache</strong> keeps reading history in IndexedDB on this device only
+			<Info class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+			<div class="text-sm text-zinc-600 dark:text-zinc-400">
+				<p class="font-medium text-zinc-800 dark:text-zinc-200">Where is history stored?</p>
+				<p class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
+					<strong class="text-zinc-700 dark:text-zinc-300">Browser cache</strong> keeps reading history in IndexedDB on this device only
 					(max <strong>80</strong> titles). Covers stay as remote URLs. Fast and private to the browser profile.
 				</p>
-				<p class="mt-1 text-xs leading-relaxed text-zinc-500">
-					<strong class="text-zinc-400">Local disk (offline)</strong> also writes
-					<code class="rounded bg-zinc-800 px-1 text-[10px]">history.json</code> and cover images under
-					<code class="rounded bg-zinc-800 px-1 text-[10px]">Rokuyomu/History/</code>
-					(or privacy-renamed folders). No title limit — useful for long-term offline progress. Requires Chrome/Edge and a folder grant.
+				<p class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
+					<strong class="text-zinc-700 dark:text-zinc-300">Local disk (offline)</strong> also writes
+					<code class="rounded bg-zinc-200 px-1 text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">history.json</code> and cover images under
+					<code class="rounded bg-zinc-200 px-1 text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">Rokuyomu/History/</code>
+					(or privacy-renamed folders). <strong class="text-zinc-700 dark:text-zinc-300">No 80-title limit</strong> — useful for long-term offline progress. Requires Chrome/Edge and a folder grant.
 				</p>
 			</div>
 		</div>
@@ -195,8 +210,8 @@
 				onclick={() => setStorageMode('cache')}
 				class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50
 					{storageMode === 'cache'
-						? 'border-violet-500 bg-violet-600/20 text-violet-300'
-						: 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}"
+						? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
+						: 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800'}"
 			>
 				<Database class="h-3.5 w-3.5" />
 				Browser cache (max 80)
@@ -207,21 +222,21 @@
 				onclick={() => setStorageMode('disk')}
 				class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50
 					{storageMode === 'disk'
-						? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
-						: 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}"
+						? 'border-emerald-600 bg-emerald-600/15 text-emerald-700 dark:border-emerald-500 dark:text-emerald-300'
+						: 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800'}"
 				title={!fsOk ? 'Not supported in this browser' : 'Unlimited offline history on disk'}
 			>
 				<HardDrive class="h-3.5 w-3.5" />
 				Local disk (unlimited)
 			</button>
 			{#if storageMode === 'disk'}
-				<span class="text-[11px] text-emerald-500/80">Offline JSON + covers enabled</span>
+				<span class="text-[11px] text-emerald-700 dark:text-emerald-500/80">{history.length} titles · no 80 cap · offline JSON</span>
 			{:else}
-				<span class="text-[11px] text-zinc-600">{history.length}/80 in cache</span>
+				<span class="text-[11px] text-zinc-500 dark:text-zinc-600">{history.length}/80 in cache</span>
 			{/if}
 		</div>
 		{#if modeMsg}
-			<p class="mt-2 text-xs text-zinc-500">{modeMsg}</p>
+			<p class="mt-2 text-xs text-zinc-500 dark:text-zinc-500">{modeMsg}</p>
 		{/if}
 	</div>
 

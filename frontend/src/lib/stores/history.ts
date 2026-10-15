@@ -27,7 +27,8 @@ import {
 	supportsFileSystemAccess,
 	getLibraryRoot,
 	saveHistoryJsonToDisk,
-	deleteHistoryCoverFromDisk
+	deleteHistoryCoverFromDisk,
+	readHistoryJsonFromDisk
 } from '$lib/utils/localFs';
 
 export type { ReadingEntry, ActivityLogEntry };
@@ -106,6 +107,14 @@ if (browser) {
 			}
 
 			historyCache = await idbGetHistory();
+			// Disk mode: merge history.json (can exceed the 80 cache cap)
+			if (prefersHistoryDisk()) {
+				try {
+					historyCache = await hydrateFromDiskIfNeeded();
+				} catch (e) {
+					console.warn('[history] disk hydrate on boot', e);
+				}
+			}
 		} catch (e) {
 			console.error('[history] failed to load from IndexedDB', e);
 			historyCache = [];
@@ -193,6 +202,41 @@ async function cacheCoverForHistory(entry: ReadingEntry) {
 		});
 	} catch (e) {
 		console.warn('[history] cover cache failed', e);
+	}
+}
+
+
+/** Merge disk history.json into IDB when disk mode is on (disk can hold more than cache limit). */
+async function hydrateFromDiskIfNeeded(): Promise<ReadingEntry[]> {
+	if (!browser || !supportsFileSystemAccess() || !prefersHistoryDisk()) {
+		return idbGetHistory();
+	}
+	try {
+		const root = await getLibraryRoot();
+		if (!root) return idbGetHistory();
+		const diskRaw = await readHistoryJsonFromDisk(root);
+		if (!diskRaw || !Array.isArray(diskRaw) || diskRaw.length === 0) {
+			return idbGetHistory();
+		}
+		const local = await idbGetHistory();
+		const map = new Map<string, ReadingEntry>();
+		for (const h of [...diskRaw, ...local] as ReadingEntry[]) {
+			const light = lightEntry(h);
+			const key = normalizeMangaId(light.mangaId);
+			if (!key) continue;
+			const existing = map.get(key);
+			if (!existing || light.timestamp > existing.timestamp) {
+				map.set(key, { ...light, mangaId: key });
+			}
+		}
+		const merged = Array.from(map.values())
+			.sort((a, b) => b.timestamp - a.timestamp)
+			.slice(0, historyLimit());
+		await idbSetAllHistory(merged);
+		return merged;
+	} catch (e) {
+		console.warn('[history] hydrateFromDisk failed', e);
+		return idbGetHistory();
 	}
 }
 
@@ -524,4 +568,16 @@ export async function applyHistoryStorageMode(mode: 'cache' | 'disk'): Promise<v
 	} else if (mode === 'disk') {
 		void exportHistoryToDisk();
 	}
+}
+
+/** Force reload from disk+IDB (History page Refresh in disk mode). */
+export async function reloadHistoryFromStorage(): Promise<ReadingEntry[]> {
+	if (!browser) return [];
+	if (prefersHistoryDisk()) {
+		historyCache = await hydrateFromDiskIfNeeded();
+	} else {
+		historyCache = await idbGetHistory();
+	}
+	window.dispatchEvent(new CustomEvent('history-changed'));
+	return historyCache;
 }
