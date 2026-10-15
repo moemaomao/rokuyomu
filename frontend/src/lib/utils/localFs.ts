@@ -575,15 +575,18 @@ export async function saveHistoryCoverToDisk(opts: {
 		const histDir = await getHistoryDir(opts.root);
 		if (!histDir) return null;
 		const coversDir = await histDir.getDirectoryHandle('covers', { create: true });
-		let ext = opts.ext || 'jpg';
-		const ct = (opts.coverBlob.type || '').toLowerCase();
-		if (ct.includes('png')) ext = 'png';
-		else if (ct.includes('webp')) ext = 'webp';
-		else if (ct.includes('gif')) ext = 'gif';
-		else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
 		const base = historyCoverKey(opts.sourceId, opts.mangaId);
-		const name = `${base}.${ext}`;
+		const name = `${base}.bin`;
 		await writeBlobFile(coversDir, name, opts.coverBlob);
+
+		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+			try {
+				await coversDir.removeEntry(`${base}.${ext}`);
+			} catch {
+				/* ignore */
+			}
+		}
+
 		return historyRelPath('covers', name);
 	} catch (e) {
 		console.warn('[localFs] saveHistoryCoverToDisk', e);
@@ -601,13 +604,15 @@ export async function deleteHistoryCoverFromDisk(opts: {
 		if (!histDir) return;
 		const coversDir = await histDir.getDirectoryHandle('covers');
 		const base = historyCoverKey(opts.sourceId, opts.mangaId);
-		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+		for (const ext of ['bin', 'jpg', 'jpeg', 'png', 'webp', 'gif']) {
 			try {
 				await coversDir.removeEntry(`${base}.${ext}`);
 			} catch {
+				/* ignore */
 			}
 		}
 	} catch {
+		/* ignore */
 	}
 }
 
@@ -621,14 +626,16 @@ export async function readHistoryCoverFromDisk(opts: {
 		if (!histDir) return null;
 		const coversDir = await histDir.getDirectoryHandle('covers');
 		const base = historyCoverKey(opts.sourceId, opts.mangaId);
-		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+		for (const ext of ['bin', 'jpg', 'jpeg', 'png', 'webp', 'gif']) {
 			try {
 				const fh = await coversDir.getFileHandle(`${base}.${ext}`);
 				return await fh.getFile();
 			} catch {
+				/* try next */
 			}
 		}
 	} catch {
+		/* ignore */
 	}
 	return null;
 }
