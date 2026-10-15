@@ -1,6 +1,7 @@
 /**
  * Flenser Translations (flenser-tl.nz)
  * Path: scraper/src/sources/impl/Flenser.ts
+ *       frontend/.../workerSources/impl/Flenser.ts
  *
  * Static Jekyll / Just the Docs:
  *   Index  : /
@@ -68,6 +69,13 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, '&quot;');
 }
 
+function formatHttpDate(raw: string | null): string | undefined {
+	if (!raw) return undefined;
+	const d = new Date(raw);
+	if (Number.isNaN(d.getTime())) return undefined;
+	return d.toISOString().slice(0, 10);
+}
+
 function parseEpisodeNum(text: string, path: string, fallback: number): number {
 	const fromPath = path.match(/Episode\s*(\d+)/i);
 	if (fromPath) {
@@ -104,6 +112,24 @@ export class FlenserSource extends BaseSource {
 		return this.fetchHtml(encodePath(decoded));
 	}
 
+	private async fetchLastModified(path: string): Promise<string | undefined> {
+		try {
+			const url = `${this.baseUrl}${encodePath(pathOnly(path))}`;
+			const res = await fetch(url, {
+				method: 'HEAD',
+				headers: {
+					...this.headers,
+					'User-Agent':
+						this.headers?.['User-Agent'] ||
+						'Mozilla/5.0 (compatible; Rokuyomu/1.0)'
+				}
+			});
+			return formatHttpDate(res.headers.get('last-modified'));
+		} catch {
+			return undefined;
+		}
+	}
+
 	private async parseIndex(): Promise<Manga[]> {
 		const html = await this.fetchHtml('/');
 		const $ = cheerio.load(html);
@@ -119,7 +145,7 @@ export class FlenserSource extends BaseSource {
 			const p = pathOnly(href);
 			if (!/\.html$/i.test(p)) return;
 			if (/Episode\s*\d+/i.test(p) || /\/Chapter\s*\d+/i.test(p)) return;
-			if (/book-list|tags\.html|ebook/i.test(p)) return;
+			if (/book-list|tags\.html|ebook|authors\.html/i.test(p)) return;
 			const parts = p.split('/').filter(Boolean);
 			if (parts.length < 3 || parts[0] !== 'docs') return;
 
@@ -153,10 +179,7 @@ export class FlenserSource extends BaseSource {
 		return list;
 	}
 
-	private collectEpisodes(
-		$: cheerio.CheerioAPI,
-		seriesPagePath: string
-	): Chapter[] {
+	private collectEpisodes($: cheerio.CheerioAPI, seriesPagePath: string): Chapter[] {
 		const folder = seriesFolder(seriesPagePath);
 		const folderNorm = folder.toLowerCase();
 		const byNum = new Map<number, Chapter>();
@@ -192,6 +215,29 @@ export class FlenserSource extends BaseSource {
 		return Array.from(byNum.values()).sort((a, b) => b.number - a.number);
 	}
 
+	private async attachChapterDates(chapters: Chapter[], maxHead = 5): Promise<Chapter[]> {
+		if (!chapters.length) return chapters;
+		const sorted = [...chapters].sort((a, b) => b.number - a.number);
+		const toFetch = sorted.slice(0, Math.min(maxHead, sorted.length));
+		const dateById = new Map<string, string>();
+
+		await Promise.all(
+			toFetch.map(async (ch) => {
+				const d = await this.fetchLastModified(ch.id);
+				if (d) dateById.set(ch.id, d);
+			})
+		);
+
+		const newestDate =
+			[...dateById.values()].sort().reverse()[0] ||
+			(await this.fetchLastModified(toFetch[0]?.id || ''));
+
+		return chapters.map((ch) => {
+			const d = dateById.get(ch.id) || (ch.number === sorted[0]?.number ? newestDate : undefined);
+			return d ? { ...ch, date: d } : ch;
+		});
+	}
+
 	private async enrichCard(m: Manga): Promise<Manga> {
 		try {
 			const html = await this.getHtml(m.id);
@@ -211,12 +257,18 @@ export class FlenserSource extends BaseSource {
 			let status = m.status;
 			if (/\bcomplete\b/.test(bodyText)) status = 'Completed';
 
+			let latestDate: string | undefined;
+			if (chapters[0]) {
+				latestDate = await this.fetchLastModified(chapters[0].id);
+			}
+
 			return {
 				...m,
 				cover: cover || m.cover,
 				status,
-				...(maxEp > 0 ? { latestChapter: maxEp } : {})
-			};
+				...(maxEp > 0 ? { latestChapter: maxEp } : {}),
+				...(latestDate ? { updatedAt: latestDate } : {})
+			} as Manga;
 		} catch {
 			return m;
 		}
@@ -331,7 +383,9 @@ export class FlenserSource extends BaseSource {
 		if (/✅/.test(h1) || /\bcomplete\b/i.test(mainText)) status = 'Completed';
 		if (/❌/.test(h1) || /\bcancel/i.test(mainText)) status = 'Dropped';
 
-		const chapters = this.collectEpisodes($, id);
+		let chapters = this.collectEpisodes($, id);
+		chapters = await this.attachChapterDates(chapters, 8);
+
 		const latestChapter = chapters.length ? chapters[0].number : undefined;
 
 		const metaLines: string[] = [];
@@ -366,6 +420,7 @@ export class FlenserSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string | null;
 	}> {
 		const id = pathOnly(chapterId);
 		const html = await this.getHtml(id);
@@ -394,9 +449,13 @@ export class FlenserSource extends BaseSource {
 
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
+		let novelId: string | null = null;
+
 		try {
 			const folder = seriesFolder(id);
 			const seriesIndex = await this.guessSeriesIndex(folder);
+			novelId = seriesIndex;
+
 			if (seriesIndex) {
 				const details = await this.getMangaDetails(seriesIndex);
 				const sorted = [...details.chapters].sort(
@@ -412,14 +471,30 @@ export class FlenserSource extends BaseSource {
 			/* ignore */
 		}
 
-		return { title, content, prevChapterId, nextChapterId };
+		if (!novelId) {
+			const folder = seriesFolder(id);
+			if (folder && folder.startsWith('/docs/')) {
+				novelId = folder;
+			}
+		}
+
+		return {
+			title,
+			content,
+			prevChapterId,
+			nextChapterId,
+			novelId
+		};
 	}
 
 	private async guessSeriesIndex(folder: string): Promise<string | null> {
 		try {
 			const all = await this.parseIndex();
-			const f = folder.toLowerCase();
-			const hit = all.find((m) => pathOnly(m.id).toLowerCase().startsWith(f + '/'));
+			const f = folder.toLowerCase().replace(/\/$/, '');
+			const hit = all.find((m) => {
+				const mid = pathOnly(m.id).toLowerCase();
+				return mid.startsWith(f + '/') || mid === f || seriesFolder(mid).toLowerCase() === f;
+			});
 			return hit ? hit.id : null;
 		} catch {
 			return null;
