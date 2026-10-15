@@ -1,11 +1,15 @@
+type CloudflareFetchInit = RequestInit & {
+	cf?: Record<string, unknown>;
+};
+
 export async function fetchWithCf(
 	url: string,
-	init?: RequestInit
+	init?: CloudflareFetchInit
 ): Promise<string> {
 	const res = await fetch(url, {
 		...init,
-		cf: { cacheTtl: 0, cacheEverything: false } as any
-	});
+		cf: { cacheTtl: 0, cacheEverything: false, ...(init?.cf ?? {}) }
+	} as RequestInit & { cf?: Record<string, unknown> });
 
 	const text = await res.text();
 
