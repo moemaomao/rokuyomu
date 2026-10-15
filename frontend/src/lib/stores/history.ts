@@ -107,7 +107,6 @@ if (browser) {
 			}
 
 			historyCache = await idbGetHistory();
-			// Disk mode: merge history.json (can exceed the 80 cache cap)
 			if (prefersHistoryDisk()) {
 				try {
 					historyCache = await hydrateFromDiskIfNeeded();
@@ -123,9 +122,11 @@ if (browser) {
 		}
 
 		window.dispatchEvent(new CustomEvent('history-changed'));
-
-		window.addEventListener('history-changed', async () => {
-			historyCache = await idbGetHistory();
+		window.addEventListener('history-changed', async (ev) => {
+			const force = (ev as CustomEvent)?.detail?.force === true;
+			if (force) {
+				historyCache = await idbGetHistory();
+			}
 		});
 	})();
 }
@@ -205,8 +206,6 @@ async function cacheCoverForHistory(entry: ReadingEntry) {
 	}
 }
 
-
-/** Merge disk history.json into IDB when disk mode is on (disk can hold more than cache limit). */
 async function hydrateFromDiskIfNeeded(): Promise<ReadingEntry[]> {
 	if (!browser || !supportsFileSystemAccess() || !prefersHistoryDisk()) {
 		return idbGetHistory();
@@ -251,17 +250,20 @@ export function isHistoryReady(): boolean {
 export function whenHistoryReady(): Promise<void> {
 	if (ready) return Promise.resolve();
 	return new Promise((resolve) => {
-		const onReady = () => {
+		const check = () => {
 			if (ready) {
-				window.removeEventListener('history-changed', onReady);
+				cleanup();
 				resolve();
 			}
 		};
-		window.addEventListener('history-changed', onReady);
-		if (ready) {
+		const onReady = () => check();
+		const timer = setInterval(check, 30);
+		const cleanup = () => {
+			clearInterval(timer);
 			window.removeEventListener('history-changed', onReady);
-			resolve();
-		}
+		};
+		window.addEventListener('history-changed', onReady);
+		check();
 	});
 }
 
@@ -570,7 +572,6 @@ export async function applyHistoryStorageMode(mode: 'cache' | 'disk'): Promise<v
 	}
 }
 
-/** Force reload from disk+IDB (History page Refresh in disk mode). */
 export async function reloadHistoryFromStorage(): Promise<ReadingEntry[]> {
 	if (!browser) return [];
 	if (prefersHistoryDisk()) {
