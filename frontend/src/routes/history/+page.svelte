@@ -321,7 +321,7 @@
 			<p class="text-sm">No reading history yet.</p>
 		</div>
 	{:else}
-		<ul class="flex flex-col gap-2">
+		<ul class="grid grid-cols-1 gap-2 lg:grid-cols-2 lg:gap-3">
 			{#each history as entry (entry.mangaId + '-' + entry.timestamp)}
 				{@const mangaHref = `/manga/${entry.sourceId}${entry.mangaId}`}
 				{@const readHref = chapterHref(entry.sourceId, entry.chapterId)}
@@ -396,7 +396,7 @@
 								<span class="history-progress-pct tabular-nums font-semibold">{pct}%</span>
 							</div>
 							<div
-								class="history-progress-track h-2 w-full overflow-hidden rounded-full"
+								class="history-progress-track h-1 w-full overflow-hidden rounded-full"
 								role="progressbar"
 								aria-valuenow={pct}
 								aria-valuemin={0}
@@ -440,6 +440,7 @@
 		contain-intrinsic-size: auto 100px;
 	}
 
+
 	.history-progress-track {
 		background: color-mix(in srgb, var(--accent, #7c3aed) 18%, transparent);
 		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 22%, transparent);
@@ -452,7 +453,7 @@
 			var(--accent, #7c3aed) 0%,
 			color-mix(in srgb, var(--accent, #7c3aed) 75%, white) 100%
 		);
-		box-shadow: 0 0 10px color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
+		box-shadow: 0 0 6px color-mix(in srgb, var(--accent, #7c3aed) 35%, transparent);
 		min-width: 0;
 	}
 
