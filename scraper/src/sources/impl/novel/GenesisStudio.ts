@@ -64,6 +64,7 @@ export class GenesisStudioSource extends BaseSource {
 	private novelsCache: any[] | null = null;
 	private novelsBySlug = new Map<string, any>();
 	private novelsById = new Map<string, any>();
+	private chapterTotalByNovelId = new Map<string, number>();
 
 	private async apiGet(apiPath: string): Promise<any> {
 		const path = apiPath.startsWith('/api')
@@ -121,9 +122,9 @@ export class GenesisStudioSource extends BaseSource {
 		else if (/hiatus|hold/.test(statusRaw)) status = 'Hiatus';
 		else if (/publish|ongoing|serial/.test(statusRaw)) status = 'Ongoing';
 
-		const ch =
-			latestChapter ??
-			(typeof n.chapter_numbers === 'number' ? n.chapter_numbers : undefined);
+		const cached =
+			n.id != null ? this.chapterTotalByNovelId.get(String(n.id)) : undefined;
+		const ch = latestChapter ?? cached;
 
 		return {
 			id: `/novels/${slug}`,
@@ -133,32 +134,67 @@ export class GenesisStudioSource extends BaseSource {
 			type: 'novel',
 			status,
 			lang: 'en',
-			...(ch != null ? { latestChapter: ch } : {})
+			...(ch != null && ch > 0 ? { latestChapter: ch } : {})
 		};
 	}
 
-	// ─── Latest = Recently Updated ───────────────────────────────────────
+	private async fetchActualChapterTotal(novelUuid: string): Promise<number | undefined> {
+		const key = String(novelUuid || '');
+		if (!key) return undefined;
+		const cached = this.chapterTotalByNovelId.get(key);
+		if (cached != null && cached > 0) return cached;
 
-	private resolveLatestChapter(novel: any, recentItem?: any): number | undefined {
-		const fromDirectus = Number(novel?.chapter_numbers);
-		if (Number.isFinite(fromDirectus) && fromDirectus > 0) return fromDirectus;
-
-		const free = Number(
-			novel?.free_up_to_chapter ?? recentItem?.novel?.free_up_to_chapter
-		);
-		const premium = Number(
-			novel?.premium_chapter_count ?? recentItem?.novel?.premium_chapter_count
-		);
-		if (Number.isFinite(free) && free > 0 && Number.isFinite(premium) && premium > 0) {
-			const sum = free + premium;
-			if (sum > free) return sum;
+		try {
+			const res = await this.apiGet(`/api/novels-chapter/${key}`);
+			const data = res?.data || res || {};
+			let total = Number(data.totalChapters);
+			if (!Number.isFinite(total) || total <= 0) {
+				const chapters: any[] = data.chapters || [];
+				total = 0;
+				for (const c of chapters) {
+					const n = Number(c.chapter_number);
+					if (Number.isFinite(n) && n > total) total = n;
+				}
+			}
+			if (total > 0) {
+				this.chapterTotalByNovelId.set(key, total);
+				return total;
+			}
+		} catch (e) {
+			console.warn('[genesistudio] fetchActualChapterTotal', key, e);
 		}
-		if (Number.isFinite(free) && free > 0) return free;
-
-		const recentCh = Number(recentItem?.chapter_number);
-		if (Number.isFinite(recentCh) && recentCh > 0) return recentCh;
 		return undefined;
 	}
+
+	private async attachActualTotals(
+		items: { manga: Manga; novelUuid?: string }[],
+		concurrency = 6
+	): Promise<Manga[]> {
+		const out: Manga[] = new Array(items.length);
+		let i = 0;
+		const workers = Array.from(
+			{ length: Math.min(concurrency, Math.max(1, items.length)) },
+			async () => {
+				while (i < items.length) {
+					const idx = i++;
+					const { manga, novelUuid } = items[idx];
+					if (!novelUuid) {
+						out[idx] = manga;
+						continue;
+					}
+					const total = await this.fetchActualChapterTotal(novelUuid);
+					out[idx] =
+						total != null && total > 0
+							? { ...manga, latestChapter: total }
+							: manga;
+				}
+			}
+		);
+		await Promise.all(workers);
+		return out;
+	}
+
+	// ─── Latest = Recently Updated ───────────────────────────────────────
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
@@ -173,7 +209,7 @@ export class GenesisStudioSource extends BaseSource {
 			]);
 			const list: any[] = Array.isArray(data) ? data : [];
 
-			const ordered: Manga[] = [];
+			const ordered: { manga: Manga; novelUuid?: string }[] = [];
 			const seen = new Set<string>();
 
 			for (const item of list) {
@@ -186,6 +222,7 @@ export class GenesisStudioSource extends BaseSource {
 					this.novelsBySlug.get(slug) ||
 					allNovels.find((n: any) => n.slug === slug);
 				const merged = catalog ? { ...novelEmbed, ...catalog } : novelEmbed;
+				const novelUuid = String(merged.id || novelEmbed.id || '');
 
 				const cover = merged.coverFile?.filename_disk
 					? coverUrl(merged.coverFile.id, merged.coverFile.filename_disk)
@@ -193,30 +230,44 @@ export class GenesisStudioSource extends BaseSource {
 						? coverUrl(novelEmbed.coverFile.id, novelEmbed.coverFile.filename_disk)
 						: coverUrl(merged.cover || novelEmbed.cover);
 
-				const latestChapter = this.resolveLatestChapter(merged, item);
-
 				ordered.push({
-					id: `/novels/${slug}`,
-					title: cleanText(merged.novel_title || novelEmbed.novel_title || slug),
-					cover,
-					sourceId: this.id,
-					type: 'novel',
-					lang: 'en',
-					...(latestChapter != null ? { latestChapter } : {})
+					novelUuid: novelUuid || undefined,
+					manga: {
+						id: `/novels/${slug}`,
+						title: cleanText(merged.novel_title || novelEmbed.novel_title || slug),
+						cover,
+						sourceId: this.id,
+						type: 'novel',
+						lang: 'en'
+					}
 				});
 			}
 
-			if (pageNum === 1) return ordered.slice(0, PER_PAGE);
-			if (ordered.length <= offset) {
-				return allNovels.slice(offset, offset + limit).map((n) => this.mapNovelCard(n));
+			let pageItems: { manga: Manga; novelUuid?: string }[];
+			if (pageNum === 1) {
+				pageItems = ordered.slice(0, PER_PAGE);
+			} else if (ordered.length <= offset) {
+				pageItems = allNovels.slice(offset, offset + limit).map((n: any) => ({
+					manga: this.mapNovelCard(n),
+					novelUuid: n.id ? String(n.id) : undefined
+				}));
+			} else {
+				pageItems = ordered.slice(offset, offset + limit);
 			}
-			return ordered.slice(offset, offset + limit);
+
+			return this.attachActualTotals(pageItems);
 		} catch (e) {
 			console.error('[genesistudio] getLatestManga', e);
 			try {
 				const all = await this.loadAllNovels();
 				const offset2 = (pageNum - 1) * PER_PAGE;
-				return all.slice(offset2, offset2 + PER_PAGE).map((n) => this.mapNovelCard(n));
+				const slice = all.slice(offset2, offset2 + PER_PAGE);
+				return this.attachActualTotals(
+					slice.map((n: any) => ({
+						manga: this.mapNovelCard(n),
+						novelUuid: n.id ? String(n.id) : undefined
+					}))
+				);
 			} catch {
 				return [];
 			}
@@ -238,7 +289,13 @@ export class GenesisStudioSource extends BaseSource {
 			return title.includes(q) || slug.includes(q) || author.includes(q);
 		});
 		const offset = (page - 1) * PER_PAGE;
-		return matched.slice(offset, offset + PER_PAGE).map((n) => this.mapNovelCard(n));
+		const slice = matched.slice(offset, offset + PER_PAGE);
+		return this.attachActualTotals(
+			slice.map((n: any) => ({
+				manga: this.mapNovelCard(n),
+				novelUuid: n.id ? String(n.id) : undefined
+			}))
+		);
 	}
 
 	// ─── Details ─────────────────────────────────────────────────────────
@@ -336,12 +393,15 @@ export class GenesisStudioSource extends BaseSource {
 
 		try {
 			const res = await this.apiGet(`/api/novels-chapter/${novelId}`);
-			const chapters: any[] = res?.data?.chapters || res?.chapters || [];
+			const data = res?.data || res || {};
+			const chapters: any[] = data.chapters || [];
 			const out: Chapter[] = [];
 
+			let maxNum = 0;
 			for (const ch of chapters) {
 				const num = Number(ch.chapter_number);
 				if (!num && num !== 0) continue;
+				if (num > maxNum) maxNum = num;
 				const isLocked =
 					ch.isPaid === true ||
 					ch.tier === 'premium' ||
@@ -356,6 +416,13 @@ export class GenesisStudioSource extends BaseSource {
 					isLocked: !!isLocked
 				});
 			}
+
+			const totalReported = Number(data.totalChapters);
+			const total =
+				Number.isFinite(totalReported) && totalReported > 0
+					? totalReported
+					: maxNum;
+			if (total > 0) this.chapterTotalByNovelId.set(String(novelId), total);
 
 			out.sort((a, b) => b.number - a.number);
 			return out;
