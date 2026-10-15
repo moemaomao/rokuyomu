@@ -22,7 +22,7 @@
 
 	let {
 		items = [] as AnnouncementPublic[],
-		/** @deprecated */
+		/** @deprecated single-message mode */
 		message = '',
 		level = 'info' as Level,
 		updatedAt = '' as string | undefined,
@@ -129,6 +129,16 @@
 		open = false;
 	}
 
+	function portal(node: HTMLElement) {
+		if (!browser) return;
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				if (node.parentNode) node.parentNode.removeChild(node);
+			}
+		};
+	}
+
 	onMount(() => {
 		function onKey(e: KeyboardEvent) {
 			if (e.key === 'Escape' && open) closeModal();
@@ -223,100 +233,103 @@
 	{/if}
 
 	{#if open}
-		<button
-			type="button"
-			class="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm"
-			aria-label="Close announcements"
-			onclick={closeModal}
-		></button>
-
-		<div
-			class="fixed left-1/2 top-1/2 z-[80] flex max-h-[min(85vh,640px)] w-[min(92vw,440px)]
-				-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border
-				border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="ann-title"
-		>
-			<div class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
-				<span
-					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-600 dark:text-violet-400"
-				>
-					<Megaphone class="h-5 w-5" />
-				</span>
-				<div class="min-w-0 flex-1">
-					<h2 id="ann-title" class="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-						Announcements
-					</h2>
-					<p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-						{list.length} message{list.length === 1 ? '' : 's'} · Rokuyomu
-					</p>
-				</div>
-				<button
-					type="button"
-					class="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700
-						dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-					aria-label="Close"
-					onclick={closeModal}
-				>
-					<X class="h-4 w-4" />
-				</button>
-			</div>
-
-			<div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-				{#each list as item, idx (item.id)}
-					{@const st = levelStyles(item.level || 'info')}
-					<article
-						class="rounded-xl border {st.border} bg-zinc-50 px-3.5 py-3 dark:bg-zinc-800/50
-							{item.active ? 'ring-1 ring-violet-500/40' : ''}"
-					>
-						<div class="mb-2 flex flex-wrap items-center gap-2">
-							<span
-								class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 {st.badge}"
-							>
-								{#if item.level === 'danger'}
-									<AlertOctagon class="h-3 w-3" />
-								{:else if item.level === 'warning'}
-									<AlertTriangle class="h-3 w-3" />
-								{:else}
-									<Info class="h-3 w-3" />
-								{/if}
-								{item.level || 'info'}
-							</span>
-							{#if item.active}
-								<span
-									class="rounded-md bg-violet-600/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 ring-1 ring-violet-500/30 dark:text-violet-300"
-								>
-									Active
-								</span>
-							{/if}
-							{#if idx === 0 && !item.active}
-								<span class="text-[10px] font-medium text-zinc-400">Latest</span>
-							{/if}
-							<span class="ml-auto text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
-								{formatDate(item.updatedAt || item.createdAt)}
-							</span>
-						</div>
-						<div
-							class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200"
-						>
-							{item.message}
-						</div>
-					</article>
-				{/each}
-			</div>
+		<div use:portal>
+			<button
+				type="button"
+				class="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm"
+				aria-label="Close announcements"
+				onclick={closeModal}
+			></button>
 
 			<div
-				class="flex shrink-0 justify-end border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
+				class="fixed left-1/2 top-1/2 z-[9999] flex max-h-[min(85vh,640px)] w-[min(92vw,440px)]
+					-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border
+					border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="ann-title"
+				style="transform: translate(-50%, -50%);"
 			>
-				<button
-					type="button"
-					class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white
-						transition hover:brightness-110"
-					onclick={closeModal}
+				<div class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+					<span
+						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-600 dark:text-violet-400"
+					>
+						<Megaphone class="h-5 w-5" />
+					</span>
+					<div class="min-w-0 flex-1">
+						<h2 id="ann-title" class="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+							Announcements
+						</h2>
+						<p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+							{list.length} message{list.length === 1 ? '' : 's'} · Rokuyomu
+						</p>
+					</div>
+					<button
+						type="button"
+						class="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700
+							dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+						aria-label="Close"
+						onclick={closeModal}
+					>
+						<X class="h-4 w-4" />
+					</button>
+				</div>
+
+				<div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+					{#each list as item, idx (item.id)}
+						{@const st = levelStyles(item.level || 'info')}
+						<article
+							class="rounded-xl border {st.border} bg-zinc-50 px-3.5 py-3 dark:bg-zinc-800/50
+								{item.active ? 'ring-1 ring-violet-500/40' : ''}"
+						>
+							<div class="mb-2 flex flex-wrap items-center gap-2">
+								<span
+									class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 {st.badge}"
+								>
+									{#if item.level === 'danger'}
+										<AlertOctagon class="h-3 w-3" />
+									{:else if item.level === 'warning'}
+										<AlertTriangle class="h-3 w-3" />
+									{:else}
+										<Info class="h-3 w-3" />
+									{/if}
+									{item.level || 'info'}
+								</span>
+								{#if item.active}
+									<span
+										class="rounded-md bg-violet-600/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 ring-1 ring-violet-500/30 dark:text-violet-300"
+									>
+										Active
+									</span>
+								{/if}
+								{#if idx === 0 && !item.active}
+									<span class="text-[10px] font-medium text-zinc-400">Latest</span>
+								{/if}
+								<span class="ml-auto text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+									{formatDate(item.updatedAt || item.createdAt)}
+								</span>
+							</div>
+							<div
+								class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200"
+							>
+								{item.message}
+							</div>
+						</article>
+					{/each}
+				</div>
+
+				<div
+					class="flex shrink-0 justify-end border-t border-zinc-100 px-5 py-3 dark:border-zinc-800"
 				>
-					Got it
-				</button>
+					<button
+						type="button"
+						class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white
+							transition hover:brightness-110"
+						onclick={closeModal}
+					>
+						Got it
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}
