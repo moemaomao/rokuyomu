@@ -169,7 +169,6 @@
 	}
 
 	function toggleDarkMode() {
-		// Flip between light/dark (explicit); clears pure "system" until user sets system in Settings
 		const next = resolveIsDark(getPreferences().theme) ? 'light' : 'dark';
 		setPreferences({ theme: next });
 		isDarkMode = applyThemeFromPreferences(next);
@@ -308,7 +307,6 @@
 		}
 
 		const mq = window.matchMedia('(min-width: 1024px)');
-		// ── Auto-retry Error 1102 ────────────────────────────────────────────────
 		const MAX_RETRY = 2;
 		const RETRY_KEY = 'rokuyomu_1102_retry';
 		const RETRY_DELAY = 1400;
@@ -400,7 +398,6 @@
 			hasHydrated = true;
 		});
 
-		// Theme from AppPreferences (dark | light | system)
 		isDarkMode = applyThemeFromPreferences(getPreferences().theme);
 
 		const mqDark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -415,7 +412,6 @@
 			isDarkMode = applyThemeFromPreferences(p.theme);
 		});
 
-		// Privacy: prune old history on load
 		pruneOldHistory().catch(() => {});
 
 		const savedHistory = localStorage.getItem('history_widget_open');
@@ -461,7 +457,7 @@
 
 		window.addEventListener('scroll', handleScroll, { passive: true });
 		const BROKEN_CACHE_KEY = 'rokuyomu_broken_sources_v1';
-		const BROKEN_CACHE_TTL = 30 * 60 * 1000; // 30 menit
+		const BROKEN_CACHE_TTL = 30 * 60 * 1000;
 
 		async function loadBrokenSourcesOnce() {
 			if (!db) return;
@@ -711,9 +707,8 @@
 			{isSidebarOpen ? 'lg:ml-[260px]' : 'ml-0'}
 			{!isReaderPage ? 'xl:flex-row' : 'flex-col'}"
 	>
-		<!-- Left column -->
 		<div class="flex min-h-screen min-w-0 flex-1 flex-col">
-			<!-- Header -->
+
 			<header
 				class="sticky top-0 z-40 w-full border-b border-[var(--border-color)] backdrop-blur-xl
 		transition-transform duration-300 ease-in-out
@@ -723,7 +718,6 @@
 					: 'bg-white/90'}"
 			>
 				<div class="flex h-12 w-full items-center justify-between gap-1.5 px-2.5 sm:h-14 sm:gap-2 sm:px-4">
-					<!-- Left: menu + logo -->
 					<div class="flex min-w-0 shrink items-center gap-1.5">
 						{#if !isSidebarOpen}
 							<button
@@ -742,8 +736,17 @@
 						{/if}
 					</div>
 
-					<!-- Right: actions -->
 					<div class="relative flex shrink-0 items-center gap-0.5">
+						{#if !isReaderPage && (data.announcements?.length || data.announcement)}
+							<AnnouncementBanner
+								items={data.announcements ?? []}
+								message={data.announcement?.message ?? ''}
+								level={data.announcement?.level ?? 'info'}
+								updatedAt={data.announcement?.updatedAt}
+								inline={true}
+							/>
+						{/if}
+
 						<a
 							href="/notification"
 							onclick={(e) => handleNavigate(e, '/notification')}
@@ -920,15 +923,6 @@
 					</div>
 				</div>
 			</header>
-
-			{#if !isReaderPage && (data.announcements?.length || data.announcement)}
-             <AnnouncementBanner
-               items={data.announcements ?? []}
-               message={data.announcement?.message ?? ''}
-               level={data.announcement?.level ?? 'info'}
-               updatedAt={data.announcement?.updatedAt}
-             />
-            {/if}
 
 			<!-- Page content -->
 			<main class="flex-1">

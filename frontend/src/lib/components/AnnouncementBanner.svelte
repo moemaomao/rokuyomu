@@ -22,15 +22,17 @@
 
 	let {
 		items = [] as AnnouncementPublic[],
-		/** @deprecated single-message mode — diisi otomatis dari items[0] jika items kosong */
+		/** @deprecated single-message mode */
 		message = '',
 		level = 'info' as Level,
-		updatedAt = '' as string | undefined
+		updatedAt = '' as string | undefined,
+		inline = true
 	}: {
 		items?: AnnouncementPublic[];
 		message?: string;
 		level?: Level;
 		updatedAt?: string;
+		inline?: boolean;
 	} = $props();
 
 	const SEEN_KEY = 'rokuyomu_ann_seen_ids_v2';
@@ -72,7 +74,7 @@
 				const arr = JSON.parse(raw) as string[];
 				return new Set(Array.isArray(arr) ? arr.map(String) : []);
 			}
-		
+
 			const leg = localStorage.getItem(SEEN_LEGACY);
 			if (leg && list[0]) {
 				const parsed = JSON.parse(leg) as { message?: string; updatedAt?: string };
@@ -174,36 +176,51 @@
 			return d.toISOString().slice(0, 16).replace('T', ' ');
 		}
 	}
-
-	function LevelIcon({ lv }: { lv: Level }) {
-		return lv;
-	}
 </script>
 
 {#if list.length}
-	<button
-		type="button"
-		class="fixed bottom-5 right-5 z-[60] flex h-12 w-12 items-center justify-center rounded-full
-			bg-violet-600 text-white shadow-lg
-			transition hover:scale-105 hover:brightness-110
-			focus:outline-none focus:ring-2 focus:ring-offset-2
-			dark:focus:ring-offset-zinc-900"
-		style="box-shadow: 0 10px 25px -5px color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
-			--tw-ring-color: var(--accent, #7c3aed);"
-		aria-label="Announcements{unreadCount > 0 ? ` ({unreadCount} unread)` : ''}"
-		onclick={openModal}
-	>
-		<Megaphone class="h-5 w-5" />
-		{#if unreadCount > 0}
-			<span
-				class="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center
-					rounded-full bg-red-500 px-1 text-[11px] font-bold leading-none text-white
-					ring-2 ring-white dark:ring-zinc-900"
-			>
-				{unreadCount > 99 ? '99+' : unreadCount}
-			</span>
-		{/if}
-	</button>
+	{#if inline}
+		<button
+			type="button"
+			class="relative rounded-lg p-1.5 transition text-zinc-300 hover:bg-zinc-800/60 hover:text-white dark:text-zinc-300 dark:hover:bg-zinc-800/60 dark:hover:text-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+			aria-label="Announcements{unreadCount > 0 ? ` ({unreadCount} unread)` : ''}"
+			title="Announcements"
+			onclick={openModal}
+		>
+			<Megaphone class="h-5 w-5" />
+			{#if unreadCount > 0}
+				<span
+					class="absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold text-white"
+				>
+					{unreadCount > 99 ? '99+' : unreadCount}
+				</span>
+			{/if}
+		</button>
+	{:else}
+		<button
+			type="button"
+			class="fixed bottom-5 right-5 z-[60] flex h-12 w-12 items-center justify-center rounded-full
+				bg-violet-600 text-white shadow-lg
+				transition hover:scale-105 hover:brightness-110
+				focus:outline-none focus:ring-2 focus:ring-offset-2
+				dark:focus:ring-offset-zinc-900"
+			style="box-shadow: 0 10px 25px -5px color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
+				--tw-ring-color: var(--accent, #7c3aed);"
+			aria-label="Announcements{unreadCount > 0 ? ` ({unreadCount} unread)` : ''}"
+			onclick={openModal}
+		>
+			<Megaphone class="h-5 w-5" />
+			{#if unreadCount > 0}
+				<span
+					class="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center
+						rounded-full bg-red-500 px-1 text-[11px] font-bold leading-none text-white
+						ring-2 ring-white dark:ring-zinc-900"
+				>
+					{unreadCount > 99 ? '99+' : unreadCount}
+				</span>
+			{/if}
+		</button>
+	{/if}
 
 	{#if open}
 		<button
