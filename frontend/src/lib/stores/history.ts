@@ -107,12 +107,13 @@ if (browser) {
 			}
 
 			historyCache = await idbGetHistory();
-			if (prefersHistoryDisk()) {
-				try {
+	
+			try {
+				if (typeof prefersHistoryDisk === 'function' && prefersHistoryDisk()) {
 					historyCache = await hydrateFromDiskIfNeeded();
-				} catch (e) {
-					console.warn('[history] disk hydrate on boot', e);
 				}
+			} catch (e) {
+				console.warn('[history] disk hydrate on boot', e);
 			}
 		} catch (e) {
 			console.error('[history] failed to load from IndexedDB', e);
@@ -123,9 +124,13 @@ if (browser) {
 
 		window.dispatchEvent(new CustomEvent('history-changed'));
 		window.addEventListener('history-changed', async (ev) => {
-			const force = (ev as CustomEvent)?.detail?.force === true;
-			if (force) {
-				historyCache = await idbGetHistory();
+			try {
+				const force = (ev as CustomEvent)?.detail?.force === true;
+				if (force) {
+					historyCache = await idbGetHistory();
+				}
+			} catch (e) {
+				console.warn('[history] history-changed handler', e);
 			}
 		});
 	})();
@@ -250,20 +255,18 @@ export function isHistoryReady(): boolean {
 export function whenHistoryReady(): Promise<void> {
 	if (ready) return Promise.resolve();
 	return new Promise((resolve) => {
-		const check = () => {
+		const onReady = () => {
 			if (ready) {
-				cleanup();
+				window.removeEventListener('history-changed', onReady);
 				resolve();
 			}
 		};
-		const onReady = () => check();
-		const timer = setInterval(check, 30);
-		const cleanup = () => {
-			clearInterval(timer);
-			window.removeEventListener('history-changed', onReady);
-		};
 		window.addEventListener('history-changed', onReady);
-		check();
+	
+		if (ready) {
+			window.removeEventListener('history-changed', onReady);
+			resolve();
+		}
 	});
 }
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
+	import { chapterHref } from '$lib/utils/novelSources';
 	import { History, Trash2, BookOpen, Clock, RefreshCw } from 'lucide-svelte';
 	import {
 		getHistory,
@@ -13,12 +13,17 @@
 	} from '$lib/stores/history';
 	import { proxyImage } from '$lib/utils/image';
 
-	let history = $state<ReadingEntry[]>(getHistory());
+	let history = $state<ReadingEntry[]>([]);
 	let refreshing = $state(false);
-	let ready = $state(isHistoryReady());
+	let ready = $state(false);
 
 	function loadHistory() {
-		history = getHistory();
+		try {
+			history = getHistory() || [];
+		} catch (e) {
+			console.warn('[history page] loadHistory', e);
+			history = [];
+		}
 	}
 
 	async function handleRefresh() {
@@ -32,20 +37,23 @@
 	}
 
 	onMount(() => {
-		loadHistory();
-
 		let cancelled = false;
 
-		if (!isHistoryReady()) {
+		loadHistory();
+		ready = isHistoryReady();
+
+		if (!ready) {
 			(async () => {
-				await whenHistoryReady();
+				try {
+					await whenHistoryReady();
+				} catch {
+					/* ignore */
+				}
 				if (!cancelled) {
 					ready = true;
 					loadHistory();
 				}
 			})();
-		} else {
-			ready = true;
 		}
 
 		const onChanged = () => {
@@ -157,7 +165,6 @@
 				<div
 					class="history-card group relative flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/10 transition hover:border-zinc-700"
 				>
-					<!-- Cover -->
 					<a
 						href={mangaHref}
 						onclick={(e) => handleNavigate(e, mangaHref)}
