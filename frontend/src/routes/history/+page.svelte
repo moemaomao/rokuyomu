@@ -26,16 +26,53 @@
 		subscribePreferences,
 		type HistoryStorageMode
 	} from '$lib/stores/preferences';
+	import {
+		getCachedPermanentStats,
+		loadPermanentStats
+	} from '$lib/stores/permanentStats';
+	import type { PermanentStatsDoc } from '$lib/db';
 	import { proxyImage } from '$lib/utils/image';
-	import { supportsFileSystemAccess, getRootFolderName, getHistorySubdirName } from '$lib/utils/localFs';
+	import {
+		supportsFileSystemAccess,
+		getRootFolderName,
+		getHistorySubdirName
+	} from '$lib/utils/localFs';
 
 	let history = $state<ReadingEntry[]>([]);
 	let refreshing = $state(false);
 	let ready = $state(false);
 	let storageMode = $state<HistoryStorageMode>(getPreferences().historyStorageMode || 'cache');
 	let fsSupported = $state(false);
+	let stats = $state<PermanentStatsDoc | null>(null);
 
 	const diskPathLabel = $derived(`${getRootFolderName()}/${getHistorySubdirName()}/`);
+
+	function normalizeId(id: string): string {
+		let s = String(id || '').trim();
+		if (!s) return '';
+		if (!s.startsWith('/')) s = '/' + s;
+		return s.replace(/\/+$/, '') || '/';
+	}
+
+	function progressPct(entry: ReadingEntry): number {
+		const ch = Number(entry.chapterNumber) || 0;
+		if (ch <= 0) return 0;
+		const key = normalizeId(entry.mangaId);
+		const max = Number(stats?.titles?.[key]?.maxChapter) || ch;
+		const denom = Math.max(max, ch, 1);
+		return Math.min(100, Math.round((ch / denom) * 100));
+	}
+
+	function progressLabel(entry: ReadingEntry): string {
+		const ch = Number(entry.chapterNumber);
+		const key = normalizeId(entry.mangaId);
+		const max = Number(stats?.titles?.[key]?.maxChapter) || 0;
+		if (ch > 0 && max > 0 && max !== ch) {
+			return `Ch. ${ch} / ${max}`;
+		}
+		if (ch > 0) return `Ch. ${ch}`;
+		return entry.chapterTitle || 'Read';
+	}
 
 	function loadHistory() {
 		try {
@@ -50,6 +87,11 @@
 		refreshing = true;
 		try {
 			loadHistory();
+			try {
+				stats = await loadPermanentStats();
+			} catch {
+				stats = getCachedPermanentStats();
+			}
 			await new Promise((r) => setTimeout(r, 120));
 		} finally {
 			refreshing = false;
@@ -69,9 +111,16 @@
 		let cancelled = false;
 		fsSupported = supportsFileSystemAccess();
 		storageMode = getPreferences().historyStorageMode || 'cache';
+		stats = getCachedPermanentStats();
 
 		loadHistory();
 		ready = isHistoryReady();
+
+		void loadPermanentStats()
+			.then((s) => {
+				if (!cancelled) stats = s;
+			})
+			.catch(() => {});
 
 		if (!ready) {
 			(async () => {
@@ -150,7 +199,9 @@
 
 <div class="mx-auto max-w-7xl p-4 md:p-6">
 	<!-- Header -->
-	<div class="mb-5 flex flex-col gap-3 border-b border-[var(--border-color)] pb-4 sm:flex-row sm:items-end sm:justify-between">
+	<div
+		class="mb-5 flex flex-col gap-3 border-b border-[var(--border-color)] pb-4 sm:flex-row sm:items-end sm:justify-between"
+	>
 		<div>
 			<h1 class="text-xl font-bold text-[var(--text-primary)]">Reading History</h1>
 			<p class="mt-0.5 text-sm text-[var(--text-secondary)]">
@@ -214,8 +265,7 @@
 					also writes
 					<code class="rounded bg-black/10 px-1 py-0.5 text-[10px] dark:bg-white/10">history.json</code>
 					and cover files under
-					<code class="rounded bg-black/10 px-1 py-0.5 text-[10px] dark:bg-white/10">{diskPathLabel}</code>
-					(or privacy-renamed folders).
+					<code class="rounded bg-black/10 px-1 py-0.5 text-[10px] dark:bg-white/10">{diskPathLabel}</code>.
 					<span class="font-semibold">No 80-title limit</span>
 					— useful for long-term offline progress. Requires Chrome/Edge and a folder grant.
 				</p>
@@ -241,9 +291,6 @@
 							? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-800 shadow-sm dark:text-emerald-300'
 							: 'border-transparent bg-white/50 text-zinc-600 hover:bg-white dark:bg-zinc-900/40 dark:text-zinc-400 dark:hover:bg-zinc-800'}
 							disabled:cursor-not-allowed disabled:opacity-40"
-						title={fsSupported
-							? 'Write history.json + covers to your offline folder'
-							: 'File System Access API not available'}
 					>
 						<HardDrive class="h-3.5 w-3.5" />
 						Local disk (unlimited)
@@ -262,7 +309,7 @@
 		</div>
 	</div>
 
-	<!-- Grid -->
+	<!-- List -->
 	{#if !ready}
 		<div class="flex flex-col items-center justify-center py-24 text-zinc-500">
 			<History class="mb-3 h-10 w-10 opacity-40" />
@@ -274,101 +321,146 @@
 			<p class="text-sm">No reading history yet.</p>
 		</div>
 	{:else}
-		<div
-			class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8"
-		>
+		<ul class="flex flex-col gap-2">
 			{#each history as entry (entry.mangaId + '-' + entry.timestamp)}
 				{@const mangaHref = `/manga/${entry.sourceId}${entry.mangaId}`}
 				{@const readHref = chapterHref(entry.sourceId, entry.chapterId)}
-				<div
-					class="history-card group flex flex-col overflow-hidden rounded-xl border border-[var(--border-color)]
-						bg-[var(--card-bg,transparent)] transition hover:border-zinc-400 dark:hover:border-zinc-600"
+				{@const pct = progressPct(entry)}
+				<li
+					class="history-row group flex gap-3 rounded-xl border border-[var(--border-color)]
+						bg-[var(--card-bg,transparent)] p-2.5 transition hover:border-zinc-400 dark:hover:border-zinc-600
+						sm:gap-4 sm:p-3"
 				>
+					<!-- Cover -->
 					<a
 						href={mangaHref}
 						onclick={(e) => handleNavigate(e, mangaHref)}
-						class="relative aspect-[3/4] w-full overflow-hidden bg-zinc-200 dark:bg-zinc-800"
+						class="relative h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-zinc-200 dark:bg-zinc-800 sm:h-24 sm:w-[4.25rem]"
 					>
 						{#if entry.cover}
 							<img
-								src={proxyImage(entry.cover, entry.sourceId, 160)}
+								src={proxyImage(entry.cover, entry.sourceId, 120)}
 								onerror={(e) => {
 									(e.currentTarget as HTMLImageElement).style.opacity = '0';
 								}}
-								alt={entry.mangaTitle}
-								class="history-card-cover h-full w-full object-cover"
+								alt=""
+								class="h-full w-full object-cover"
 								loading="lazy"
 								decoding="async"
-								fetchpriority="low"
 							/>
 						{:else}
 							<div class="flex h-full w-full items-center justify-center">
-								<BookOpen class="h-8 w-8 text-zinc-400 dark:text-zinc-600" />
+								<BookOpen class="h-6 w-6 text-zinc-400" />
 							</div>
 						{/if}
-
-						<span
-							class="absolute top-2 left-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[9px] font-bold capitalize text-white backdrop-blur-md"
-						>
-							{entry.sourceId}
-						</span>
 					</a>
 
-					<div class="flex flex-1 flex-col justify-between p-2.5">
-						<div class="space-y-1">
-							<a
-								href={mangaHref}
-								onclick={(e) => handleNavigate(e, mangaHref)}
-								class="line-clamp-1 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-								title={entry.mangaTitle}
+					<!-- Body -->
+					<div class="min-w-0 flex-1">
+						<div class="flex items-start justify-between gap-2">
+							<div class="min-w-0">
+								<a
+									href={mangaHref}
+									onclick={(e) => handleNavigate(e, mangaHref)}
+									class="line-clamp-1 text-sm font-semibold text-[var(--text-primary)] transition hover:opacity-80"
+									title={entry.mangaTitle}
+								>
+									{entry.mangaTitle}
+								</a>
+								<a
+									href={readHref}
+									onclick={(e) => handleNavigate(e, readHref)}
+									class="mt-0.5 line-clamp-1 text-xs text-[var(--color-primary)] transition hover:opacity-80"
+									title={entry.chapterTitle}
+								>
+									{entry.chapterTitle}
+								</a>
+							</div>
+
+							<button
+								type="button"
+								onclick={() => handleRemove(entry.mangaId)}
+								class="shrink-0 rounded-lg p-1.5 text-zinc-400 transition hover:bg-red-500/10 hover:text-red-500"
+								title="Remove"
 							>
-								{entry.mangaTitle}
-							</a>
-							<a
-								href={readHref}
-								onclick={(e) => handleNavigate(e, readHref)}
-								class="line-clamp-1 text-[11px] text-[var(--color-primary)] transition-colors hover:opacity-80"
-								title={entry.chapterTitle}
-							>
-								{entry.chapterTitle}
-							</a>
+								<Trash2 class="h-4 w-4" />
+							</button>
 						</div>
 
-						<div
-							class="mt-3 flex items-center justify-between border-t border-[var(--border-color)] pt-2"
-						>
-							<span class="flex items-center gap-1 text-[10px] text-zinc-500">
+						<!-- Progress bar -->
+						<div class="mt-2.5">
+							<div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
+								<span class="font-medium tabular-nums text-zinc-700 dark:text-zinc-300">
+									{progressLabel(entry)}
+								</span>
+								<span class="history-progress-pct tabular-nums font-semibold">{pct}%</span>
+							</div>
+							<div
+								class="history-progress-track h-2 w-full overflow-hidden rounded-full"
+								role="progressbar"
+								aria-valuenow={pct}
+								aria-valuemin={0}
+								aria-valuemax={100}
+							>
+								<div
+									class="history-progress-fill h-full rounded-full transition-[width] duration-500 ease-out"
+									style="width: {pct}%"
+								></div>
+							</div>
+						</div>
+
+						<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-zinc-500">
+							<span
+								class="rounded-md bg-zinc-100 px-1.5 py-0.5 font-semibold capitalize text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+							>
+								{entry.sourceId}
+							</span>
+							<span class="flex items-center gap-1">
 								<Clock class="h-3 w-3" />
 								{formatTime(entry.timestamp)}
 							</span>
-
-							<button
-								onclick={() => handleRemove(entry.mangaId)}
-								class="text-zinc-400 transition-colors hover:text-red-500"
-								title="Remove entry"
+							<a
+								href={readHref}
+								onclick={(e) => handleNavigate(e, readHref)}
+								class="font-medium text-violet-600 hover:underline dark:text-violet-400"
 							>
-								<Trash2 class="h-3.5 w-3.5" />
-							</button>
+								Continue reading →
+							</a>
 						</div>
 					</div>
-				</div>
+				</li>
 			{/each}
-		</div>
+		</ul>
 	{/if}
 </div>
 
 <style>
-	.history-card {
+	.history-row {
 		content-visibility: auto;
-		contain-intrinsic-size: auto 280px;
-		contain: layout style paint;
+		contain-intrinsic-size: auto 100px;
 	}
-	@media (hover: hover) and (pointer: fine) {
-		.history-card-cover {
-			transition: transform 0.3s ease;
-		}
-		.group:hover .history-card-cover {
-			transform: scale(1.05);
-		}
+
+	.history-progress-track {
+		background: color-mix(in srgb, var(--accent, #7c3aed) 18%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 22%, transparent);
+	}
+
+	.history-progress-fill {
+		background: var(--accent, #7c3aed);
+		background-image: linear-gradient(
+			90deg,
+			var(--accent, #7c3aed) 0%,
+			color-mix(in srgb, var(--accent, #7c3aed) 75%, white) 100%
+		);
+		box-shadow: 0 0 10px color-mix(in srgb, var(--accent, #7c3aed) 40%, transparent);
+		min-width: 0;
+	}
+
+	.history-progress-fill[style*='width: 0%'] {
+		box-shadow: none;
+	}
+
+	.history-progress-pct {
+		color: var(--accent, #7c3aed);
 	}
 </style>
