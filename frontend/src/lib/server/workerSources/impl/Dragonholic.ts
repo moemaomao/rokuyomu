@@ -1,6 +1,7 @@
 /**
  * DragonholicTranslations.com — WordPress CPT series + chapter (Lumina theme)
  * Path: scraper/src/sources/impl/Dragonholic.ts
+ *       frontend/.../workerSources/impl/Dragonholic.ts
  *
  * REST:
  *   GET /wp-json/wp/v2/series?page=&per_page=&orderby=modified&order=desc&search=
@@ -38,7 +39,7 @@ function pathOnly(href: string): string {
 	}
 }
 
-function decodeHtml(s: string): string {
+function decodeEntities(s: string): string {
 	return (s || '')
 		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
 		.replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
@@ -51,10 +52,57 @@ function decodeHtml(s: string): string {
 		.replace(/&#8221;|&rdquo;/g, '"')
 		.replace(/&#8211;|&ndash;/g, '–')
 		.replace(/&#8212;|&mdash;/g, '—')
-		.replace(/&nbsp;/g, ' ')
+		.replace(/&nbsp;/gi, ' ')
+		.replace(/&hellip;/gi, '…');
+}
+
+function decodeHtml(s: string): string {
+	return decodeEntities(s || '')
 		.replace(/<[^>]+>/g, '')
+		.replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, ' ')
 		.replace(/\s+/g, ' ')
 		.trim();
+}
+
+function cleanChapterHtml(html: string): string {
+	if (!html) return '';
+
+	let s = html
+		.replace(/<script[\s\S]*?<\/script>/gi, '')
+		.replace(/<style[\s\S]*?<\/style>/gi, '')
+		.replace(/<!--[\s\S]*?-->/g, '')
+		.replace(/[\u00a0\u200b\u200c\u200d\ufeff]+/g, ' ')
+		.replace(/&nbsp;/gi, ' ');
+
+	s = decodeEntities(s);
+	s = s
+		.replace(
+			/<(?:div|span|aside|nav|header|footer)[^>]*(?:class|id)=["'][^"']*(?:ads?|share|nav|toc|discord|support|related)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|span|aside|nav|header|footer)>/gi,
+			''
+		)
+		.replace(/<img[^>]*>/gi, '')
+		.replace(/<a\s+[^>]*href=["'][^"']*["'][^>]*>([\s\S]*?)<\/a>/gi, '$1');
+	s = s.replace(/[ \t]{2,}/g, ' ');
+	s = s
+		.replace(/<p[^>]*>/gi, '<p>')
+		.replace(/<\/p>\s*<p>/gi, '</p>\n<p>')
+		.replace(/<br\s*\/?>/gi, '<br/>');
+
+	s = s.replace(/<p>\s*<\/p>/gi, '');
+	s = s.replace(/<p>([\s\S]*?)<\/p>/gi, (_m, inner: string) => {
+		const t = inner.replace(/<[^>]+>/g, '').trim();
+		if (t.length < 2) return '';
+		if (
+			/dragonholic|please support|join our discord|table of contents|patreon|ko-fi|buy me a coffee/i.test(
+				t
+			)
+		) {
+			return '';
+		}
+		return `<p>${inner.trim()}</p>`;
+	});
+
+	return s.trim();
 }
 
 function stripHtmlKeepP(html: string): string {
@@ -62,15 +110,16 @@ function stripHtmlKeepP(html: string): string {
 	let s = html
 		.replace(/<script[\s\S]*?<\/script>/gi, '')
 		.replace(/<style[\s\S]*?<\/style>/gi, '')
+		.replace(/[\u00a0\u200b\u200c\u200d\ufeff]+/g, ' ')
 		.replace(/<br\s*\/?>/gi, '\n')
 		.replace(/<\/p>/gi, '\n\n')
 		.replace(/<\/div>/gi, '\n')
-		.replace(/<[^>]+>/g, '')
-		.replace(/&nbsp;/g, ' ');
-	s = decodeHtml(s);
+		.replace(/<\/h[1-6]>/gi, '\n\n')
+		.replace(/<[^>]+>/g, '');
+	s = decodeEntities(s).replace(/&nbsp;/gi, ' ');
 	return s
 		.split(/\n+/)
-		.map((l) => l.trim())
+		.map((l) => l.replace(/[ \t]+/g, ' ').trim())
 		.filter((l) => l.length > 0)
 		.join('\n\n');
 }
@@ -124,7 +173,6 @@ export class DragonholicSource extends BaseSource {
 		return { data, totalPages, total };
 	}
 
-	/** Latest chapter number for a series (1 request) */
 	private async fetchLatestChapterNum(seriesId: number): Promise<number | undefined> {
 		try {
 			const { data } = await this.apiGet<any[]>(
@@ -184,9 +232,7 @@ export class DragonholicSource extends BaseSource {
 
 		const enriched = await Promise.all(
 			data.map(async (item) => {
-				const latest = item?.id
-					? await this.fetchLatestChapterNum(item.id)
-					: undefined;
+				const latest = item?.id ? await this.fetchLatestChapterNum(item.id) : undefined;
 				return this.mapSeriesItem(item, latest);
 			})
 		);
@@ -213,9 +259,7 @@ export class DragonholicSource extends BaseSource {
 
 		const enriched = await Promise.all(
 			data.map(async (item) => {
-				const latest = item?.id
-					? await this.fetchLatestChapterNum(item.id)
-					: undefined;
+				const latest = item?.id ? await this.fetchLatestChapterNum(item.id) : undefined;
 				return this.mapSeriesItem(item, latest);
 			})
 		);
@@ -272,8 +316,7 @@ export class DragonholicSource extends BaseSource {
 
 				const rawTitle = decodeHtml(item.title?.rendered || item.title || '');
 				const num = parseChapterNumber(rawTitle, chapters.length + 1);
-				const date =
-					typeof item.date === 'string' ? item.date.slice(0, 10) : undefined;
+				const date = typeof item.date === 'string' ? item.date.slice(0, 10) : undefined;
 
 				chapters.push({
 					id,
@@ -326,8 +369,7 @@ export class DragonholicSource extends BaseSource {
 		const seriesPath = seriesPathFromLink(item.link || '', item.slug);
 		const chapters = await this.fetchAllChapters(seriesId, item.slug || '');
 
-		const latestChapter =
-			chapters.length > 0 ? chapters[0].number : undefined;
+		const latestChapter = chapters.length > 0 ? chapters[0].number : undefined;
 
 		return {
 			id: seriesPath,
@@ -400,7 +442,6 @@ export class DragonholicSource extends BaseSource {
 		currentNumber: number
 	): Promise<{ prev: string | null; next: string | null }> {
 		try {
-			
 			const list: { path: string; number: number }[] = [];
 			let page = 1;
 			let totalPages = 1;
@@ -439,42 +480,57 @@ export class DragonholicSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string | null;
 	}> {
 		const item = await this.resolveChapterItem(chapterId);
 		const title = decodeHtml(item.title?.rendered || item.title || 'Chapter');
 		const currentPath = pathOnly(item.link || chapterId);
 		const currentNumber = parseChapterNumber(title, 0);
 
-		const plain = stripHtmlKeepP(item.content?.rendered || '');
-		const paras = plain
-			.split(/\n\n+/)
-			.map((p) => p.trim())
-			.filter((p) => {
-				if (p.length < 10) return false;
-				if (/dragonholic|please support|join our discord|table of contents/i.test(p))
-					return false;
-				return true;
-			});
+		const rawHtml = item.content?.rendered || '';
+		let contentHtml = cleanChapterHtml(rawHtml);
 
-		const contentHtml =
-			paras.length > 0
-				? paras.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n')
-				: '<p><em>Konten kosong atau chapter terkunci.</em></p>';
+		if (!contentHtml || contentHtml.replace(/<[^>]+>/g, '').trim().length < 20) {
+			const plain = stripHtmlKeepP(rawHtml);
+			const paras = plain
+				.split(/\n\n+/)
+				.map((p) => p.trim())
+				.filter((p) => {
+					if (p.length < 10) return false;
+					if (/dragonholic|please support|join our discord|table of contents/i.test(p))
+						return false;
+					return true;
+				});
+			contentHtml =
+				paras.length > 0
+					? paras.map((p) => `<p>${escapeHtml(p)}</p>`).join('\n')
+					: '<p><em>Konten kosong atau chapter terkunci.</em></p>';
+		}
 
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
+		let novelId: string | null = null;
+
 		const parentId = Number(item.parent);
 		if (parentId > 0) {
 			const nav = await this.resolveNeighbors(parentId, currentPath, currentNumber);
 			prevChapterId = nav.prev;
 			nextChapterId = nav.next;
+
+			const m = currentPath.match(/^(\/series\/[^/]+)/i);
+			if (m) novelId = m[1];
+		}
+		if (!novelId) {
+			const m = currentPath.match(/^(\/series\/[^/]+)/i);
+			if (m) novelId = m[1];
 		}
 
 		return {
 			title,
 			content: contentHtml,
 			prevChapterId,
-			nextChapterId
+			nextChapterId,
+			novelId
 		};
 	}
 }
