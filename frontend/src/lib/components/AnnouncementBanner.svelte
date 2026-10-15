@@ -233,22 +233,27 @@
 	{/if}
 
 	{#if open}
-		<div use:portal>
+		<div
+			use:portal
+			class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+			role="presentation"
+		>
+			<!-- Backdrop -->
 			<button
 				type="button"
-				class="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm"
+				class="absolute inset-0 bg-black/50 backdrop-blur-sm"
 				aria-label="Close announcements"
 				onclick={closeModal}
 			></button>
 
+			<!-- Dialog -->
 			<div
-				class="fixed left-1/2 top-1/2 z-[9999] flex max-h-[min(85vh,640px)] w-[min(92vw,440px)]
-					-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border
-					border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+				class="relative z-10 flex max-h-[min(85vh,640px)] w-full max-w-[440px]
+					flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl
+					dark:border-zinc-700 dark:bg-zinc-900"
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby="ann-title"
-				style="transform: translate(-50%, -50%);"
 			>
 				<div class="flex shrink-0 items-start gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
 					<span
