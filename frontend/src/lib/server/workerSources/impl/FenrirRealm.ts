@@ -1,28 +1,17 @@
 /**
  * Fenrir Realm (fenrirealm.com)
  * Path: scraper/src/sources/impl/FenrirRealm.ts
+ *       frontend/.../workerSources/impl/FenrirRealm.ts
  *
  * Novel source — SvelteKit frontend + JSON API `/api/new/v2/...`
  *
- * New Releases (homepage section):
- *   GET /api/new/v2/home  →  { new_releases: SeriesCard[] }
- *
- * Series list (pagination):
- *   GET /api/new/v2/series?sort=latest&page=N  →  { data, meta }
- *
- * Series detail:
- *   GET /api/new/v2/series/{slug}
- *
- * Chapters:
- *   GET /api/new/v2/series/{slug}/chapters
- *   GET /api/new/v2/series/{slug}/chapters/{chapterSlug}
- *   (or GET /api/new/v2/chapters/{id})
- *
- * Cover: https://fenrirealm.com/{cover}  (cover is "storage/…")
- *
- * Chapter body: HTML with decoy aria-hidden divs — strip those + <style>.
- *
- * Frontend id: fenrirealm
+ * FIX 2026-10:
+ *   - API sering return content:"" + content_format:"locked" (bahkan free chapter)
+ *     → fallback scrape HTML #reader-area / chapter-view
+ *   - coba URL alt /series/{slug}/{chSlug} (tanpa /chapters/)
+ *   - pesan locked yang jelas, bukan "Offline / unavailable"
+ *   - return novelId untuk mark-as-read
+ *   - chapter list lebih toleran (legacy /api/novels/chapter-list)
  */
 import * as cheerio from 'cheerio';
 import { BaseSource } from '../BaseSource';
@@ -49,6 +38,7 @@ function absUrl(href: string | undefined | null): string {
 function cleanText(s: string): string {
 	return (s || '')
 		.replace(/\u00a0/g, ' ')
+		.replace(/[\u200b\u200c\u200d\ufeff]/g, '')
 		.replace(/&quot;/g, '"')
 		.replace(/&#039;/g, "'")
 		.replace(/&amp;/g, '&')
@@ -83,27 +73,66 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, '&quot;');
 }
 
-/** Remove anti-scrape decoy blocks; keep real <p> text as HTML paragraphs */
 function sanitizeChapterHtml(html: string): string {
+	if (!html || !html.trim()) return '';
 	const $ = cheerio.load(`<div id="root">${html || ''}</div>`);
 	$('#root style, #root script').remove();
 	$('#root [aria-hidden="true"]').remove();
-	// also drop zero-size / clip decoys by class noise if any remain empty
 	const parts: string[] = [];
 	$('#root p').each((_: number, el: any) => {
 		const t = cleanText($(el).text());
-		if (t) parts.push(`<p>${escapeHtml(t)}</p>`);
+		if (t && t.length > 1) parts.push(`<p>${escapeHtml(t)}</p>`);
 	});
 	if (parts.length) return parts.join('\n');
-	// fallback: whole text
 	const raw = cleanText($('#root').text());
-	if (!raw) return '';
+	if (!raw || raw.length < 20) return '';
 	return raw
 		.split(/\n+/)
 		.map((l) => l.trim())
-		.filter(Boolean)
+		.filter((l) => l.length > 15)
 		.map((l) => `<p>${escapeHtml(l)}</p>`)
 		.join('\n');
+}
+
+function extractContentFromChapterHtml(html: string): string {
+	if (!html) return '';
+	const $ = cheerio.load(html);
+
+	const selectors = [
+		'#reader-area .chapter-view',
+		'#reader-area',
+		'[class*="reader-area"]',
+		'.chapter-content',
+		'.chapter-body',
+		'article .prose',
+		'[data-chapter-id]'
+	];
+
+	for (const sel of selectors) {
+		const $el = $(sel).first();
+		if (!$el.length) continue;
+		// clone & clean
+		const $clone = $el.clone();
+		$clone.find('script, style, nav, header, footer, [aria-hidden="true"]').remove();
+		$clone.find('h1, h2, button, svg, .text-muted-foreground').remove();
+		const htmlInner = $clone.html() || '';
+		const cleaned = sanitizeChapterHtml(htmlInner);
+		if (cleaned.replace(/<[^>]+>/g, '').trim().length >= 80) return cleaned;
+		const plain = cleanText($clone.text());
+		if (plain.length >= 80) {
+			return plain
+				.split(/\n+/)
+				.map((l) => l.trim())
+				.filter((l) => l.length > 20)
+				.map((l) => `<p>${escapeHtml(l)}</p>`)
+				.join('\n');
+		}
+	}
+
+	const bodyText = cleanText($('body').text());
+	if (bodyText.length > 500 && !/just a moment|cf-challenge/i.test(bodyText)) {
+	}
+	return '';
 }
 
 type ApiSeriesCard = {
@@ -121,6 +150,7 @@ type ApiSeriesCard = {
 
 type ApiChapter = {
 	id?: number;
+	uuid?: string;
 	slug?: string;
 	name?: string;
 	title?: string | null;
@@ -130,6 +160,7 @@ type ApiChapter = {
 	created_at?: string;
 	updated_at?: string;
 	content?: string;
+	content_format?: string;
 };
 
 export class FenrirRealmSource extends BaseSource {
@@ -182,7 +213,11 @@ export class FenrirRealmSource extends BaseSource {
 			}
 		});
 		const text = await res.text();
-		if (!res.ok || text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
+		if (
+			!res.ok ||
+			text.trimStart().startsWith('<!DOCTYPE') ||
+			text.trimStart().startsWith('<html')
+		) {
 			throw new Error(
 				`FenrirRealm API ${res.status} ${path} ${text.slice(0, 100).replace(/\s+/g, ' ')}`
 			);
@@ -194,29 +229,31 @@ export class FenrirRealmSource extends BaseSource {
 		}
 	}
 
-	/** Homepage SSR — works more often than JSON API behind Cloudflare. */
-	private async fetchHomeHtml(): Promise<string> {
-		const res = await fetch(`${BASE}/`, { headers: this.htmlHeaders() });
+	private async fetchHtmlPage(path: string): Promise<string> {
+		const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? path : `/${path}`}`;
+		const res = await fetch(url, { headers: this.htmlHeaders() });
 		const html = await res.text();
-		if (!res.ok || /just a moment|cf-challenge|challenge-platform/i.test(html) && html.length < 50000) {
-			// soft: still try parse if series links present
-			if (!/\/series\/[a-z0-9-]+/i.test(html)) {
-				throw new Error(`FenrirRealm home HTML blocked (${res.status})`);
-			}
+		if (!res.ok) throw new Error(`FenrirRealm HTML ${res.status} ${path}`);
+		return html;
+	}
+
+	private async fetchHomeHtml(): Promise<string> {
+		const html = await this.fetchHtmlPage('/');
+		if (
+			/just a moment|cf-challenge|challenge-platform/i.test(html) &&
+			html.length < 50000 &&
+			!/\/series\/[a-z0-9-]+/i.test(html)
+		) {
+			throw new Error(`FenrirRealm home HTML blocked`);
 		}
 		return html;
 	}
 
-	/**
-	 * Parse homepage cards. New Releases section appears after the heading;
-	 * we collect unique /series/{slug} with nearby title + "N ch" badge.
-	 */
 	private parseHomeHtmlList(html: string): Manga[] {
 		const $ = cheerio.load(html);
 		const out: Manga[] = [];
 		const seen = new Set<string>();
 
-		// Build chapter count map from "123 ch" near each series link
 		const latestBySlug = new Map<string, number>();
 		const re = /\/series\/([a-z0-9-]+)[\s\S]{0,1200}?(\d+)\s*ch\b/gi;
 		let m: RegExpExecArray | null;
@@ -244,10 +281,7 @@ export class FenrirRealmSource extends BaseSource {
 				cleanText($(el).text());
 			if (!title || title.length < 3) return;
 			if (/^(read now|explore|add to|series|home)$/i.test(title)) return;
-			// skip long blurbs mistaken as title
-			if (title.length > 120) {
-				title = title.slice(0, 120);
-			}
+			if (title.length > 120) title = title.slice(0, 120);
 
 			seen.add(id);
 			let cover =
@@ -277,11 +311,12 @@ export class FenrirRealmSource extends BaseSource {
 		if (!s?.slug || !s?.title) return null;
 		const cover = absUrl(s.cover) || s.cover_data_url || '';
 		const fromCard = Number((s as any).chapter_count ?? (s as any).chapters_count ?? 0);
-		const ch = latestChapter != null && latestChapter > 0
-			? latestChapter
-			: fromCard > 0
-				? fromCard
-				: undefined;
+		const ch =
+			latestChapter != null && latestChapter > 0
+				? latestChapter
+				: fromCard > 0
+					? fromCard
+					: undefined;
 		return {
 			id: `/series/${s.slug}`,
 			title: cleanText(s.title),
@@ -294,22 +329,15 @@ export class FenrirRealmSource extends BaseSource {
 		};
 	}
 
-	/** Resolve Ch. badge from chapters list (API cards omit count). */
 	private async attachLatestChapter(m: Manga): Promise<Manga> {
 		const existing = Number(m.latestChapter ?? 0);
 		if (existing > 0) return m;
 		const slug = this.extractSeriesSlug(m.id);
 		if (!slug) return m;
 		try {
-			const list = await this.apiGet<ApiChapter[]>(
-				`/series/${encodeURIComponent(slug)}/chapters`
-			);
-			if (!Array.isArray(list) || !list.length) return m;
-			let max = 0;
-			for (const c of list) {
-				const n = Number(c.number ?? c.index ?? 0) || 0;
-				if (n > max) max = n;
-			}
+			const list = await this.fetchChapterList(slug);
+			if (!list.length) return m;
+			const max = Math.max(...list.map((c) => Number(c.number) || 0));
 			if (max > 0) return { ...m, latestChapter: max };
 		} catch {
 			/* ignore */
@@ -330,13 +358,10 @@ export class FenrirRealmSource extends BaseSource {
 		return out;
 	}
 
-	// ── New Releases (homepage section) + paginated catalog ─────────────────
-
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
 
 		if (pageNum === 1) {
-			// 1) JSON home API (new_releases)
 			try {
 				const home = await this.apiGet<{
 					new_releases?: ApiSeriesCard[];
@@ -352,27 +377,20 @@ export class FenrirRealmSource extends BaseSource {
 						ordered.push(m);
 					}
 				}
-				if (ordered.length) {
-					return this.attachLatestChapters(ordered);
-				}
+				if (ordered.length) return this.attachLatestChapters(ordered);
 			} catch (e) {
 				console.warn('[FenrirRealm] home API failed, trying HTML', e);
 			}
 
-			// 2) Cloudflare-friendly: SSR homepage HTML
 			try {
 				const html = await this.fetchHomeHtml();
 				const fromHtml = this.parseHomeHtmlList(html);
-				if (fromHtml.length) {
-					// badges may already be present from "N ch"; fill gaps
-					return this.attachLatestChapters(fromHtml);
-				}
+				if (fromHtml.length) return this.attachLatestChapters(fromHtml);
 			} catch (e) {
 				console.warn('[FenrirRealm] home HTML failed', e);
 			}
 		}
 
-		// Page 2+ / final fallback: series catalog API
 		try {
 			const data = await this.apiGet<{ data?: ApiSeriesCard[] }>(
 				`/series?sort=latest&page=${pageNum}`
@@ -387,7 +405,6 @@ export class FenrirRealmSource extends BaseSource {
 			console.warn('[FenrirRealm] series API failed', e);
 		}
 
-		// Last resort page 1 HTML again
 		if (pageNum === 1) {
 			const html = await this.fetchHomeHtml();
 			return this.attachLatestChapters(this.parseHomeHtmlList(html));
@@ -399,8 +416,6 @@ export class FenrirRealmSource extends BaseSource {
 		const q = query.trim();
 		if (!q) return [];
 		const page = Math.max(1, opts?.page ?? 1);
-		// Public search path used by site: /search/{query}
-		// API: try series list with search param variants
 		const attempts = [
 			`/series?sort=latest&page=${page}&search=${encodeURIComponent(q)}`,
 			`/series?sort=latest&page=${page}&q=${encodeURIComponent(q)}`,
@@ -419,19 +434,15 @@ export class FenrirRealmSource extends BaseSource {
 				/* next */
 			}
 		}
-		// Fallback: filter page-1 new releases / latest
 		const pool = await this.getLatestManga(1).catch(() => [] as Manga[]);
 		const ql = q.toLowerCase();
 		return pool.filter((m) => m.title.toLowerCase().includes(ql)).slice(0, 24);
 	}
 
-	// ── Details ─────────────────────────────────────────────────────────────
-
 	async getMangaDetails(mangaId: string): Promise<MangaDetails> {
 		const slug = this.extractSeriesSlug(mangaId);
 		if (!slug) throw new Error(`FenrirRealm: invalid manga id ${mangaId}`);
 
-		// Prefer JSON API; fall back to SSR page (seriesData embed) when CF blocks API
 		try {
 			const series = await this.apiGet<{
 				title?: string;
@@ -482,13 +493,8 @@ export class FenrirRealmSource extends BaseSource {
 	}
 
 	private async getMangaDetailsFromHtml(slug: string): Promise<MangaDetails> {
-		const res = await fetch(`${BASE}/series/${encodeURIComponent(slug)}`, {
-			headers: this.htmlHeaders()
-		});
-		const html = await res.text();
-		if (!res.ok) throw new Error(`FenrirRealm: series page ${res.status}`);
+		const html = await this.fetchHtmlPage(`/series/${encodeURIComponent(slug)}`);
 
-		// seriesData:{title:"...",slug:"...",...} from SvelteKit payload
 		const idx = html.indexOf('seriesData:');
 		let title = slug;
 		let status = 'Ongoing';
@@ -523,7 +529,9 @@ export class FenrirRealmSource extends BaseSource {
 			const $ = cheerio.load(html);
 			title =
 				cleanText($('h1').first().text()) ||
-				cleanText($('meta[property="og:title"]').attr('content') || '').split(/[|\-–]/)[0].trim() ||
+				cleanText($('meta[property="og:title"]').attr('content') || '')
+					.split(/[|\-–]/)[0]
+					.trim() ||
 				slug;
 			cover = absUrl($('meta[property="og:image"]').attr('content') || '');
 			description = cleanText($('meta[property="og:description"]').attr('content') || '');
@@ -555,11 +563,37 @@ export class FenrirRealmSource extends BaseSource {
 	}
 
 	private async fetchChapterList(seriesSlug: string): Promise<Chapter[]> {
-		const list = await this.apiGet<ApiChapter[]>(
-			`/series/${encodeURIComponent(seriesSlug)}/chapters`
-		);
-		if (!Array.isArray(list)) return [];
+		try {
+			const list = await this.apiGet<ApiChapter[]>(
+				`/series/${encodeURIComponent(seriesSlug)}/chapters`
+			);
+			if (Array.isArray(list) && list.length) {
+				return this.mapChapterList(seriesSlug, list);
+			}
+		} catch (e) {
+			console.warn('[FenrirRealm] chapters API failed', e);
+		}
 
+		try {
+			const res = await fetch(
+				`${BASE}/api/novels/chapter-list/${encodeURIComponent(seriesSlug)}`,
+				{ headers: { ...this.headers, Accept: 'application/json', Referer: `${BASE}/` } }
+			);
+			const text = await res.text();
+			if (res.ok && !text.trimStart().startsWith('<')) {
+				const list = JSON.parse(text) as ApiChapter[];
+				if (Array.isArray(list) && list.length) {
+					return this.mapChapterList(seriesSlug, list);
+				}
+			}
+		} catch (e) {
+			console.warn('[FenrirRealm] legacy chapter-list failed', e);
+		}
+
+		return [];
+	}
+
+	private mapChapterList(seriesSlug: string, list: ApiChapter[]): Chapter[] {
 		const out: Chapter[] = [];
 		const seen = new Set<string>();
 		for (const ch of list) {
@@ -597,15 +631,14 @@ export class FenrirRealmSource extends BaseSource {
 
 	private parseChapterId(chapterId: string): { seriesSlug: string; chapterSlug: string } {
 		const path = chapterId.replace(/\/$/, '');
-		const m = path.match(/\/series\/([a-z0-9-]+)\/chapters\/([^/]+)/i);
+		let m = path.match(/\/series\/([a-z0-9-]+)\/chapters\/([^/]+)/i);
 		if (m) return { seriesSlug: m[1], chapterSlug: m[2] };
-		// fallback: only chapter slug (legacy)
-		const m2 = path.match(/\/chapters\/([^/]+)/i);
-		if (m2) return { seriesSlug: '', chapterSlug: m2[1] };
+		m = path.match(/\/series\/([a-z0-9-]+)\/([^/]+)$/i);
+		if (m && m[2] !== 'chapters') return { seriesSlug: m[1], chapterSlug: m[2] };
+		m = path.match(/\/chapters\/([^/]+)/i);
+		if (m) return { seriesSlug: '', chapterSlug: m[1] };
 		return { seriesSlug: '', chapterSlug: path.replace(/^\//, '') };
 	}
-
-	// ── Chapter content ─────────────────────────────────────────────────────
 
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
@@ -616,48 +649,84 @@ export class FenrirRealmSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string | null;
 	}> {
 		const { seriesSlug, chapterSlug } = this.parseChapterId(chapterId);
 		if (!chapterSlug) throw new Error(`FenrirRealm: invalid chapter id ${chapterId}`);
 
-		let data: ApiChapter;
-		if (seriesSlug) {
-			data = await this.apiGet<ApiChapter>(
-				`/series/${encodeURIComponent(seriesSlug)}/chapters/${encodeURIComponent(chapterSlug)}`
-			);
-		} else {
-			// numeric id path
-			data = await this.apiGet<ApiChapter>(`/chapters/${encodeURIComponent(chapterSlug)}`);
+		let data: ApiChapter | null = null;
+		let apiErr: unknown = null;
+
+		// 1) JSON API
+		try {
+			if (seriesSlug) {
+				data = await this.apiGet<ApiChapter>(
+					`/series/${encodeURIComponent(seriesSlug)}/chapters/${encodeURIComponent(chapterSlug)}`
+				);
+			} else {
+				data = await this.apiGet<ApiChapter>(`/chapters/${encodeURIComponent(chapterSlug)}`);
+			}
+		} catch (e) {
+			apiErr = e;
+			console.warn('[FenrirRealm] chapter API failed', e);
 		}
 
-		const price = Number(data.locked?.price ?? 0) || 0;
-		if (price > 0 && !data.content) {
-			throw new Error(
-				`FenrirRealm: chapter locked (price ${price}) — ${chapterId}`
-			);
+		const price = Number(data?.locked?.price ?? 0) || 0;
+		const format = String(data?.content_format || '');
+		let body = String(data?.content || '');
+
+		if ((!body || body.length < 40) && seriesSlug) {
+			const htmlPaths = [
+				`/series/${encodeURIComponent(seriesSlug)}/chapters/${encodeURIComponent(chapterSlug)}`,
+				`/series/${encodeURIComponent(seriesSlug)}/${encodeURIComponent(chapterSlug)}`
+			];
+			for (const hp of htmlPaths) {
+				try {
+					const html = await this.fetchHtmlPage(hp);
+					const extracted = extractContentFromChapterHtml(html);
+					if (extracted && extracted.replace(/<[^>]+>/g, '').trim().length >= 80) {
+						body = extracted;
+						break;
+					}
+				} catch (e) {
+					console.warn('[FenrirRealm] HTML fallback failed', hp, e);
+				}
+			}
 		}
 
-		const num = Number(data.number ?? 0) || 0;
+		const num = Number(data?.number ?? 0) || 0;
 		const title =
-			cleanText(data.name || '') ||
-			cleanText(data.title || '') ||
+			cleanText(data?.name || '') ||
+			cleanText(data?.title || '') ||
 			(num ? `Chapter ${num}` : `Chapter ${chapterSlug}`);
 
-		const html = sanitizeChapterHtml(data.content || '');
-		if (html.length < 40) {
-			throw new Error(`FenrirRealm: empty chapter body (${chapterId})`);
+		let html = body.startsWith('<') ? sanitizeChapterHtml(body) : sanitizeChapterHtml(`<p>${body}</p>`);
+		if (!html || html.replace(/<[^>]+>/g, '').trim().length < 40) {
+			// Paid lock
+			if (price > 0) {
+				html = `<p><em>Chapter terkunci (Rune ${price}). Buka di fenrirealm.com.</em></p>`;
+			} else if (format === 'locked' || !body) {
+				html = `<p><em>Konten chapter tidak tersedia via API (content_format=locked). Fenrir Realm memblokir body chapter untuk request non-browser. Coba buka di situs asli, atau jalankan source lewat scraper + Byparr.</em></p>${
+					apiErr ? `<p><small>${escapeHtml(String(apiErr).slice(0, 200))}</small></p>` : ''
+				}`;
+			} else {
+				html = `<p><em>Konten chapter kosong (${chapterId}).</em></p>`;
+			}
 		}
 
-		// Prev / next from chapter list when we know the series
 		let prevChapterId: string | null = null;
 		let nextChapterId: string | null = null;
+		const novelId = seriesSlug ? `/series/${seriesSlug}` : null;
+
 		if (seriesSlug) {
 			try {
 				const list = await this.fetchChapterList(seriesSlug);
-				// list is desc by number
-				const idx = list.findIndex((c) => c.id.endsWith(`/chapters/${chapterSlug}`));
+				const idx = list.findIndex(
+					(c) =>
+						c.id.endsWith(`/chapters/${chapterSlug}`) ||
+						c.id.endsWith(`/${chapterSlug}`)
+				);
 				if (idx >= 0) {
-					// higher index = older = previous in reading order (asc)
 					nextChapterId = idx > 0 ? list[idx - 1]?.id ?? null : null;
 					prevChapterId = idx < list.length - 1 ? list[idx + 1]?.id ?? null : null;
 				}
@@ -670,7 +739,8 @@ export class FenrirRealmSource extends BaseSource {
 			title,
 			content: html,
 			prevChapterId,
-			nextChapterId
+			nextChapterId,
+			novelId
 		};
 	}
 }

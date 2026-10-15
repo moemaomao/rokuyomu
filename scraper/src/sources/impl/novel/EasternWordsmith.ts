@@ -13,7 +13,6 @@
  * Test: curl.exe "http://localhost:3000/easternwordsmith/latest?page=1"
  */
 import * as cheerio from 'cheerio';
-import type { AnyNode } from 'domhandler';
 import { BaseSource } from '../../BaseSource';
 import { fetchWithCf } from '../../../lib/fetchWithCf';
 import type { Manga, MangaDetails, Chapter } from '../../types-manga';
@@ -178,32 +177,14 @@ export class EasternWordsmithSource extends BaseSource {
 			if (!isChallengeHtml(html) && html.length > 500) {
 				return html;
 			}
-			console.warn(
-				`[easternwordsmith] fetchWithCf returned challenge/short body len=${html.length}, forcing Byparr`
+			throw new Error(
+				`[easternwordsmith] fetchWithCf returned challenge/short body len=${html.length} for ${raw}`
 			);
 		} catch (e: any) {
-			console.warn(
-				`[easternwordsmith] direct fetch failed (${e?.message || e}), forcing Byparr for ${raw}`
-			);
-		}
-
-		const { solveWithByparr, isByparrEnabled } = await import('../../../lib/byparr');
-		if (!isByparrEnabled()) {
 			throw new Error(
-				`Cannot reach ${raw} and BYPARR_URL is not set. Start Byparr and set BYPARR_URL.`
+				`[easternwordsmith] failed to fetch ${raw}: ${e?.message || String(e)}`
 			);
 		}
-
-		const solved = await solveWithByparr(raw, { maxTimeoutMs: 90_000 });
-		if (!solved.html || isChallengeHtml(solved.html)) {
-			throw new Error(
-				`Byparr did not return usable HTML for ${raw} (len=${solved.html?.length || 0})`
-			);
-		}
-		console.log(
-			`[easternwordsmith] Byparr OK ${raw} len=${solved.html.length} cookies=${Boolean(solved.cookieHeader)}`
-		);
-		return solved.html;
 	}
 
 	// ─── List parsers ────────────────────────────────────────────────────
@@ -522,7 +503,7 @@ export class EasternWordsmithSource extends BaseSource {
 			});
 		};
 
-		const scan = (root: cheerio.Cheerio<AnyNode>) => {
+		const scan = (root: cheerio.Cheerio<any>) => {
 			root.find('a[href*="chapter"]').each((_, el) => {
 				const a = $(el);
 				const href = a.attr('href') || '';
