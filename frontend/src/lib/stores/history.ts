@@ -22,11 +22,22 @@ import {
 	type ReadingEntry,
 	type ActivityLogEntry
 } from '$lib/db';
-import { getPreferences, shouldSaveHistory } from '$lib/stores/preferences';
+import { getPreferences, shouldSaveHistory, prefersHistoryDisk } from '$lib/stores/preferences';
+import {
+	supportsFileSystemAccess,
+	getLibraryRoot,
+	saveHistoryJsonToDisk,
+	deleteHistoryCoverFromDisk
+} from '$lib/utils/localFs';
 
 export type { ReadingEntry, ActivityLogEntry };
 
-const MAX_HISTORY = 80;
+const MAX_HISTORY_CACHE = 80;
+
+function historyLimit(): number {
+	return prefersHistoryDisk() ? 10_000 : MAX_HISTORY_CACHE;
+}
+
 const TOMBSTONE_KEY = 'mikoroku_history_tombstones';
 const FIRESTORE_BATCH_LIMIT = 450;
 
@@ -85,7 +96,7 @@ if (browser) {
 				try {
 					const parsed = JSON.parse(old) as ReadingEntry[];
 					if (Array.isArray(parsed) && parsed.length > 0) {
-						const cleaned = parsed.map(lightEntry).slice(0, MAX_HISTORY);
+						const cleaned = parsed.map(lightEntry).slice(0, historyLimit());
 						await idbSetAllHistory(cleaned);
 					}
 				} catch {
@@ -158,6 +169,33 @@ function lightEntry(entry: ReadingEntry): ReadingEntry {
 	};
 }
 
+
+async function persistHistoryToDisk(list: ReadingEntry[]) {
+	if (!browser || !supportsFileSystemAccess() || !prefersHistoryDisk()) return;
+	try {
+		const root = await getLibraryRoot();
+		if (!root) return;
+		await saveHistoryJsonToDisk(list, root);
+	} catch (e) {
+		console.warn('[history] disk snapshot failed', e);
+	}
+}
+
+async function cacheCoverForHistory(entry: ReadingEntry) {
+	if (!entry?.cover || !entry.sourceId || !entry.mangaId) return;
+	if (!prefersHistoryDisk()) return;
+	try {
+		const { cacheHistoryCover } = await import('$lib/utils/cacheCover');
+		await cacheHistoryCover({
+			mangaId: entry.mangaId,
+			sourceId: entry.sourceId,
+			coverUrl: entry.cover
+		});
+	} catch (e) {
+		console.warn('[history] cover cache failed', e);
+	}
+}
+
 export function getHistory(): ReadingEntry[] {
 	return historyCache;
 }
@@ -202,7 +240,7 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 		(h) => normalizeMangaId(h.mangaId) !== key
 	);
 	list.unshift(full);
-	const trimmed = list.slice(0, MAX_HISTORY);
+	const trimmed = list.slice(0, historyLimit());
 	await idbSetAllHistory(trimmed);
 
 	try {
@@ -218,6 +256,9 @@ export async function saveReading(entry: Omit<ReadingEntry, 'timestamp'>) {
 	historyCache = trimmed;
 	window.dispatchEvent(new CustomEvent('history-changed'));
 	window.dispatchEvent(new CustomEvent('activity-changed'));
+
+	void persistHistoryToDisk(trimmed);
+	void cacheCoverForHistory(full);
 
 	const user = getUser();
 	if (user && db) {
@@ -265,6 +306,7 @@ export async function removeFromHistory(mangaId: string) {
 	addTombstone(n || mangaId);
 
 	const list = await idbGetHistory();
+	const removed = list.filter((h) => normalizeMangaId(h.mangaId) === n);
 	const next = list.filter((h) => normalizeMangaId(h.mangaId) !== n);
 	await idbSetAllHistory(next);
 	try {
@@ -276,6 +318,11 @@ export async function removeFromHistory(mangaId: string) {
 
 	historyCache = next;
 	window.dispatchEvent(new CustomEvent('history-changed'));
+
+	void persistHistoryToDisk(next);
+	for (const h of removed) {
+		void deleteHistoryCoverFromDisk({ sourceId: h.sourceId, mangaId: h.mangaId }).catch(() => {});
+	}
 
 	const user = getUser();
 	if (user && db) {
@@ -342,6 +389,11 @@ export async function clearHistory() {
 	historyCache = [];
 	window.dispatchEvent(new CustomEvent('history-changed'));
 
+	void persistHistoryToDisk([]);
+	for (const h of list) {
+		void deleteHistoryCoverFromDisk({ sourceId: h.sourceId, mangaId: h.mangaId }).catch(() => {});
+	}
+
 	const user = getUser();
 	if (user && db && list.length) {
 		const ok = await deleteCloudHistoryDocs(
@@ -388,11 +440,13 @@ export async function syncHistoryOnLogin() {
 
 		const merged = Array.from(map.values())
 			.sort((a, b) => b.timestamp - a.timestamp)
-			.slice(0, MAX_HISTORY);
+			.slice(0, historyLimit());
 
 		await idbSetAllHistory(merged);
 		historyCache = merged;
 		window.dispatchEvent(new CustomEvent('history-changed'));
+
+		void persistHistoryToDisk(merged);
 
 		const tombstoneList = [...tombstones];
 		if (tombstoneList.length > 0) {
@@ -444,4 +498,30 @@ export async function pruneOldHistory(): Promise<number> {
 	historyCache = kept;
 	window.dispatchEvent(new CustomEvent('history-changed'));
 	return removed;
+}
+
+export async function exportHistoryToDisk(): Promise<{ ok: boolean; count: number }> {
+	if (!browser) return { ok: false, count: 0 };
+	const list = await idbGetHistory();
+	const path = await saveHistoryJsonToDisk(list);
+	if (!path) return { ok: false, count: 0 };
+	for (const h of list) {
+		void cacheCoverForHistory(h);
+	}
+	return { ok: true, count: list.length };
+}
+
+export async function applyHistoryStorageMode(mode: 'cache' | 'disk'): Promise<void> {
+	if (!browser) return;
+	const { setPreferences } = await import('$lib/stores/preferences');
+	setPreferences({ historyStorageMode: mode });
+	const list = await idbGetHistory();
+	if (mode === 'cache' && list.length > MAX_HISTORY_CACHE) {
+		const trimmed = list.slice(0, MAX_HISTORY_CACHE);
+		await idbSetAllHistory(trimmed);
+		historyCache = trimmed;
+		window.dispatchEvent(new CustomEvent('history-changed'));
+	} else if (mode === 'disk') {
+		void exportHistoryToDisk();
+	}
 }

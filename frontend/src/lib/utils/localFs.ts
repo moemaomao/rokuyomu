@@ -5,6 +5,15 @@ const FS_STORE = 'handles';
 export const ROOT_FOLDER_NAME = 'Rokuyomu';
 export const LIBRARY_SUBDIR = 'Library';
 export const BOOKMARK_SUBDIR = 'Bookmark';
+export const HISTORY_SUBDIR = 'History';
+
+/** Privacy-mode folder names (less obvious on disk). */
+const HIDDEN = {
+	root: 'AppCache',
+	library: '_media',
+	bookmark: '_fav',
+	history: '_recent'
+} as const;
 
 /** @deprecated Use ROOT_FOLDER_NAME — kept for path string compatibility in older entries. */
 export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
@@ -84,9 +93,54 @@ async function ensurePermission(handle: FileSystemDirectoryHandle): Promise<bool
 	}
 }
 
+function readHideFolders(): {
+	root: boolean;
+	library: boolean;
+	bookmark: boolean;
+	history: boolean;
+} {
+	const defaults = { root: false, library: false, bookmark: false, history: false };
+	try {
+		if (typeof localStorage === 'undefined') return defaults;
+		const raw = localStorage.getItem('rokuyomu_preferences');
+		if (!raw) return defaults;
+		const p = JSON.parse(raw);
+		const h = p?.hideOfflineFolders;
+		if (h === true) return { root: true, library: true, bookmark: true, history: true };
+		if (h && typeof h === 'object') {
+			return {
+				root: Boolean(h.root),
+				library: Boolean(h.library),
+				bookmark: Boolean(h.bookmark),
+				history: Boolean(h.history)
+			};
+		}
+		return defaults;
+	} catch {
+		return defaults;
+	}
+}
+
+export function getRootFolderName(): string {
+	return readHideFolders().root ? HIDDEN.root : ROOT_FOLDER_NAME;
+}
+
+export function getLibrarySubdirName(): string {
+	return readHideFolders().library ? HIDDEN.library : LIBRARY_SUBDIR;
+}
+
+export function getBookmarkSubdirName(): string {
+	return readHideFolders().bookmark ? HIDDEN.bookmark : BOOKMARK_SUBDIR;
+}
+
+export function getHistorySubdirName(): string {
+	return readHideFolders().history ? HIDDEN.history : HISTORY_SUBDIR;
+}
+
 async function ensureSubdirs(root: FileSystemDirectoryHandle): Promise<void> {
-	await root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
-	await root.getDirectoryHandle(BOOKMARK_SUBDIR, { create: true });
+	await root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
+	await root.getDirectoryHandle(getBookmarkSubdirName(), { create: true });
+	await root.getDirectoryHandle(getHistorySubdirName(), { create: true });
 }
 
 export async function pickLibraryRoot(): Promise<FileSystemDirectoryHandle | null> {
@@ -98,7 +152,7 @@ export async function pickLibraryRoot(): Promise<FileSystemDirectoryHandle | nul
 			startIn: 'downloads'
 		})) as FileSystemDirectoryHandle;
 
-		const root = await parent.getDirectoryHandle(ROOT_FOLDER_NAME, { create: true });
+		const root = await parent.getDirectoryHandle(getRootFolderName(), { create: true });
 		await ensureSubdirs(root);
 
 		memoryRoot = root;
@@ -145,7 +199,7 @@ export async function getLibraryDir(
 ): Promise<FileSystemDirectoryHandle | null> {
 	const r = root ?? (await getLibraryRoot());
 	if (!r) return null;
-	return r.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	return r.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 }
 
 export async function getBookmarkDir(
@@ -153,7 +207,15 @@ export async function getBookmarkDir(
 ): Promise<FileSystemDirectoryHandle | null> {
 	const r = root ?? (await getLibraryRoot());
 	if (!r) return null;
-	return r.getDirectoryHandle(BOOKMARK_SUBDIR, { create: true });
+	return r.getDirectoryHandle(getBookmarkSubdirName(), { create: true });
+}
+
+export async function getHistoryDir(
+	root?: FileSystemDirectoryHandle | null
+): Promise<FileSystemDirectoryHandle | null> {
+	const r = root ?? (await getLibraryRoot());
+	if (!r) return null;
+	return r.getDirectoryHandle(getHistorySubdirName(), { create: true });
 }
 
 export function sanitizePathSegment(name: string): string {
@@ -198,11 +260,17 @@ export async function writeTextFile(
 }
 
 function libraryRelPath(...parts: string[]): string {
-	return [ROOT_FOLDER_NAME, LIBRARY_SUBDIR, ...parts.map(sanitizePathSegment)].join('/');
+	return [getRootFolderName(), getLibrarySubdirName(), ...parts.map(sanitizePathSegment)].join('/');
 }
 
 function bookmarkRelPath(...parts: string[]): string {
-	return [ROOT_FOLDER_NAME, BOOKMARK_SUBDIR, ...parts.map((p) => p.replace(/\s+/g, '_'))].join(
+	return [getRootFolderName(), getBookmarkSubdirName(), ...parts.map((p) => p.replace(/\s+/g, '_'))].join(
+		'/'
+	);
+}
+
+function historyRelPath(...parts: string[]): string {
+	return [getRootFolderName(), getHistorySubdirName(), ...parts.map((p) => p.replace(/\s+/g, '_'))].join(
 		'/'
 	);
 }
@@ -216,7 +284,7 @@ export async function saveMangaChapterToDisk(opts: {
 	pages: { blob: Blob; ext: string }[];
 	meta?: Record<string, unknown>;
 }): Promise<string> {
-	const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const mangaRoot = await getOrCreateDir(library, 'Manga');
 	const titleDir = await getOrCreateDir(mangaRoot, opts.mangaTitle);
 	if (opts.meta) {
@@ -238,7 +306,7 @@ export async function saveNovelPdfToDisk(opts: {
 	pdfBlob: Blob;
 	meta?: Record<string, unknown>;
 }): Promise<string> {
-	const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const novelRoot = await getOrCreateDir(library, 'Novel');
 	const titleDir = await getOrCreateDir(novelRoot, opts.novelTitle);
 	if (opts.meta) {
@@ -256,7 +324,7 @@ export async function saveCoverToDisk(opts: {
 	coverBlob: Blob;
 	ext?: string;
 }): Promise<string> {
-	const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR, { create: true });
+	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const kindRoot = await getOrCreateDir(library, opts.kind);
 	const titleDir = await getOrCreateDir(kindRoot, sanitizePathSegment(opts.title));
 	let ext = opts.ext || 'jpg';
@@ -276,7 +344,7 @@ export async function readCoverFromDisk(opts: {
 	title: string;
 }): Promise<Blob | null> {
 	try {
-		const library = await opts.root.getDirectoryHandle(LIBRARY_SUBDIR);
+		const library = await opts.root.getDirectoryHandle(getLibrarySubdirName());
 		const kindRoot = await library.getDirectoryHandle(opts.kind);
 		const titleDir = await kindRoot.getDirectoryHandle(sanitizePathSegment(opts.title));
 		for (const name of ['cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp', 'cover.gif']) {
@@ -349,7 +417,7 @@ export async function saveBookmarkCoverToDisk(opts: {
 	}
 }
 
-export async function removeBookmarkCoverFromDisk(opts: {
+export async function deleteBookmarkCoverFromDisk(opts: {
 	root?: FileSystemDirectoryHandle | null;
 	sourceId: string;
 	mangaId: string;
@@ -407,4 +475,122 @@ export async function readBookmarksJsonFromDisk(
 	} catch {
 		return null;
 	}
+}
+
+export function historyCoverKey(sourceId: string, mangaId: string): string {
+	const src = sanitizePathSegment(sourceId || 'src').replace(/\s+/g, '_');
+	const id = sanitizePathSegment(String(mangaId || 'id').replace(/\//g, '_')).replace(/\s+/g, '_');
+	return `${src}__${id}`.slice(0, 120);
+}
+
+export async function saveHistoryJsonToDisk(
+	list: unknown[],
+	root?: FileSystemDirectoryHandle | null
+): Promise<string | null> {
+	try {
+		const histDir = await getHistoryDir(root);
+		if (!histDir) return null;
+		const payload = JSON.stringify(
+			{
+				version: 1,
+				updatedAt: Date.now(),
+				count: Array.isArray(list) ? list.length : 0,
+				history: list
+			},
+			null,
+			2
+		);
+		await writeTextFile(histDir, 'history.json', payload);
+		return historyRelPath('history.json');
+	} catch (e) {
+		console.warn('[localFs] saveHistoryJsonToDisk', e);
+		return null;
+	}
+}
+
+export async function readHistoryJsonFromDisk(
+	root?: FileSystemDirectoryHandle | null
+): Promise<unknown[] | null> {
+	try {
+		const histDir = await getHistoryDir(root);
+		if (!histDir) return null;
+		const fh = await histDir.getFileHandle('history.json');
+		const file = await fh.getFile();
+		const fileText = await file.text();
+		const data = JSON.parse(fileText);
+		if (Array.isArray(data)) return data;
+		if (data && Array.isArray(data.history)) return data.history;
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+export async function saveHistoryCoverToDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	mangaId: string;
+	coverBlob: Blob;
+	ext?: string;
+}): Promise<string | null> {
+	try {
+		const histDir = await getHistoryDir(opts.root);
+		if (!histDir) return null;
+		const coversDir = await histDir.getDirectoryHandle('covers', { create: true });
+		let ext = opts.ext || 'jpg';
+		const ct = (opts.coverBlob.type || '').toLowerCase();
+		if (ct.includes('png')) ext = 'png';
+		else if (ct.includes('webp')) ext = 'webp';
+		else if (ct.includes('gif')) ext = 'gif';
+		else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
+		const base = historyCoverKey(opts.sourceId, opts.mangaId);
+		const name = `${base}.${ext}`;
+		await writeBlobFile(coversDir, name, opts.coverBlob);
+		return historyRelPath('covers', name);
+	} catch (e) {
+		console.warn('[localFs] saveHistoryCoverToDisk', e);
+		return null;
+	}
+}
+
+export async function deleteHistoryCoverFromDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	mangaId: string;
+}): Promise<void> {
+	try {
+		const histDir = await getHistoryDir(opts.root);
+		if (!histDir) return;
+		const coversDir = await histDir.getDirectoryHandle('covers');
+		const base = historyCoverKey(opts.sourceId, opts.mangaId);
+		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+			try {
+				await coversDir.removeEntry(`${base}.${ext}`);
+			} catch {
+			}
+		}
+	} catch {
+	}
+}
+
+export async function readHistoryCoverFromDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	mangaId: string;
+}): Promise<Blob | null> {
+	try {
+		const histDir = await getHistoryDir(opts.root);
+		if (!histDir) return null;
+		const coversDir = await histDir.getDirectoryHandle('covers');
+		const base = historyCoverKey(opts.sourceId, opts.mangaId);
+		for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'gif']) {
+			try {
+				const fh = await coversDir.getFileHandle(`${base}.${ext}`);
+				return await fh.getFile();
+			} catch {
+			}
+		}
+	} catch {
+	}
+	return null;
 }

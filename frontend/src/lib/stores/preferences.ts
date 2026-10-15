@@ -19,6 +19,13 @@ export type ThemeMode =
 
 export type GridSize = 'compact' | 'comfortable';
 export type DownloadMode = 'disk' | 'zip';
+export type HistoryStorageMode = 'cache' | 'disk';
+export type HideOfflineFolders = {
+	root: boolean;
+	library: boolean;
+	bookmark: boolean;
+	history: boolean;
+};
 
 export type AppPreferences = {
 	theme: ThemeMode;
@@ -35,6 +42,8 @@ export type AppPreferences = {
 	incognitoSession: boolean;
 	downloadMode: DownloadMode;
 	autoDownloadOnRead: boolean;
+	historyStorageMode: HistoryStorageMode;
+	hideOfflineFolders: HideOfflineFolders;
 };
 
 const STORAGE_KEY = 'rokuyomu_preferences';
@@ -49,7 +58,14 @@ const DEFAULTS: AppPreferences = {
 	autoClearHistoryDays: 0,
 	incognitoSession: false,
 	downloadMode: 'disk',
-	autoDownloadOnRead: false
+	autoDownloadOnRead: false,
+	historyStorageMode: 'cache',
+	hideOfflineFolders: {
+		root: false,
+		library: false,
+		bookmark: false,
+		history: false
+	}
 };
 
 const DARK_THEMES: ThemeMode[] = [
@@ -72,11 +88,26 @@ function load(): AppPreferences {
 		if (t === 'amoled' || t === 'sepia' || t === 'midnight' || t === 'cyan' || t === 'pink') {
 			parsed.theme = 'dark';
 		}
+
+		let hideFolders = { ...DEFAULTS.hideOfflineFolders };
+		const rawHide = (parsed as any).hideOfflineFolders;
+		if (rawHide === true) {
+			hideFolders = { root: true, library: true, bookmark: true, history: true };
+		} else if (rawHide && typeof rawHide === 'object') {
+			hideFolders = {
+				root: Boolean(rawHide.root),
+				library: Boolean(rawHide.library),
+				bookmark: Boolean(rawHide.bookmark),
+				history: Boolean(rawHide.history)
+			};
+		}
 		return {
 			...DEFAULTS,
 			...parsed,
 			hideBadges: { ...DEFAULTS.hideBadges, ...(parsed.hideBadges || {}) },
-			autoDownloadOnRead: Boolean(parsed.autoDownloadOnRead)
+			autoDownloadOnRead: Boolean(parsed.autoDownloadOnRead),
+			historyStorageMode: parsed.historyStorageMode === 'disk' ? 'disk' : 'cache',
+			hideOfflineFolders: hideFolders
 		};
 	} catch {
 		return { ...DEFAULTS, hideBadges: { ...DEFAULTS.hideBadges } };
@@ -105,7 +136,10 @@ export function setPreferences(partial: Partial<AppPreferences>): AppPreferences
 		...partial,
 		hideBadges: partial.hideBadges
 			? { ...prefs.hideBadges, ...partial.hideBadges }
-			: prefs.hideBadges
+			: prefs.hideBadges,
+		hideOfflineFolders: partial.hideOfflineFolders
+			? { ...prefs.hideOfflineFolders, ...partial.hideOfflineFolders }
+			: prefs.hideOfflineFolders
 	};
 	try {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
@@ -203,4 +237,13 @@ export function prefersDiskDownload(): boolean {
 
 export function shouldAutoDownloadOnRead(): boolean {
 	return Boolean(getPreferences().autoDownloadOnRead);
+}
+
+
+export function prefersHistoryDisk(): boolean {
+	return getPreferences().historyStorageMode === 'disk';
+}
+
+export function getHideOfflineFolders(): HideOfflineFolders {
+	return getPreferences().hideOfflineFolders;
 }

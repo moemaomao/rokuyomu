@@ -2,7 +2,8 @@ import {
 	supportsFileSystemAccess,
 	ensureLibraryRoot,
 	saveCoverToDisk,
-	saveBookmarkCoverToDisk
+	saveBookmarkCoverToDisk,
+	saveHistoryCoverToDisk
 } from '$lib/utils/localFs';
 import { idbPutLibraryCover } from '$lib/db';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
@@ -101,6 +102,62 @@ export async function cacheBookmarkCover(opts: {
 		} catch (e) {
 			console.warn('[cacheCover] bookmark disk save failed', e);
 		}
+	}
+}
+
+
+function histCoverKey(mangaId: string, sourceId: string): string {
+	return `hist::${libKey(mangaId, sourceId)}`;
+}
+
+export async function cacheHistoryCover(opts: {
+	mangaId: string;
+	sourceId: string;
+	coverUrl: string;
+}): Promise<void> {
+	const { mangaId, sourceId, coverUrl } = opts;
+	if (!coverUrl || !mangaId || !sourceId) return;
+
+	const blob = await fetchCoverBlob(coverUrl, sourceId);
+	if (!blob) return;
+
+	const key = histCoverKey(mangaId, sourceId);
+
+	try {
+		await idbPutLibraryCover(key, blob);
+	} catch (e) {
+		console.warn('[cacheCover] history IDB put failed', e);
+	}
+
+	if (supportsFileSystemAccess()) {
+		try {
+			const root = await ensureLibraryRoot();
+			if (root) {
+				await saveHistoryCoverToDisk({
+					root,
+					sourceId,
+					mangaId,
+					coverBlob: blob
+				});
+			}
+		} catch (e) {
+			console.warn('[cacheCover] history disk save failed', e);
+		}
+	}
+}
+
+export async function getOfflineHistoryCoverObjectUrl(
+	mangaId: string,
+	sourceId: string
+): Promise<string | null> {
+	try {
+		const { idbGetLibraryCover } = await import('$lib/db');
+		let blob = await idbGetLibraryCover(histCoverKey(mangaId, sourceId));
+		if (!blob) blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
+		if (!blob) return null;
+		return URL.createObjectURL(blob);
+	} catch {
+		return null;
 	}
 }
 

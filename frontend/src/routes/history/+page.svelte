@@ -2,12 +2,27 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
-	import { History, Trash2, BookOpen, Clock, RefreshCw } from 'lucide-svelte';
-	import { getHistory, clearHistory, removeFromHistory, whenHistoryReady, type ReadingEntry } from '$lib/stores/history';
+	import { History, Trash2, BookOpen, Clock, RefreshCw, HardDrive, Database, Info } from 'lucide-svelte';
+	import {
+		getHistory,
+		clearHistory,
+		removeFromHistory,
+		whenHistoryReady,
+		applyHistoryStorageMode,
+		exportHistoryToDisk,
+		type ReadingEntry
+	} from '$lib/stores/history';
+	import { getPreferences, subscribePreferences, type HistoryStorageMode } from '$lib/stores/preferences';
+	import { supportsFileSystemAccess } from '$lib/utils/localFs';
+	import { chooseLibraryFolder } from '$lib/stores/library.svelte';
     import { proxyImage } from '$lib/utils/image';
 
 	let history = $state<ReadingEntry[]>([]);
 	let refreshing = $state(false);
+	let storageMode = $state<HistoryStorageMode>(getPreferences().historyStorageMode || 'cache');
+	let modeBusy = $state(false);
+	let modeMsg = $state('');
+	const fsOk = supportsFileSystemAccess();
 
 	function loadHistory() {
 		history = getHistory();
@@ -25,16 +40,55 @@
 
 	onMount(() => {
 		let cancelled = false;
+		storageMode = getPreferences().historyStorageMode || 'cache';
 		(async () => {
 			await whenHistoryReady();
 			if (!cancelled) loadHistory();
 		})();
 		window.addEventListener('history-changed', loadHistory);
+		const unsub = subscribePreferences((p) => {
+			storageMode = p.historyStorageMode || 'cache';
+		});
 		return () => {
 			cancelled = true;
 			window.removeEventListener('history-changed', loadHistory);
+			unsub();
 		};
 	});
+
+	async function setStorageMode(mode: HistoryStorageMode) {
+		if (mode === storageMode || modeBusy) return;
+		modeBusy = true;
+		modeMsg = '';
+		try {
+			if (mode === 'disk') {
+				if (!fsOk) {
+					modeMsg = 'Local disk requires Chrome or Edge (File System Access API).';
+					return;
+				}
+				const ok = await chooseLibraryFolder();
+				if (!ok) {
+					modeMsg = 'Folder not selected — staying on browser cache.';
+					return;
+				}
+			}
+			await applyHistoryStorageMode(mode);
+			storageMode = mode;
+			loadHistory();
+			if (mode === 'disk') {
+				const res = await exportHistoryToDisk();
+				modeMsg = res.ok
+					? `Disk mode on — ${res.count} entries saved under History/ (unlimited).`
+					: 'Disk mode on. Grant the Rokuyomu folder to write history.json + covers.';
+			} else {
+				modeMsg = 'Browser cache mode — up to 80 titles in IndexedDB only.';
+			}
+		} catch (e: any) {
+			modeMsg = e?.message || 'Failed to change storage mode';
+		} finally {
+			modeBusy = false;
+		}
+	}
 
 	async function handleClear() {
 		if (!confirm('Clear all reading history?')) return;
@@ -113,6 +167,63 @@
             {/if}
         </div>
     </div>
+
+	<!-- Storage mode toggle -->
+	<div
+		class="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4"
+	>
+		<div class="mb-3 flex items-start gap-2">
+			<Info class="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+			<div class="text-sm text-zinc-400">
+				<p class="font-medium text-zinc-300">Where is history stored?</p>
+				<p class="mt-1 text-xs leading-relaxed text-zinc-500">
+					<strong class="text-zinc-400">Browser cache</strong> keeps reading history in IndexedDB on this device only
+					(max <strong>80</strong> titles). Covers stay as remote URLs. Fast and private to the browser profile.
+				</p>
+				<p class="mt-1 text-xs leading-relaxed text-zinc-500">
+					<strong class="text-zinc-400">Local disk (offline)</strong> also writes
+					<code class="rounded bg-zinc-800 px-1 text-[10px]">history.json</code> and cover images under
+					<code class="rounded bg-zinc-800 px-1 text-[10px]">Rokuyomu/History/</code>
+					(or privacy-renamed folders). No title limit — useful for long-term offline progress. Requires Chrome/Edge and a folder grant.
+				</p>
+			</div>
+		</div>
+		<div class="flex flex-wrap items-center gap-2">
+			<button
+				type="button"
+				disabled={modeBusy}
+				onclick={() => setStorageMode('cache')}
+				class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50
+					{storageMode === 'cache'
+						? 'border-violet-500 bg-violet-600/20 text-violet-300'
+						: 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}"
+			>
+				<Database class="h-3.5 w-3.5" />
+				Browser cache (max 80)
+			</button>
+			<button
+				type="button"
+				disabled={modeBusy || !fsOk}
+				onclick={() => setStorageMode('disk')}
+				class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50
+					{storageMode === 'disk'
+						? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
+						: 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}"
+				title={!fsOk ? 'Not supported in this browser' : 'Unlimited offline history on disk'}
+			>
+				<HardDrive class="h-3.5 w-3.5" />
+				Local disk (unlimited)
+			</button>
+			{#if storageMode === 'disk'}
+				<span class="text-[11px] text-emerald-500/80">Offline JSON + covers enabled</span>
+			{:else}
+				<span class="text-[11px] text-zinc-600">{history.length}/80 in cache</span>
+			{/if}
+		</div>
+		{#if modeMsg}
+			<p class="mt-2 text-xs text-zinc-500">{modeMsg}</p>
+		{/if}
+	</div>
 
     {#if history.length === 0}
         <div class="flex flex-col items-center justify-center py-20 text-center">
