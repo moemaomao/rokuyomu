@@ -38,11 +38,9 @@ function pathOnly(href: string): string {
 	try {
 		const u = new URL(absUrl(href));
 		let p = u.pathname || '/';
-		// decode then re-normalize
 		try {
 			p = decodeURIComponent(p);
 		} catch {
-			/* keep */
 		}
 		if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
 		return p || '/';
@@ -53,7 +51,6 @@ function pathOnly(href: string): string {
 	}
 }
 
-/** Encode path for fetch — keep /novel/Foo Bar as /novel/Foo%20Bar */
 function encodePath(path: string): string {
 	if (path.startsWith('http')) return path;
 	const parts = path.split('/').map((seg, i) => {
@@ -171,7 +168,6 @@ export class EasternWordsmithSource extends BaseSource {
 			? path
 			: `${this.baseUrl}${encodePath(path.startsWith('/') ? path : `/${path}`)}`;
 
-		// 1) Normal path (cookie jar + Byparr if CF HTML detected)
 		try {
 			const html = await fetchWithCf(raw, {
 				headers: {
@@ -186,13 +182,11 @@ export class EasternWordsmithSource extends BaseSource {
 				`[easternwordsmith] fetchWithCf returned challenge/short body len=${html.length}, forcing Byparr`
 			);
 		} catch (e: any) {
-			// Node "fetch failed" / ECONNRESET / etc. — never reached CF detector
 			console.warn(
 				`[easternwordsmith] direct fetch failed (${e?.message || e}), forcing Byparr for ${raw}`
 			);
 		}
 
-		// 2) Force Byparr solve (site often blocks bare Node TLS before CF page)
 		const { solveWithByparr, isByparrEnabled } = await import('../../../lib/byparr');
 		if (!isByparrEnabled()) {
 			throw new Error(
@@ -220,7 +214,6 @@ export class EasternWordsmithSource extends BaseSource {
 
 		const push = (href: string, title: string, cover: string, latest?: number) => {
 			let path = pathOnly(href);
-			// relative "novel/Foo" → "/novel/Foo"
 			if (!path.startsWith('/novel/') && /novel\//i.test(href)) {
 				const m = href.match(/novel\/([^?#]+)/i);
 				if (m) path = `/novel/${decodeURIComponent(m[1]).replace(/\/$/, '')}`;
@@ -245,7 +238,6 @@ export class EasternWordsmithSource extends BaseSource {
 			});
 		};
 
-		// A) Latest Updates cards: h6 > a[href*="novel"]
 		$('h6 a[href*="novel"], h5 a[href*="novel"], h4 a[href*="novel"]').each((_, el) => {
 			const a = $(el);
 			const href = a.attr('href') || '';
@@ -267,7 +259,6 @@ export class EasternWordsmithSource extends BaseSource {
 			push(href, title, cover, latest);
 		});
 
-		// B) Any anchor with novel/ in href
 		$('a[href*="novel"]').each((_, el) => {
 			const a = $(el);
 			const href = a.attr('href') || '';
@@ -280,7 +271,6 @@ export class EasternWordsmithSource extends BaseSource {
 			}
 			title = title.replace(/\s+/g, ' ').trim();
 			if (!title || title.length < 2) return;
-			// skip nav labels
 			if (/^(home|novels?|updates?|contact|login|register|all novels)$/i.test(title)) return;
 
 			let cover = '';
@@ -303,7 +293,6 @@ export class EasternWordsmithSource extends BaseSource {
 			push(href, title, cover, latest);
 		});
 
-		// C) Regex fallback on raw-ish text links if still empty
 		if (list.length === 0) {
 			const body = $.root().html() || '';
 			const re = /href=["']([^"']*novel\/[^"']+)["'][^>]*>([^<]{3,200})</gi;

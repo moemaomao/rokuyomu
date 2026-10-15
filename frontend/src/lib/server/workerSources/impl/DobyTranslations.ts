@@ -76,7 +76,6 @@ export class DobyTranslationsSource extends ThemesiaSource {
 	async getChapterPages(_chapterId: string): Promise<string[]> {
 		return [];
 	}
-
 }
 
 export default DobyTranslationsSource;
