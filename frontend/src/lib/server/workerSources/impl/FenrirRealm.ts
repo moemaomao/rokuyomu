@@ -73,25 +73,45 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, '&quot;');
 }
 
+const UI_JUNK_RE =
+	/highlights?\s+word\s+anchors|double-tap\s+the\s+text|floating\s+reading-quest|reading-quest\s+ring|sign\s+in\s+to\s+save|easier\s+tracking|hide\s+or\s+show\s+it|reader\s+settings|font\s+size|line\s+height|theme\s+mode|table\s+of\s+contents|please\s+support|join\s+(our\s+)?discord|buy\s+me\s+a\s+coffee|ko-?fi\.com|patreon\.com|read\s+on\s+fenri/i;
+
+function isUiJunk(text: string): boolean {
+	const t = cleanText(text);
+	if (!t) return true;
+	if (t.length < 25) return true;
+	if (UI_JUNK_RE.test(t)) return true;
+	if (t.length < 80 && /floating|anchor|quest ring|double-tap/i.test(t)) return true;
+	return false;
+}
+
 function sanitizeChapterHtml(html: string): string {
 	if (!html || !html.trim()) return '';
 	const $ = cheerio.load(`<div id="root">${html || ''}</div>`);
-	$('#root style, #root script').remove();
+	$('#root style, #root script, #root nav, #root header, #root footer').remove();
 	$('#root [aria-hidden="true"]').remove();
+	$('#root [class*="text-[11px]"], #root [class*="text-xs"], #root [data-slot]').remove();
+	$('#root button, #root svg, #root input, #root label').remove();
+
 	const parts: string[] = [];
 	$('#root p').each((_: number, el: any) => {
 		const t = cleanText($(el).text());
-		if (t && t.length > 1) parts.push(`<p>${escapeHtml(t)}</p>`);
+		if (!t || isUiJunk(t)) return;
+		parts.push(`<p>${escapeHtml(t)}</p>`);
 	});
-	if (parts.length) return parts.join('\n');
+	if (parts.length >= 2) return parts.join('\n');
+	if (parts.length === 1 && parts[0].replace(/<[^>]+>/g, '').length >= 120) {
+		return parts[0];
+	}
+
 	const raw = cleanText($('#root').text());
-	if (!raw || raw.length < 20) return '';
-	return raw
+	if (!raw || raw.length < 80 || isUiJunk(raw)) return '';
+	const lines = raw
 		.split(/\n+/)
 		.map((l) => l.trim())
-		.filter((l) => l.length > 15)
-		.map((l) => `<p>${escapeHtml(l)}</p>`)
-		.join('\n');
+		.filter((l) => l.length > 40 && !isUiJunk(l));
+	if (lines.length < 2 && (lines[0]?.length || 0) < 200) return '';
+	return lines.map((l) => `<p>${escapeHtml(l)}</p>`).join('\n');
 }
 
 function extractContentFromChapterHtml(html: string): string {
@@ -99,39 +119,41 @@ function extractContentFromChapterHtml(html: string): string {
 	const $ = cheerio.load(html);
 
 	const selectors = [
-		'#reader-area .chapter-view',
-		'#reader-area',
-		'[class*="reader-area"]',
+		'#reader-area .chapter-view .prose',
+		'#reader-area .chapter-view [class*="content"]',
+		'#reader-area .chapter-view article',
+		'[data-chapter-id] .prose',
 		'.chapter-content',
-		'.chapter-body',
-		'article .prose',
-		'[data-chapter-id]'
+		'.chapter-body'
 	];
 
 	for (const sel of selectors) {
 		const $el = $(sel).first();
 		if (!$el.length) continue;
-		// clone & clean
 		const $clone = $el.clone();
-		$clone.find('script, style, nav, header, footer, [aria-hidden="true"]').remove();
-		$clone.find('h1, h2, button, svg, .text-muted-foreground').remove();
-		const htmlInner = $clone.html() || '';
-		const cleaned = sanitizeChapterHtml(htmlInner);
-		if (cleaned.replace(/<[^>]+>/g, '').trim().length >= 80) return cleaned;
-		const plain = cleanText($clone.text());
-		if (plain.length >= 80) {
-			return plain
-				.split(/\n+/)
-				.map((l) => l.trim())
-				.filter((l) => l.length > 20)
-				.map((l) => `<p>${escapeHtml(l)}</p>`)
-				.join('\n');
-		}
+		$clone
+			.find(
+				'script, style, nav, header, footer, button, svg, [aria-hidden="true"], [data-slot], [class*="text-[11px]"]'
+			)
+			.remove();
+		const cleaned = sanitizeChapterHtml($clone.html() || '');
+		const plainLen = cleaned.replace(/<[^>]+>/g, '').trim().length;
+		if (plainLen >= 120) return cleaned;
 	}
 
-	const bodyText = cleanText($('body').text());
-	if (bodyText.length > 500 && !/just a moment|cf-challenge/i.test(bodyText)) {
+	const $view = $('#reader-area .chapter-view, [data-chapter-id]').first();
+	if ($view.length) {
+		const $clone = $view.clone();
+		$clone
+			.find(
+				'script, style, nav, header, footer, button, svg, h1, h2, h3, [aria-hidden="true"], [data-slot], label, input, [class*="text-muted"], [class*="text-[11px]"], [class*="text-xs"]'
+			)
+			.remove();
+		const cleaned = sanitizeChapterHtml($clone.html() || '');
+		const plainLen = cleaned.replace(/<[^>]+>/g, '').trim().length;
+		if (plainLen >= 120) return cleaned;
 	}
+
 	return '';
 }
 
@@ -563,6 +585,7 @@ export class FenrirRealmSource extends BaseSource {
 	}
 
 	private async fetchChapterList(seriesSlug: string): Promise<Chapter[]> {
+		// Primary: new API
 		try {
 			const list = await this.apiGet<ApiChapter[]>(
 				`/series/${encodeURIComponent(seriesSlug)}/chapters`
