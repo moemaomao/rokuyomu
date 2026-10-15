@@ -7,7 +7,6 @@ export const LIBRARY_SUBDIR = 'Library';
 export const BOOKMARK_SUBDIR = 'Bookmark';
 export const HISTORY_SUBDIR = 'History';
 
-/** Privacy-mode folder names (less obvious on disk). */
 const HIDDEN = {
 	root: 'AppCache',
 	library: '_media',
@@ -15,7 +14,7 @@ const HIDDEN = {
 	history: '_recent'
 } as const;
 
-/** @deprecated Use ROOT_FOLDER_NAME — kept for path string compatibility in older entries. */
+/** @deprecated */
 export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
 
 let memoryRoot: FileSystemDirectoryHandle | null = null;
@@ -219,16 +218,44 @@ export async function getHistoryDir(
 }
 
 export function sanitizePathSegment(name: string): string {
-	return (
-		String(name || 'untitled')
-			.replace(/[<>:"/\\|?*\x00-\x1f~'’`]/g, '_')
-			.replace(/[\u200B-\u200D\uFEFF]/g, '')
-			.replace(/\s+/g, ' ')
-			.trim()
-			.replace(/^\.+|\.+$/g, '')
-			.replace(/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i, '_$1')
-			.slice(0, 80) || 'untitled'
-	);
+	let s = String(name ?? '');
+
+	try {
+		s = s.normalize('NFKC');
+	} catch {
+		/* ignore */
+	}
+
+	s = s
+		.replace(/[\uFFFD\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g, '')
+		.replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+		.replace(/[<>:"/\\|?*]/g, '_')
+		.replace(/[~'’`]/g, '_')
+		.replace(/[âÃ][\u0080-\u00FF]?/g, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.replace(/^\.+|\.+$/g, '')
+		.replace(/_+/g, '_')
+		.replace(/^_+|_+$/g, '');
+
+	if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(s)) {
+		s = '_' + s;
+	}
+
+	if (s.length > 80) {
+		s = s.slice(0, 80).replace(/\s+\S*$/, '').trim() || s.slice(0, 80);
+	}
+
+	if (!s || /^[_\s.]*$/.test(s)) {
+		let hash = 0;
+		const raw = String(name ?? 'untitled');
+		for (let i = 0; i < raw.length; i++) {
+			hash = (Math.imul(31, hash) + raw.charCodeAt(i)) | 0;
+		}
+		s = 'title_' + (hash >>> 0).toString(36);
+	}
+
+	return s;
 }
 
 export async function getOrCreateDir(
@@ -236,7 +263,18 @@ export async function getOrCreateDir(
 	name: string
 ): Promise<FileSystemDirectoryHandle> {
 	const safe = sanitizePathSegment(name);
-	return parent.getDirectoryHandle(safe, { create: true });
+	try {
+		return await parent.getDirectoryHandle(safe, { create: true });
+	} catch (e) {
+		console.warn('[localFs] getOrCreateDir failed for', safe, e);
+		let hash = 0;
+		const raw = String(name ?? 'untitled');
+		for (let i = 0; i < raw.length; i++) {
+			hash = (Math.imul(31, hash) + raw.charCodeAt(i)) | 0;
+		}
+		const fallback = 'title_' + (hash >>> 0).toString(36);
+		return parent.getDirectoryHandle(fallback, { create: true });
+	}
 }
 
 export async function writeBlobFile(
