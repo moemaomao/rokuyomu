@@ -1,6 +1,7 @@
 /**
  * Genesis Studio (genesistudio.com) — Next.js + Directus API
  * Path: scraper/src/sources/impl/novel/GenesisStudio.ts
+ *       frontend/.../workerSources/impl/GenesisStudio.ts
  *
  * - Homepage: /api/chapters/recent (Recently Updated) — unik per novel, max 24
  * - Detail: /api/directus/novels (cache by slug) + /api/directus/novels/by-id/{id}
@@ -65,7 +66,9 @@ export class GenesisStudioSource extends BaseSource {
 	private novelsById = new Map<string, any>();
 
 	private async apiGet(apiPath: string): Promise<any> {
-		const path = apiPath.startsWith('/api') ? apiPath : `/api${apiPath.startsWith('/') ? apiPath : `/${apiPath}`}`;
+		const path = apiPath.startsWith('/api')
+			? apiPath
+			: `/api${apiPath.startsWith('/') ? apiPath : `/${apiPath}`}`;
 		try {
 			const text = await this.fetchHtml(path);
 			return JSON.parse(text);
@@ -109,9 +112,6 @@ export class GenesisStudioSource extends BaseSource {
 
 	private mapNovelCard(n: any, latestChapter?: number): Manga {
 		const slug = String(n.slug || n.id || '');
-		const coverId = n.coverFile?.filename_disk
-			? null
-			: n.cover;
 		const cover = n.coverFile?.filename_disk
 			? coverUrl(n.coverFile.id, n.coverFile.filename_disk)
 			: coverUrl(n.cover);
@@ -139,39 +139,65 @@ export class GenesisStudioSource extends BaseSource {
 
 	// ─── Latest = Recently Updated ───────────────────────────────────────
 
+	private resolveLatestChapter(novel: any, recentItem?: any): number | undefined {
+		const fromDirectus = Number(novel?.chapter_numbers);
+		if (Number.isFinite(fromDirectus) && fromDirectus > 0) return fromDirectus;
+
+		const free = Number(
+			novel?.free_up_to_chapter ?? recentItem?.novel?.free_up_to_chapter
+		);
+		const premium = Number(
+			novel?.premium_chapter_count ?? recentItem?.novel?.premium_chapter_count
+		);
+		if (Number.isFinite(free) && free > 0 && Number.isFinite(premium) && premium > 0) {
+			const sum = free + premium;
+			if (sum > free) return sum;
+		}
+		if (Number.isFinite(free) && free > 0) return free;
+
+		const recentCh = Number(recentItem?.chapter_number);
+		if (Number.isFinite(recentCh) && recentCh > 0) return recentCh;
+		return undefined;
+	}
+
 	async getLatestManga(page = 1): Promise<Manga[]> {
 		const pageNum = Math.max(1, page);
 		const limit = PER_PAGE;
 		const offset = (pageNum - 1) * limit;
-		const fetchLimit = pageNum === 1 ? PER_PAGE : Math.min(100, offset + limit);
+		const fetchLimit = Math.min(120, Math.max(PER_PAGE * 4, offset + limit * 2));
 
 		try {
-			const data = await this.apiGet(
-				`/api/chapters/recent?limit=${fetchLimit}&type=all`
-			);
+			const [data, allNovels] = await Promise.all([
+				this.apiGet(`/api/chapters/recent?limit=${fetchLimit}&type=all`),
+				this.loadAllNovels().catch(() => [] as any[])
+			]);
 			const list: any[] = Array.isArray(data) ? data : [];
 
 			const ordered: Manga[] = [];
 			const seen = new Set<string>();
 
 			for (const item of list) {
-				const novel = item.novel || {};
-				const slug = String(novel.slug || '');
+				const novelEmbed = item.novel || {};
+				const slug = String(novelEmbed.slug || '');
 				if (!slug || seen.has(slug)) continue;
 				seen.add(slug);
 
-				const cover = novel.coverFile?.filename_disk
-					? coverUrl(novel.coverFile.id, novel.coverFile.filename_disk)
-					: coverUrl(novel.cover);
+				const catalog =
+					this.novelsBySlug.get(slug) ||
+					allNovels.find((n: any) => n.slug === slug);
+				const merged = catalog ? { ...novelEmbed, ...catalog } : novelEmbed;
 
-				const latestChapter =
-					typeof item.chapter_number === 'number'
-						? item.chapter_number
-						: undefined;
+				const cover = merged.coverFile?.filename_disk
+					? coverUrl(merged.coverFile.id, merged.coverFile.filename_disk)
+					: novelEmbed.coverFile?.filename_disk
+						? coverUrl(novelEmbed.coverFile.id, novelEmbed.coverFile.filename_disk)
+						: coverUrl(merged.cover || novelEmbed.cover);
+
+				const latestChapter = this.resolveLatestChapter(merged, item);
 
 				ordered.push({
 					id: `/novels/${slug}`,
-					title: cleanText(novel.novel_title || slug),
+					title: cleanText(merged.novel_title || novelEmbed.novel_title || slug),
 					cover,
 					sourceId: this.id,
 					type: 'novel',
@@ -182,10 +208,7 @@ export class GenesisStudioSource extends BaseSource {
 
 			if (pageNum === 1) return ordered.slice(0, PER_PAGE);
 			if (ordered.length <= offset) {
-				const all = await this.loadAllNovels();
-				return all
-					.slice(offset, offset + limit)
-					.map((n) => this.mapNovelCard(n));
+				return allNovels.slice(offset, offset + limit).map((n) => this.mapNovelCard(n));
 			}
 			return ordered.slice(offset, offset + limit);
 		} catch (e) {
@@ -253,6 +276,7 @@ export class GenesisStudioSource extends BaseSource {
 					novel = { ...novel, ...detail };
 				}
 			} catch {
+				/* keep cache entry */
 			}
 		}
 
@@ -276,9 +300,7 @@ export class GenesisStudioSource extends BaseSource {
 		if (/complet|finish|end/.test(st)) status = 'Completed';
 		else if (/hiatus/.test(st)) status = 'Hiatus';
 
-		const description = cleanText(
-			novel.synopsis || novel.one_liner || ''
-		).slice(0, 4000);
+		const description = cleanText(novel.synopsis || novel.one_liner || '').slice(0, 4000);
 
 		const chapters = await this.fetchChapters(String(novel.id), slug, novel);
 
@@ -310,9 +332,7 @@ export class GenesisStudioSource extends BaseSource {
 		novel?: any
 	): Promise<Chapter[]> {
 		const freeUpTo =
-			typeof novel?.free_up_to_chapter === 'number'
-				? novel.free_up_to_chapter
-				: 0;
+			typeof novel?.free_up_to_chapter === 'number' ? novel.free_up_to_chapter : 0;
 
 		try {
 			const res = await this.apiGet(`/api/novels-chapter/${novelId}`);
@@ -367,18 +387,20 @@ export class GenesisStudioSource extends BaseSource {
 		content: string;
 		prevChapterId?: string | null;
 		nextChapterId?: string | null;
+		novelId?: string | null;
 	}> {
 		const m = String(chapterId).match(/\/novels\/([^/]+)\/chapter-(\d+)/i);
 		if (!m) throw new Error(`Invalid chapter id: ${chapterId}`);
 		const slug = decodeURIComponent(m[1]);
 		const number = parseInt(m[2], 10);
+		const novelId = `/novels/${slug}`;
 
 		await this.loadAllNovels();
 		const novel = this.novelsBySlug.get(slug);
 		if (!novel?.id) throw new Error(`Novel not found for chapter: ${slug}`);
 
 		const res = await this.apiGet(`/api/novels-chapter/${novel.id}`);
-		const chapters: any[] = res?.data?.chapters || [];
+		const chapters: any[] = res?.data?.chapters || res?.chapters || [];
 		const ch = chapters.find((c) => Number(c.chapter_number) === number);
 		if (!ch) throw new Error(`Chapter ${number} not found`);
 
@@ -408,7 +430,8 @@ export class GenesisStudioSource extends BaseSource {
 			title: `Chapter ${number}`,
 			content,
 			prevChapterId: prev ? `/novels/${slug}/chapter-${number - 1}` : null,
-			nextChapterId: next ? `/novels/${slug}/chapter-${number + 1}` : null
+			nextChapterId: next ? `/novels/${slug}/chapter-${number + 1}` : null,
+			novelId
 		};
 	}
 }
