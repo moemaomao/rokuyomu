@@ -117,7 +117,7 @@ export abstract class ThemesiaSource extends BaseSource {
 		'div.listupd div.bsx, div.listupd div.bs, .listupd .bsx, .listupd .bs, .postbody div.bsx, .listupd article.maindet, article.maindet, .bixbox .bsx, .bixbox .bs, div.bsx, div.bs, .page-item-detail, .utao, .uta, .epic-card';
 
 	protected chapterListSelector =
-		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a, .eplisterfull li a, ul.clstyle li a, .eplister a';
+		'#chapterlist li a, .eplister li a, #chapterlist a, .chbox a, .eplisterfull li a, ul.clstyle li a, .eplister a, .ep-chapter-list li a';
 
 	protected pageImageSelector =
 		'#readerarea img, .readerarea img, .rdminimal img, #reader img, .reading-content img';
@@ -326,10 +326,16 @@ export abstract class ThemesiaSource extends BaseSource {
 
 			const id = this.cleanId(href);
 			if (seen.has(id)) return;
-			if (/^https?:\/\//i.test(href) && !/-chapter-[\d.]+/i.test(id) && !/-ch-[\d.]+/i.test(id)) {
+
+			if (new RegExp(`^${this.seriesPath.replace(/\//g, '\\/')}\\/[^/]+\\/?$`, 'i').test(id)) {
 				return;
 			}
-			seen.add(id);
+			if (/\/(page|genre|tag|author|project|list-mode)\//i.test(id)) return;
+
+			const looksLikeChapterPath =
+				/-chapter-[\d.]+/i.test(id) ||
+				/-ch-[\d.]+/i.test(id) ||
+				/-\d+(?:[.-]\d+)?(?:-end)?\/?$/i.test(id);
 
 			const $li = $a.closest('li').length ? $a.closest('li') : $a.parent();
 
@@ -337,7 +343,11 @@ export abstract class ThemesiaSource extends BaseSource {
 				$a.find('.epl-num, .chapternum').first().text().replace(/\s+/g, ' ').trim() ||
 				$a.text().replace(/\s+/g, ' ').trim();
 			const number = this.parseChapterNumber(numText || id, id);
-			if (!number && !/chapter/i.test(id) && !/chapter/i.test(numText)) return;
+
+			if (!looksLikeChapterPath && !number && !/chapter/i.test(id) && !/chapter/i.test(numText)) {
+				return;
+			}
+			seen.add(id);
 
 			const title = number > 0 ? `Chapter ${number}` : numText || id;
 
