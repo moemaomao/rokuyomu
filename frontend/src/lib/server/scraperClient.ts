@@ -128,6 +128,7 @@ export type NovelChapterPayload = {
 	content: string;
 	prevChapterId?: string | null;
 	nextChapterId?: string | null;
+	novelId?: string | null;
 	novelInfo?: { title?: string; id?: string } | null;
 	chapters?: { id: string; title: string; number?: number }[];
 	currentChapter?: { id: string; title?: string } | null;
@@ -148,15 +149,19 @@ export async function remoteNovelChapter(
 				content: string;
 				prevChapterId?: string | null;
 				nextChapterId?: string | null;
+				novelId?: string | null;
 			}>;
 		};
 		if (typeof adapter.getChapterContent === 'function') {
 			const data = await adapter.getChapterContent(id);
+			const novelId = data.novelId ?? null;
 			return {
 				title: data.title || 'Chapter',
 				content: data.content || '',
 				prevChapterId: data.prevChapterId ?? null,
 				nextChapterId: data.nextChapterId ?? null,
+				novelId,
+				novelInfo: novelId ? { id: novelId } : null,
 				prevChapter: data.prevChapterId ? { id: data.prevChapterId } : null,
 				nextChapter: data.nextChapterId ? { id: data.nextChapterId } : null
 			};
