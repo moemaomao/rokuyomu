@@ -22,7 +22,7 @@
 
 	let {
 		items = [] as AnnouncementPublic[],
-		/** @deprecated single-message mode */
+		/** @deprecated */
 		message = '',
 		level = 'info' as Level,
 		updatedAt = '' as string | undefined,
@@ -182,7 +182,7 @@
 	{#if inline}
 		<button
 			type="button"
-			class="relative rounded-lg p-1.5 transition text-zinc-300 hover:bg-zinc-800/60 hover:text-white dark:text-zinc-300 dark:hover:bg-zinc-800/60 dark:hover:text-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+			class="relative rounded-lg p-1.5 transition text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/60 dark:hover:text-white"
 			aria-label="Announcements{unreadCount > 0 ? ` ({unreadCount} unread)` : ''}"
 			title="Announcements"
 			onclick={openModal}
