@@ -271,6 +271,7 @@ async function mirrorToDisk(entry: SourceCacheEntry): Promise<void> {
 		const sourcesDir = await cacheDir.getDirectoryHandle('sources', { create: true });
 		await writeTextFile(sourcesDir, safeCacheFileName(entry), JSON.stringify(entry));
 	} catch {
+		/* disk optional */
 	}
 }
 
@@ -280,14 +281,24 @@ export async function exportSourceCacheToDisk(): Promise<{
 }> {
 	if (!browser) return { written: 0, pathHint: '' };
 
-	const { supportsFileSystemAccess, ensureLibraryRoot, writeTextFile } = await import(
-		'$lib/utils/localFs'
-	);
+	const {
+		supportsFileSystemAccess,
+		requestStoredLibraryRoot,
+		pickLibraryRoot,
+		writeTextFile,
+		isMobileLikeFs
+	} = await import('$lib/utils/localFs');
 	if (!supportsFileSystemAccess()) {
-		throw new Error('File System Access API not supported (use Chrome or Edge).');
+		throw new Error('File System Access API not supported (use Chrome or Edge desktop).');
+	}
+	if (isMobileLikeFs()) {
+		throw new Error(
+			'Folder export is unreliable on mobile browsers. Use desktop Chrome/Edge, or rely on IndexedDB cache only.'
+		);
 	}
 
-	const root = await ensureLibraryRoot();
+	let root = await requestStoredLibraryRoot();
+	if (!root) root = await pickLibraryRoot();
 	if (!root) {
 		throw new Error('Folder not selected or permission denied.');
 	}
@@ -327,9 +338,7 @@ export async function cachedJsonFetch<T>(opts: {
 	sourceId: string;
 	scope?: string;
 	ttlMs?: number;
-    
 	fetcher: () => Promise<T>;
-
 	staleWhileRevalidate?: boolean;
 }): Promise<{ data: T; fromCache: boolean; fresh: boolean }> {
 	const hit = await getSourceCache<T>({

@@ -1,6 +1,6 @@
 import {
 	supportsFileSystemAccess,
-	ensureLibraryRoot,
+	getLibraryRoot,
 	saveCoverToDisk,
 	saveBookmarkCoverToDisk,
 	saveHistoryCoverToDisk
@@ -54,7 +54,7 @@ export async function cacheLibraryCover(opts: {
 
 	if (supportsFileSystemAccess()) {
 		try {
-			const root = await ensureLibraryRoot();
+			const root = await getLibraryRoot();
 			if (root) {
 				await saveCoverToDisk({
 					root,
@@ -90,7 +90,7 @@ export async function cacheBookmarkCover(opts: {
 
 	if (supportsFileSystemAccess()) {
 		try {
-			const root = await ensureLibraryRoot();
+			const root = await getLibraryRoot();
 			if (root) {
 				await saveBookmarkCoverToDisk({
 					root,
@@ -131,7 +131,7 @@ export async function cacheHistoryCover(opts: {
 
 	if (supportsFileSystemAccess()) {
 		try {
-			const root = await ensureLibraryRoot();
+			const root = await getLibraryRoot();
 			if (root) {
 				await saveHistoryCoverToDisk({
 					root,

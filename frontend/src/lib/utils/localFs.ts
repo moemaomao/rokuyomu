@@ -74,13 +74,16 @@ async function idbGetHandle(): Promise<FileSystemDirectoryHandle | null> {
 	}
 }
 
-async function ensurePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+async function ensurePermission(
+	handle: FileSystemDirectoryHandle,
+	opts?: { request?: boolean }
+): Promise<boolean> {
 	try {
 		const h = handle as any;
 		if (typeof h.queryPermission === 'function') {
 			let state = await h.queryPermission({ mode: 'readwrite' });
 			if (state === 'granted') return true;
-			if (typeof h.requestPermission === 'function') {
+			if (opts?.request && typeof h.requestPermission === 'function') {
 				state = await h.requestPermission({ mode: 'readwrite' });
 				return state === 'granted';
 			}
@@ -90,6 +93,14 @@ async function ensurePermission(handle: FileSystemDirectoryHandle): Promise<bool
 	} catch {
 		return false;
 	}
+}
+
+export function isMobileLikeFs(): boolean {
+	if (typeof navigator === 'undefined') return false;
+	const ua = navigator.userAgent || '';
+	if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+	if (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua)) return true;
+	return false;
 }
 
 function readHideFolders(): {
@@ -168,7 +179,7 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	if (!supportsFileSystemAccess()) return null;
 
 	if (memoryRoot) {
-		const ok = await ensurePermission(memoryRoot);
+		const ok = await ensurePermission(memoryRoot, { request: false });
 		if (ok) {
 			await ensureSubdirs(memoryRoot).catch(() => {});
 			return memoryRoot;
@@ -179,7 +190,7 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	const stored = await idbGetHandle();
 	if (!stored) return null;
 
-	const ok = await ensurePermission(stored);
+	const ok = await ensurePermission(stored, { request: false });
 	if (!ok) return null;
 
 	memoryRoot = stored;
@@ -188,9 +199,26 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 }
 
 export async function ensureLibraryRoot(): Promise<FileSystemDirectoryHandle | null> {
-	const existing = await getLibraryRoot();
-	if (existing) return existing;
-	return pickLibraryRoot();
+	return getLibraryRoot();
+}
+
+export async function requestStoredLibraryRoot(): Promise<FileSystemDirectoryHandle | null> {
+	if (!supportsFileSystemAccess()) return null;
+	if (memoryRoot) {
+		const ok = await ensurePermission(memoryRoot, { request: true });
+		if (ok) {
+			await ensureSubdirs(memoryRoot).catch(() => {});
+			return memoryRoot;
+		}
+		memoryRoot = null;
+	}
+	const stored = await idbGetHandle();
+	if (!stored) return null;
+	const ok = await ensurePermission(stored, { request: true });
+	if (!ok) return null;
+	memoryRoot = stored;
+	await ensureSubdirs(stored).catch(() => {});
+	return stored;
 }
 
 export async function getLibraryDir(
