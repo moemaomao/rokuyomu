@@ -689,28 +689,52 @@ Nội dung:
 
 	function measureScrollProgress(): number {
 		if (!browser) return 0;
-		const doc = document.documentElement;
-		const body = document.body;
-		const scrollTop = window.scrollY || doc.scrollTop || body.scrollTop || 0;
-		const scrollHeight = Math.max(doc.scrollHeight, body.scrollHeight);
-		const clientHeight = window.innerHeight || doc.clientHeight || 0;
-		const maxScroll = scrollHeight - clientHeight;
-		if (maxScroll <= 40) {
-			return scrollHeight > clientHeight * 0.5
-				? Math.min(100, Math.round((scrollTop / Math.max(scrollHeight, 1)) * 100) || 5)
-				: 0;
+
+		const el = document.getElementById('novel-content');
+		const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+		const viewport = window.innerHeight || document.documentElement.clientHeight || 1;
+
+		if (el) {
+			const rect = el.getBoundingClientRect();
+			const articleTop = scrollTop + rect.top;
+			const articleHeight = Math.max(el.scrollHeight, el.offsetHeight, 1);
+			const readable = articleHeight - viewport;
+
+			if (readable <= 8) {
+				return rect.bottom > 0 && rect.top < viewport ? 100 : 0;
+			}
+
+			let pct = ((scrollTop - articleTop) / readable) * 100;
+
+			const docH = Math.max(
+				document.documentElement.scrollHeight,
+				document.body.scrollHeight
+			);
+			if (scrollTop + viewport >= docH - 100) pct = 100;
+
+			if (pct < 0) pct = 0;
+			if (pct > 100) pct = 100;
+			return Math.round(pct);
 		}
-		const pct = (scrollTop / maxScroll) * 100;
-		return Math.min(100, Math.max(0, Math.round(pct)));
+
+		const scrollHeight = Math.max(
+			document.documentElement.scrollHeight,
+			document.body.scrollHeight
+		);
+		const maxScroll = scrollHeight - viewport;
+		if (maxScroll <= 8) return 0;
+		if (scrollTop >= maxScroll - 100) return 100;
+		return Math.min(100, Math.max(0, Math.round((scrollTop / maxScroll) * 100)));
 	}
 
 	function onScrollProgress() {
 		const pct = measureScrollProgress();
+		if (pct === scrollProgress) return;
 		scrollProgress = pct;
 		if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
 		scrollSaveTimer = setTimeout(() => {
-			persistReadingProgress(pct, false);
-		}, 400);
+			persistReadingProgress(scrollProgress, false);
+		}, 250);
 	}
 
 	function flushScrollProgress() {
@@ -723,7 +747,6 @@ Nội dung:
 		persistReadingProgress(pct, false);
 	}
 
-	// Initial history write when chapter opens
 	$effect(() => {
 		if (!browser) return;
 		const key = `${source}::${chapterId}`;
@@ -739,7 +762,6 @@ Nội dung:
 		persistReadingProgress(0, true);
 	});
 
-	// Scroll listener + restore previous progress for same chapter
 	$effect(() => {
 		if (!browser) return;
 		const src = String(source || '');
@@ -747,11 +769,15 @@ Nội dung:
 		if (!src || !cid) return;
 
 		window.addEventListener('scroll', onScrollProgress, { passive: true });
+		window.addEventListener('resize', onScrollProgress, { passive: true });
 		window.addEventListener('beforeunload', flushScrollProgress);
 		const onVis = () => {
 			if (document.visibilityState === 'hidden') flushScrollProgress();
 		};
 		document.addEventListener('visibilitychange', onVis);
+
+		const t1 = setTimeout(() => onScrollProgress(), 300);
+		const t2 = setTimeout(() => onScrollProgress(), 1200);
 
 		const restore = () => {
 			try {
@@ -791,8 +817,11 @@ Nội dung:
 		});
 
 		return () => {
+			clearTimeout(t1);
+			clearTimeout(t2);
 			flushScrollProgress();
 			window.removeEventListener('scroll', onScrollProgress);
+			window.removeEventListener('resize', onScrollProgress);
 			window.removeEventListener('beforeunload', flushScrollProgress);
 			document.removeEventListener('visibilitychange', onVis);
 		};
