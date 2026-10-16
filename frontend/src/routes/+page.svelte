@@ -87,13 +87,14 @@
 		const targetSource = url.searchParams.get("source") || "";
 		const pageNum = Math.max(1, Number(url.searchParams.get("page") || "1") || 1);
 
+		// Single source
 		if (targetSource) {
 			const hit = await getSourceCache({
 				kind: q ? "search" : "latest",
 				sourceId: targetSource,
 				scope: latestScope({ page: pageNum, lang, type, q })
 			});
-		
+	
 			if (generation !== navGeneration) return false;
 			const now = window.location.pathname + window.location.search;
 			const want = (url.pathname === "/" ? "/" : url.pathname) + url.search;

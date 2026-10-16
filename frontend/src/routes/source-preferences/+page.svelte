@@ -118,15 +118,17 @@
 	function save() {
 		setPreferredSources(preferred.slice(0, MAX_PREFERRED));
 		setHomeLayout(homeLayout);
-		// Force multi mode so homepage does not restore last single source
 		if (preferred.length > 0) {
 			setMultiMode();
 		}
+		try {
+			const n = (Number(localStorage.getItem('rokuyomu_prefs_gen') || '0') || 0) + 1;
+			localStorage.setItem('rokuyomu_prefs_gen', String(n));
+		} catch {}
 		saved = true;
 		setTimeout(() => {
 			const params = new URLSearchParams();
 			if (selectedKind === 'novel') params.set('kind', 'novel');
-			// No ?source= → multi mode (merged or sectioned)
 			window.location.href = params.toString() ? `/?${params}` : '/';
 		}, 300);
 	}
