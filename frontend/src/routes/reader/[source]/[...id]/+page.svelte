@@ -109,6 +109,9 @@ $effect(() => {
 	let currentPageIndex = $state(0);
 	let currentMode = $state<'webtoon' | 'page'>('webtoon');
 	let showControls = $state(true);
+	let scrollProgress = $state(0);
+	let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	let scrollTrackingArmed = false;
 	let lastScrollY = $state(0);
 
 	let isMenuOpen = $state(false);
@@ -168,6 +171,76 @@ $effect(() => {
 		return proxy;
 	}
 
+	function measureMangaProgress(): number {
+		if (!browser) return 0;
+		const total = pages?.length || 0;
+
+		if (currentMode === 'page') {
+			if (total <= 1) return total === 1 ? 100 : 0;
+			const idx = Math.max(0, Math.min(currentPageIndex, total - 1));
+			if (idx >= total - 1) return 100;
+			return Math.min(99, Math.round(((idx + 1) / total) * 100));
+		}
+
+		const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+		const viewport = window.innerHeight || 1;
+		const docH = Math.max(
+			document.documentElement.scrollHeight || 0,
+			document.body?.scrollHeight || 0,
+			0
+		);
+		const maxScroll = docH - viewport;
+		if (maxScroll < 80) return 0;
+		if (scrollTop >= maxScroll - 64) return 100;
+		return Math.min(100, Math.max(0, Math.round((scrollTop / maxScroll) * 100)));
+	}
+
+	function persistMangaProgress(force = false) {
+		if (!browser) return;
+		const mid = mangaInfo?.id;
+		const cid = chapterId;
+		const src = source;
+		if (!mid || !cid || !src) return;
+		if (!force && scrollProgress <= 0) return;
+		const title = currentChapter?.title || `Chapter ${currentChapter?.number || 0}`;
+		const num = currentChapter?.number || 0;
+		try {
+			void saveReading({
+				mangaId: mid,
+				mangaSlug: mangaInfo?.slug || '',
+				mangaTitle: mangaInfo?.title || '',
+				cover: mangaInfo?.cover || '',
+				chapterId: cid,
+				chapterTitle: title,
+				chapterNumber: num,
+				sourceId: src,
+				scrollProgress: Math.min(100, Math.max(0, Math.round(scrollProgress)))
+			});
+		} catch (e) {
+			console.warn('[reader] save progress', e);
+		}
+	}
+
+	function onReadingProgress() {
+		const pct = measureMangaProgress();
+		if (pct > scrollProgress) {
+			scrollProgress = pct;
+			scrollTrackingArmed = true;
+			if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+			scrollSaveTimer = setTimeout(() => persistMangaProgress(), 300);
+		}
+	}
+
+	function flushMangaProgress() {
+		if (scrollSaveTimer) {
+			clearTimeout(scrollSaveTimer);
+			scrollSaveTimer = null;
+		}
+		if (scrollTrackingArmed && scrollProgress > 0) {
+			persistMangaProgress(true);
+		}
+	}
+
 	function handleScroll() {
 		const y = window.scrollY;
 		if (y > lastScrollY && y > 80) {
@@ -178,6 +251,7 @@ $effect(() => {
 			showControls = true;
 		}
 		lastScrollY = y;
+		onReadingProgress();
 	}
 
 	function handleMouseMove() {
@@ -251,6 +325,7 @@ $effect(() => {
 	}
 
 	async function goToChapter(target: unknown) {
+		flushMangaProgress();
 		showChapterList = false;
 		isMenuOpen = false;
 		if (!target) return;
@@ -406,6 +481,8 @@ $effect(() => {
 		const title = currentChapter?.title || `Chapter ${currentChapter?.number || 0}`;
 		const num = currentChapter?.number || 0;
 		markChapterRead(src, mid, cid, num);
+		scrollProgress = 0;
+		scrollTrackingArmed = false;
 		saveReading({
 			mangaId: mid,
 			mangaSlug: mangaInfo?.slug || '',
@@ -414,8 +491,32 @@ $effect(() => {
 			chapterId: cid,
 			chapterTitle: title,
 			chapterNumber: num,
-			sourceId: src
+			sourceId: src,
+			scrollProgress: 0
 		});
+	});
+
+	$effect(() => {
+		const _mode = currentMode;
+		const _idx = currentPageIndex;
+		const _len = pages?.length || 0;
+		if (_mode === 'page' && _len > 0) {
+			onReadingProgress();
+		}
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		const onVis = () => {
+			if (document.visibilityState === 'hidden') flushMangaProgress();
+		};
+		window.addEventListener('beforeunload', flushMangaProgress);
+		document.addEventListener('visibilitychange', onVis);
+		return () => {
+			flushMangaProgress();
+			window.removeEventListener('beforeunload', flushMangaProgress);
+			document.removeEventListener('visibilitychange', onVis);
+		};
 	});
 	
 	let pageTitle = $derived(

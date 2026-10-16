@@ -100,9 +100,11 @@
 		const ch = extractChapterNum(entry);
 		if (ch <= 0) return 0;
 		const key = normalizeId(entry.mangaId);
-		const max = Number(stats?.titles?.[key]?.maxChapter) || ch;
-		const denom = Math.max(max, ch, 1);
-		return Math.min(100, Math.round((ch / denom) * 100));
+		const max = Number(stats?.titles?.[key]?.maxChapter) || 0;
+		if (max > ch) {
+			return Math.min(100, Math.round((ch / max) * 100));
+		}
+		return 0;
 	}
 
 	function progressLabel(entry: ReadingEntry): string {
