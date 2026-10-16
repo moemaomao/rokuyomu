@@ -75,24 +75,29 @@
 		currentPage = serverPage;
 	});
 
+	let navGeneration = $state(0);
 
-	async function tryRestoreFromClientCache(): Promise<boolean> {
+	async function tryRestoreFromClientCache(expectedUrl: string, generation: number): Promise<boolean> {
 		if (!browser) return false;
 		const q = searchQuery || "";
 		const lang = selectedLang || "all";
 		const type = selectedType || "all";
-		const url = $page.url;
+		const url = new URL(expectedUrl, "http://local");
 		const sp = url.searchParams.get("sp") || "";
 		const targetSource = url.searchParams.get("source") || "";
 		const pageNum = Math.max(1, Number(url.searchParams.get("page") || "1") || 1);
 
-		// Single source
 		if (targetSource) {
 			const hit = await getSourceCache({
 				kind: q ? "search" : "latest",
 				sourceId: targetSource,
 				scope: latestScope({ page: pageNum, lang, type, q })
 			});
+		
+			if (generation !== navGeneration) return false;
+			const now = window.location.pathname + window.location.search;
+			const want = (url.pathname === "/" ? "/" : url.pathname) + url.search;
+			if (now !== want) return false;
 			if (hit?.fresh && Array.isArray(hit.data) && hit.data.length > 0) {
 				mangas = hit.data as any;
 				sections = [];
@@ -104,8 +109,10 @@
 			return false;
 		}
 
-		// Multi sectioned
-		if (isMulti && homeLayout === "sectioned" && preferredSources.length) {
+		const prefs = preferredSources;
+		const layout = homeLayout;
+		const multi = isMulti;
+		if (multi && layout === "sectioned" && prefs.length) {
 			const spMap: Record<string, number> = {};
 			if (sp) {
 				for (const part of sp.split(",")) {
@@ -119,13 +126,14 @@
 			}
 			const nextSections: SectionItem[] = [];
 			let allFresh = true;
-			for (const sid of preferredSources) {
+			for (const sid of prefs) {
 				const p = spMap[sid] || 1;
 				const hit = await getSourceCache({
 					kind: q ? "search" : "latest",
 					sourceId: sid,
 					scope: latestScope({ page: p, lang, type, q })
 				});
+				if (generation !== navGeneration) return false;
 				if (hit?.fresh && Array.isArray(hit.data) && hit.data.length > 0) {
 					const name = sources.find((s) => s.id === sid)?.name || sid;
 					nextSections.push({
@@ -140,7 +148,11 @@
 					break;
 				}
 			}
-			if (allFresh && nextSections.length === preferredSources.length) {
+			if (generation !== navGeneration) return false;
+			const now = window.location.pathname + window.location.search;
+			const want = (url.pathname === "/" ? "/" : url.pathname) + url.search;
+			if (now !== want) return false;
+			if (allFresh && nextSections.length === prefs.length) {
 				sections = nextSections;
 				mangas = [];
 				currentSource = null;
@@ -151,12 +163,17 @@
 		return false;
 	}
 
-	afterNavigate(async ({ type, to }) => {
+	afterNavigate(async ({ type, to, from }) => {
 		if (!browser) return;
+		navGeneration += 1;
+		const generation = navGeneration;
+
 		if (type !== "popstate") return;
 		if (!to || to.url.pathname !== "/") return;
-		const restored = await tryRestoreFromClientCache();
-		if (restored) {
+
+		const expected = to.url.pathname + to.url.search;
+		const restored = await tryRestoreFromClientCache(expected, generation);
+		if (restored && generation === navGeneration) {
 			loading = false;
 		}
 	});
