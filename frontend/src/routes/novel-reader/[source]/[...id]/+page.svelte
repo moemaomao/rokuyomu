@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from 'svelte';
-	import { saveReading } from '$lib/stores/history';
+	import { saveReading, getLastRead } from '$lib/stores/history';
 	import { markChapterRead } from '$lib/utils/readChapters';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
@@ -95,6 +95,11 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	let downloadProgress = $state(0);
 	let downloadLabel = $state('');
 	let isDownloaded = $state(false);
+
+	/** 0–100 reading scroll progress in current chapter */
+	let scrollProgress = $state(0);
+	let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastSavedChapterKey = $state('');
 
 	function novelMangaId(): string {
 		const nid = (novelInfo as { id?: string } | null)?.id || '';
@@ -615,6 +620,7 @@ Nội dung:
 	async function goChapter(ch: Chapter | null | undefined) {
 		if (!ch?.id || !source) return;
 		stopTTS();
+		flushScrollProgress();
 		stopAutoScroll();
 		showTools = false;
 		const cleanId = String(ch.id).replace(/^\/+/, '');
@@ -630,46 +636,166 @@ Nội dung:
 		showTools = false;
 	}
 
-	$effect(() => {
+	function buildHistoryPayload(progress: number) {
+		const nid =
+			(novelInfo as { id?: string; title?: string; cover?: string } | null)?.id ||
+			chapterId ||
+			'';
+		const ntitle = (novelInfo as { title?: string } | null)?.title || title || 'Novel';
+		const ncover = (novelInfo as { cover?: string } | null)?.cover || '';
+		if (!nid || !source) return null;
+		const mangaId = String(nid).startsWith('/')
+			? String(nid)
+			: `/${String(nid).replace(/^\/+/, '')}`;
+		const chId = chapterId
+			? String(chapterId).startsWith('/')
+				? String(chapterId)
+				: `/${String(chapterId).replace(/^\/+/, '')}`
+			: '';
+		if (!chId) return null;
+		const chTitle =
+			(currentChapter as { title?: string } | null)?.title || title || 'Chapter';
+		const chNum = parseChapterNumber(
+			(currentChapter as { number?: number } | null)?.number,
+			chTitle,
+			chId
+		);
+		return {
+			mangaId,
+			mangaSlug: '',
+			mangaTitle: ntitle,
+			cover: ncover,
+			chapterId: chId,
+			chapterTitle: chTitle,
+			chapterNumber: chNum,
+			sourceId: source,
+			scrollProgress: Math.min(100, Math.max(0, Math.round(progress)))
+		};
+	}
+
+	function persistReadingProgress(progress: number, markRead = false) {
 		if (!browser) return;
 		try {
-			const nid =
-				(novelInfo as { id?: string; title?: string; cover?: string } | null)?.id ||
-				chapterId ||
-				'';
-			const ntitle = (novelInfo as { title?: string } | null)?.title || title || 'Novel';
-			const ncover = (novelInfo as { cover?: string } | null)?.cover || '';
-			if (!nid || !source) return;
-			const mangaId = String(nid).startsWith('/')
-				? String(nid)
-				: `/${String(nid).replace(/^\/+/, '')}`;
-			const chId = chapterId
-				? String(chapterId).startsWith('/')
-					? String(chapterId)
-					: `/${String(chapterId).replace(/^\/+/, '')}`
-				: '';
-			if (!chId) return;
-			const chTitle =
-				(currentChapter as { title?: string } | null)?.title || title || 'Chapter';
-			const chNum = parseChapterNumber(
-				(currentChapter as { number?: number } | null)?.number,
-				chTitle,
-				chId
-			);
-			markChapterRead(source, mangaId, chId, chNum);
-			saveReading({
-				mangaId,
-				mangaSlug: '',
-				mangaTitle: ntitle,
-				cover: ncover,
-				chapterId: chId,
-				chapterTitle: chTitle,
-				chapterNumber: chNum,
-				sourceId: source
-			});
+			const payload = buildHistoryPayload(progress);
+			if (!payload) return;
+			if (markRead) {
+				markChapterRead(source, payload.mangaId, payload.chapterId, payload.chapterNumber);
+			}
+			void saveReading(payload);
 		} catch (e) {
 			console.warn('[novel-reader] save history failed', e);
 		}
+	}
+
+	function measureScrollProgress(): number {
+		if (!browser) return 0;
+		const doc = document.documentElement;
+		const body = document.body;
+		const scrollTop = window.scrollY || doc.scrollTop || body.scrollTop || 0;
+		const scrollHeight = Math.max(doc.scrollHeight, body.scrollHeight);
+		const clientHeight = window.innerHeight || doc.clientHeight || 0;
+		const maxScroll = scrollHeight - clientHeight;
+		if (maxScroll <= 40) {
+			return scrollHeight > clientHeight * 0.5
+				? Math.min(100, Math.round((scrollTop / Math.max(scrollHeight, 1)) * 100) || 5)
+				: 0;
+		}
+		const pct = (scrollTop / maxScroll) * 100;
+		return Math.min(100, Math.max(0, Math.round(pct)));
+	}
+
+	function onScrollProgress() {
+		const pct = measureScrollProgress();
+		scrollProgress = pct;
+		if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+		scrollSaveTimer = setTimeout(() => {
+			persistReadingProgress(pct, false);
+		}, 400);
+	}
+
+	function flushScrollProgress() {
+		if (scrollSaveTimer) {
+			clearTimeout(scrollSaveTimer);
+			scrollSaveTimer = null;
+		}
+		const pct = measureScrollProgress();
+		scrollProgress = pct;
+		persistReadingProgress(pct, false);
+	}
+
+	// Initial history write when chapter opens
+	$effect(() => {
+		if (!browser) return;
+		const key = `${source}::${chapterId}`;
+		source;
+		chapterId;
+		novelInfo;
+		currentChapter;
+		title;
+		if (!source || !chapterId) return;
+		if (key === lastSavedChapterKey) return;
+		lastSavedChapterKey = key;
+		scrollProgress = 0;
+		persistReadingProgress(0, true);
+	});
+
+	// Scroll listener + restore previous progress for same chapter
+	$effect(() => {
+		if (!browser) return;
+		const src = String(source || '');
+		const cid = String(chapterId || '');
+		if (!src || !cid) return;
+
+		window.addEventListener('scroll', onScrollProgress, { passive: true });
+		window.addEventListener('beforeunload', flushScrollProgress);
+		const onVis = () => {
+			if (document.visibilityState === 'hidden') flushScrollProgress();
+		};
+		document.addEventListener('visibilitychange', onVis);
+
+		const restore = () => {
+			try {
+				const nid =
+					(novelInfo as { id?: string } | null)?.id || chapterId || '';
+				const mangaId = String(nid).startsWith('/')
+					? String(nid)
+					: `/${String(nid).replace(/^\/+/, '')}`;
+				const last = getLastRead(mangaId);
+				const lastCid = String(last?.chapterId || '').replace(/^\/+|\/+$/g, '');
+				const curCid = cid.replace(/^\/+|\/+$/g, '');
+				const sp = Number(last?.scrollProgress);
+				if (
+					last &&
+					lastCid === curCid &&
+					Number.isFinite(sp) &&
+					sp > 2 &&
+					sp < 98
+				) {
+					const doc = document.documentElement;
+					const body = document.body;
+					const scrollHeight = Math.max(doc.scrollHeight, body.scrollHeight);
+					const clientHeight = window.innerHeight || doc.clientHeight || 0;
+					const maxScroll = scrollHeight - clientHeight;
+					if (maxScroll > 40) {
+						window.scrollTo({ top: (sp / 100) * maxScroll, behavior: 'auto' });
+						scrollProgress = Math.round(sp);
+					}
+				}
+			} catch {
+				/* ignore */
+			}
+		};
+		requestAnimationFrame(() => {
+			restore();
+			setTimeout(restore, 350);
+		});
+
+		return () => {
+			flushScrollProgress();
+			window.removeEventListener('scroll', onScrollProgress);
+			window.removeEventListener('beforeunload', flushScrollProgress);
+			document.removeEventListener('visibilitychange', onVis);
+		};
 	});
 
 	

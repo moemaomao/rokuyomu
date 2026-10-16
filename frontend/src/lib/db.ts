@@ -19,6 +19,7 @@ export interface ReadingEntry {
 	chapterNumber: number;
 	sourceId: string;
 	timestamp: number;
+	scrollProgress?: number;
 }
 
 export interface NotificationEntry {

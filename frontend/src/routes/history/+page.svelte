@@ -54,7 +54,6 @@
 		return s.replace(/\/+$/, '') || '/';
 	}
 
-	/** Fallback when history stored chapterNumber=0 (common for novels). */
 	function extractChapterNum(entry: ReadingEntry): number {
 		const direct = Number(entry.chapterNumber);
 		if (Number.isFinite(direct) && direct > 0) return Math.round(direct * 10) / 10;
@@ -86,6 +85,10 @@
 	}
 
 	function progressPct(entry: ReadingEntry): number {
+		const sp = Number((entry as { scrollProgress?: number }).scrollProgress);
+		if (Number.isFinite(sp) && sp >= 0) {
+			return Math.min(100, Math.max(0, Math.round(sp)));
+		}
 		const ch = extractChapterNum(entry);
 		if (ch <= 0) return 0;
 		const key = normalizeId(entry.mangaId);
@@ -98,10 +101,15 @@
 		const ch = extractChapterNum(entry);
 		const key = normalizeId(entry.mangaId);
 		const max = Number(stats?.titles?.[key]?.maxChapter) || 0;
+		const sp = Number((entry as { scrollProgress?: number }).scrollProgress);
+		const hasScroll = Number.isFinite(sp) && sp >= 0;
 		if (ch > 0 && max > 0 && max !== ch) {
-			return `Ch. ${ch} / ${max}`;
+			return hasScroll ? `Ch. ${ch} · ${Math.round(sp)}% read` : `Ch. ${ch} / ${max}`;
 		}
-		if (ch > 0) return `Ch. ${ch}`;
+		if (ch > 0) {
+			return hasScroll ? `Ch. ${ch} · ${Math.round(sp)}% read` : `Ch. ${ch}`;
+		}
+		if (hasScroll) return `${Math.round(sp)}% read`;
 		return entry.chapterTitle || 'Read';
 	}
 

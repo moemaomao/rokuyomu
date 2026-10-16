@@ -171,6 +171,9 @@ function lightCover(url: string | undefined | null): string {
 }
 
 function lightEntry(entry: ReadingEntry): ReadingEntry {
+	const sp = Number(entry.scrollProgress);
+	const scrollProgress =
+		Number.isFinite(sp) && sp >= 0 ? Math.min(100, Math.round(sp)) : undefined;
 	return {
 		mangaId: normalizeMangaId(entry.mangaId) || entry.mangaId,
 		mangaSlug: entry.mangaSlug || '',
@@ -180,7 +183,8 @@ function lightEntry(entry: ReadingEntry): ReadingEntry {
 		chapterTitle: (entry.chapterTitle || '').slice(0, 80),
 		chapterNumber: entry.chapterNumber,
 		sourceId: entry.sourceId,
-		timestamp: entry.timestamp
+		timestamp: entry.timestamp,
+		...(scrollProgress !== undefined ? { scrollProgress } : {})
 	};
 }
 
