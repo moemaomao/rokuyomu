@@ -114,6 +114,47 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 		return !!(seg && offlineSet.has(seg));
 	}
 
+	function parseChapterNumber(raw: unknown, fallbackTitle?: string, fallbackId?: string): number {
+		const tryParse = (s: string): number => {
+			const t = String(s || '').replace(/\s+/g, ' ').trim();
+			if (!t) return 0;
+	
+			let m = t.match(/(?:^|\/|[-_])(?:chapter|ch\.?|episode|ep\.?|bab)[-_.]?\s*(\d+(?:\.\d+)?)/i);
+			if (m) {
+				const n = parseFloat(m[1]);
+				if (Number.isFinite(n) && n > 0) return Math.round(n * 10) / 10;
+			}
+		
+			m = t.match(/\b(?:chapter|ch\.?|episode|ep\.?|bab|part|arc)\s*[.\-_]?\s*(\d+(?:\.\d+)?)/i);
+			if (m) {
+				const n = parseFloat(m[1]);
+				if (Number.isFinite(n) && n > 0) return Math.round(n * 10) / 10;
+			}
+		
+			m = t.match(/(?:^|[-_/])(\d+(?:\.\d+)?)(?:\s*$|\.[a-z]+$)/i);
+			if (m) {
+				const n = parseFloat(m[1]);
+				if (Number.isFinite(n) && n > 0 && n < 100000) return Math.round(n * 10) / 10;
+			}
+	
+			if (/^\d+(?:\.\d+)?$/.test(t)) {
+				const n = parseFloat(t);
+				if (Number.isFinite(n) && n > 0) return Math.round(n * 10) / 10;
+			}
+			return 0;
+		};
+
+		const direct = Number(raw);
+		if (Number.isFinite(direct) && direct > 0) return Math.round(direct * 10) / 10;
+
+		for (const candidate of [fallbackTitle, fallbackId]) {
+			const n = tryParse(String(candidate || ''));
+			if (n > 0) return n;
+		}
+		return 0;
+	}
+
+
 	async function refreshOfflineStatus() {
 		if (!browser || !source || !chapterId) {
 			isDownloaded = false;
@@ -610,7 +651,11 @@ Nội dung:
 			if (!chId) return;
 			const chTitle =
 				(currentChapter as { title?: string } | null)?.title || title || 'Chapter';
-			const chNum = Number((currentChapter as { number?: number } | null)?.number) || 0;
+			const chNum = parseChapterNumber(
+				(currentChapter as { number?: number } | null)?.number,
+				chTitle,
+				chId
+			);
 			markChapterRead(source, mangaId, chId, chNum);
 			saveReading({
 				mangaId,

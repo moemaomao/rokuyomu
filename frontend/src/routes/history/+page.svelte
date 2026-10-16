@@ -54,8 +54,39 @@
 		return s.replace(/\/+$/, '') || '/';
 	}
 
+	/** Fallback when history stored chapterNumber=0 (common for novels). */
+	function extractChapterNum(entry: ReadingEntry): number {
+		const direct = Number(entry.chapterNumber);
+		if (Number.isFinite(direct) && direct > 0) return Math.round(direct * 10) / 10;
+		const tryParse = (s: string): number => {
+			const t = String(s || '').replace(/\s+/g, ' ').trim();
+			if (!t) return 0;
+			let m = t.match(/(?:^|\/|[-_])(?:chapter|ch\.?|episode|ep\.?|bab)[-_.]?\s*(\d+(?:\.\d+)?)/i);
+			if (m) {
+				const n = parseFloat(m[1]);
+				if (Number.isFinite(n) && n > 0) return Math.round(n * 10) / 10;
+			}
+			m = t.match(/\b(?:chapter|ch\.?|episode|ep\.?|bab|part|arc)\s*[.\-_]?\s*(\d+(?:\.\d+)?)/i);
+			if (m) {
+				const n = parseFloat(m[1]);
+				if (Number.isFinite(n) && n > 0) return Math.round(n * 10) / 10;
+			}
+			m = t.match(/(?:^|[-_\/])(\d+(?:\.\d+)?)(?:\s*$|\.[a-z]+$)/i);
+			if (m) {
+				const n = parseFloat(m[1]);
+				if (Number.isFinite(n) && n > 0 && n < 100000) return Math.round(n * 10) / 10;
+			}
+			if (/^\d+(?:\.\d+)?$/.test(t)) {
+				const n = parseFloat(t);
+				if (Number.isFinite(n) && n > 0) return Math.round(n * 10) / 10;
+			}
+			return 0;
+		};
+		return tryParse(entry.chapterTitle || '') || tryParse(entry.chapterId || '') || 0;
+	}
+
 	function progressPct(entry: ReadingEntry): number {
-		const ch = Number(entry.chapterNumber) || 0;
+		const ch = extractChapterNum(entry);
 		if (ch <= 0) return 0;
 		const key = normalizeId(entry.mangaId);
 		const max = Number(stats?.titles?.[key]?.maxChapter) || ch;
@@ -64,7 +95,7 @@
 	}
 
 	function progressLabel(entry: ReadingEntry): string {
-		const ch = Number(entry.chapterNumber);
+		const ch = extractChapterNum(entry);
 		const key = normalizeId(entry.mangaId);
 		const max = Number(stats?.titles?.[key]?.maxChapter) || 0;
 		if (ch > 0 && max > 0 && max !== ch) {
