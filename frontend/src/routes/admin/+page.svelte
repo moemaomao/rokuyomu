@@ -102,8 +102,6 @@
 	let healthMap = $state<Record<string, HealthInfo>>({});
 	let healthRunning = $state(false);
 	let backupRunning = $state(false);
-
-	/** Shared loading bar for health / backup jobs */
 	let jobProgress = $state<{
 		active: boolean;
 		label: string;
@@ -427,7 +425,7 @@
 		errorMsg = '';
 		try {
 			await annPost({ action: 'activate', id });
-			successMsg = 'Banner aktif di-set';
+			successMsg = 'Banner is now active on the site';
 			setTimeout(() => (successMsg = ''), 2000);
 		} catch (e: unknown) {
 			errorMsg = e instanceof Error ? e.message : 'Activate failed';
@@ -441,7 +439,7 @@
 		errorMsg = '';
 		try {
 			await annPost({ action: 'deactivate' });
-			successMsg = 'Banner dimatikan (list tetap ada)';
+			successMsg = 'Banner hidden (list kept)';
 			setTimeout(() => (successMsg = ''), 2000);
 		} catch (e: unknown) {
 			errorMsg = e instanceof Error ? e.message : 'Deactivate failed';
@@ -451,7 +449,7 @@
 	}
 
 	async function deleteAnnouncement(id: string) {
-		if (!confirm('Hapus announcement ini dari list?')) return;
+		if (!confirm('Delete this announcement from the list?')) return;
 		annBusy = true;
 		errorMsg = '';
 		try {
@@ -709,7 +707,7 @@
 		if (targets.length === 0) return;
 		if (
 			!confirm(
-				`${enable ? 'Tampilkan' : 'Sembunyikan'} ${targets.length} source yang terfilter?`
+				`${enable ? 'Show' : 'Hide'} ${targets.length} filtered source(s)?`
 			)
 		) {
 			return;
@@ -1567,7 +1565,7 @@
 						<div>
 							<h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Announcements</h2>
 							<p class="mt-1 text-sm text-zinc-500">
-								Simpan banyak template, pilih mana yang ditampilkan di site (KV
+								Save multiple templates and choose which one is shown site-wide (KV
 								<code class="text-xs">config:announcements</code>).
 							</p>
 						</div>
@@ -1590,7 +1588,7 @@
 
 					<div class="mb-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
 						<div class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-							{annEditingId ? 'Edit announcement' : 'Tambah baru'}
+							{annEditingId ? 'Edit announcement' : 'Add new'}
 						</div>
 						<label class="mb-2 block text-xs text-zinc-500">
 							Level
@@ -1626,12 +1624,12 @@
 							onclick={deactivateAnnouncement}
 							disabled={annBusy || !annActiveId}
 						>
-							Matikan banner (keep list)
+							Hide banner (keep list)
 						</button>
 					</div>
 
 					{#if annItems.length === 0}
-						<p class="py-6 text-center text-sm text-zinc-500">Belum ada announcement. Tambah di form atas.</p>
+						<p class="py-6 text-center text-sm text-zinc-500">No announcements yet. Add one using the form above.</p>
 					{:else}
 						<ul class="space-y-2">
 							{#each annItems as item (item.id)}
@@ -1659,16 +1657,30 @@
 											<p class="whitespace-pre-wrap text-sm text-zinc-800 dark:text-zinc-200">{item.message}</p>
 										</div>
 										<div class="flex shrink-0 flex-col gap-1 sm:flex-row">
-											{#if annActiveId !== item.id}
-												<button type="button" class="rounded-lg border border-violet-300/70 px-2.5 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300" onclick={() => activateAnnouncement(item.id)} disabled={annBusy}>
-													Tampilkan
+											{#if annActiveId === item.id}
+												<button
+													type="button"
+													class="rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+													onclick={deactivateAnnouncement}
+													disabled={annBusy}
+												>
+													Hide
+												</button>
+											{:else}
+												<button
+													type="button"
+													class="rounded-lg border border-violet-300/70 px-2.5 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300"
+													onclick={() => activateAnnouncement(item.id)}
+													disabled={annBusy}
+												>
+													Show
 												</button>
 											{/if}
 											<button type="button" class="rounded-lg border border-zinc-200 px-2.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400" onclick={() => startEditAnnouncement(item)} disabled={annBusy}>
 												Edit
 											</button>
 											<button type="button" class="rounded-lg border border-red-300/70 px-2.5 py-1 text-[11px] text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400" onclick={() => deleteAnnouncement(item.id)} disabled={annBusy}>
-												Hapus
+												Delete
 											</button>
 										</div>
 									</div>
