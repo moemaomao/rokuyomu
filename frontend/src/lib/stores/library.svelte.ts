@@ -10,7 +10,12 @@ import {
 } from '$lib/db';
 import { getBookmarks } from '$lib/stores/bookmark.svelte';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
-import { getLibraryRoot, supportsFileSystemAccess, pickLibraryRoot } from '$lib/utils/localFs';
+import {
+	getLibraryRoot,
+	supportsFileSystemAccess,
+	pickLibraryRoot,
+	scanLibraryFromDisk
+} from '$lib/utils/localFs';
 import { isNovelSource } from '$lib/utils/novelSources';
 
 export type { LibraryEntry, LibraryChapterRef };
@@ -59,12 +64,78 @@ async function reloadFromIdb() {
 	return entries;
 }
 
+export async function resyncLibraryFromDisk(): Promise<number> {
+	if (!browser) return 0;
+	try {
+		const root = await getLibraryRoot();
+		if (!root) return 0;
+		const scanned = await scanLibraryFromDisk(root);
+		if (!scanned.length) return 0;
+
+		const map = new Map<string, LibraryEntry>();
+		for (const e of entries) {
+			map.set(e.key, plainEntry(e));
+		}
+		for (const e of await idbGetLibrary()) {
+			const p = plainEntry(e);
+			map.set(p.key, p);
+		}
+
+		let added = 0;
+		for (const t of scanned) {
+			const key = libKey(t.mangaId, t.sourceId);
+			const existing = map.get(key);
+			const chapterMap = new Map<string, LibraryChapterRef>();
+			for (const c of existing?.chapters || []) {
+				const pc = plainChapter(c);
+				if (pc.chapterId) chapterMap.set(pc.chapterId, pc);
+			}
+			for (const c of t.chapters) {
+				const pc = plainChapter(c);
+				if (pc.chapterId) chapterMap.set(pc.chapterId, pc);
+			}
+			if (!existing) added++;
+			map.set(
+				key,
+				plainEntry({
+					key,
+					mangaId: t.mangaId,
+					mangaTitle: t.mangaTitle || existing?.mangaTitle || t.folderName,
+					cover: existing?.cover || '',
+					sourceId: t.sourceId,
+					isNovel: t.isNovel,
+					localPath: t.localPath || existing?.localPath || '',
+					chapters: Array.from(chapterMap.values()).sort((a, b) => b.savedAt - a.savedAt),
+					latestChapter: existing?.latestChapter,
+					lang: existing?.lang,
+					timestamp: existing?.timestamp || Date.now()
+				})
+			);
+		}
+
+		const list = Array.from(map.values())
+			.map(plainEntry)
+			.sort((a, b) => b.timestamp - a.timestamp);
+		await idbSetAllLibrary(list);
+		entries = list;
+		window.dispatchEvent(new CustomEvent('library-changed'));
+		return added;
+	} catch (e) {
+		console.warn('[library] resyncLibraryFromDisk', e);
+		return 0;
+	}
+}
+
 if (browser) {
 	(async () => {
 		try {
 			await reloadFromIdb();
 			const root = await getLibraryRoot().catch(() => null);
 			hasRoot = !!root || supportsFileSystemAccess();
+			if (root && entries.length === 0) {
+				const n = await resyncLibraryFromDisk();
+				if (n > 0) console.info('[library] restored', n, 'titles from disk');
+			}
 			loadError = null;
 		} catch (e: any) {
 			console.error('[library] load failed', e);
@@ -175,12 +246,16 @@ export async function chooseLibraryFolder(): Promise<boolean> {
 		const h = await pickLibraryRoot();
 		hasRoot = !!h;
 		if (h) {
-			// Snapshot existing bookmarks into Rokuyomu/Bookmark/ after folder grant
 			try {
 				const { exportBookmarksToDisk } = await import('$lib/stores/bookmark.svelte');
 				await exportBookmarksToDisk();
 			} catch (e) {
 				console.warn('[library] export bookmarks after pick', e);
+			}
+			try {
+				await resyncLibraryFromDisk();
+			} catch (e) {
+				console.warn('[library] resync after pick', e);
 			}
 		}
 		return !!h;
@@ -282,7 +357,14 @@ export async function syncLibraryFromBookmarks(): Promise<number> {
 export async function ensureLibraryLoaded(): Promise<LibraryEntry[]> {
 	if (!browser) return [];
 	try {
-		const list = await reloadFromIdb();
+		let list = await reloadFromIdb();
+		if (list.length === 0) {
+			const root = await getLibraryRoot().catch(() => null);
+			if (root) {
+				await resyncLibraryFromDisk();
+				list = entries;
+			}
+		}
 		ready = true;
 		return list;
 	} catch (e: any) {

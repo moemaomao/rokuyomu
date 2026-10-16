@@ -264,6 +264,15 @@ export async function getOrCreateDir(
 ): Promise<FileSystemDirectoryHandle> {
 	const safe = sanitizePathSegment(name);
 	try {
+		for await (const [existingName, handle] of parent.entries()) {
+			if (handle.kind !== 'directory') continue;
+			if (existingName === safe || existingName.toLowerCase() === safe.toLowerCase()) {
+				return handle as FileSystemDirectoryHandle;
+			}
+		}
+	} catch {
+	}
+	try {
 		return await parent.getDirectoryHandle(safe, { create: true });
 	} catch (e) {
 		console.warn('[localFs] getOrCreateDir failed for', safe, e);
@@ -273,7 +282,11 @@ export async function getOrCreateDir(
 			hash = (Math.imul(31, hash) + raw.charCodeAt(i)) | 0;
 		}
 		const fallback = 'title_' + (hash >>> 0).toString(36);
-		return parent.getDirectoryHandle(fallback, { create: true });
+		try {
+			return await parent.getDirectoryHandle(fallback, { create: false });
+		} catch {
+			return parent.getDirectoryHandle(fallback, { create: true });
+		}
 	}
 }
 
@@ -638,4 +651,142 @@ export async function readHistoryCoverFromDisk(opts: {
 		/* ignore */
 	}
 	return null;
+}
+
+
+export type DiskLibraryTitle = {
+	kind: 'Manga' | 'Novel';
+	folderName: string;
+	mangaTitle: string;
+	sourceId: string;
+	mangaId: string;
+	isNovel: boolean;
+	localPath: string;
+	chapters: {
+		chapterId: string;
+		chapterTitle: string;
+		savedAt: number;
+		pageCount?: number;
+	}[];
+	coverFileName?: string;
+};
+
+async function readMetaJson(
+	dir: FileSystemDirectoryHandle
+): Promise<Record<string, unknown> | null> {
+	try {
+		const fh = await dir.getFileHandle('meta.json');
+		const file = await fh.getFile();
+		const text = await file.text();
+		const data = JSON.parse(text);
+		return data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
+	} catch {
+		return null;
+	}
+}
+
+export async function scanLibraryFromDisk(
+	root?: FileSystemDirectoryHandle | null
+): Promise<DiskLibraryTitle[]> {
+	const r = root ?? (await getLibraryRoot());
+	if (!r) return [];
+
+	let library: FileSystemDirectoryHandle;
+	try {
+		library = await r.getDirectoryHandle(getLibrarySubdirName());
+	} catch {
+		return [];
+	}
+
+	const out: DiskLibraryTitle[] = [];
+
+	for (const kind of ['Manga', 'Novel'] as const) {
+		let kindRoot: FileSystemDirectoryHandle;
+		try {
+			kindRoot = await library.getDirectoryHandle(kind);
+		} catch {
+			continue;
+		}
+
+		for await (const [name, handle] of kindRoot.entries()) {
+			if (handle.kind !== 'directory') continue;
+			const titleDir = handle as FileSystemDirectoryHandle;
+			const meta = await readMetaJson(titleDir);
+			const isNovel = kind === 'Novel';
+
+			const sourceId = String(meta?.source || meta?.sourceId || 'disk').trim() || 'disk';
+			const mangaIdRaw = String(meta?.mangaId || meta?.id || '').trim();
+			const mangaTitle = String(
+				meta?.mangaTitle || meta?.title || name || 'Untitled'
+			).slice(0, 160);
+
+			const mangaId =
+				mangaIdRaw ||
+				`/disk/${kind.toLowerCase()}/${sanitizePathSegment(name)}`;
+
+			const chapters: DiskLibraryTitle['chapters'] = [];
+			let coverFileName: string | undefined;
+
+			if (isNovel) {
+				for await (const [fname, fhandle] of titleDir.entries()) {
+					if (fhandle.kind !== 'file') continue;
+					const lower = fname.toLowerCase();
+					if (lower === 'meta.json') continue;
+					if (lower.startsWith('cover.')) {
+						coverFileName = fname;
+						continue;
+					}
+					if (!lower.endsWith('.pdf')) continue;
+					const chapterTitle = fname.replace(/\.pdf$/i, '');
+					const chMetaId = String(meta?.chapterId || '').trim();
+					chapters.push({
+						chapterId: chMetaId || `/disk/${sanitizePathSegment(chapterTitle)}`,
+						chapterTitle,
+						savedAt: Number(meta?.savedAt) || Date.now(),
+						pageCount: undefined
+					});
+				}
+			} else {
+				for await (const [chName, chHandle] of titleDir.entries()) {
+					if (chHandle.kind === 'file') {
+						const lower = chName.toLowerCase();
+						if (lower.startsWith('cover.')) coverFileName = chName;
+						continue;
+					}
+					if (chHandle.kind !== 'directory') continue;
+					const chDir = chHandle as FileSystemDirectoryHandle;
+					let pageCount = 0;
+					try {
+						for await (const [, ph] of chDir.entries()) {
+							if (ph.kind === 'file') pageCount++;
+						}
+					} catch {
+						/* ignore */
+					}
+					const chMeta = await readMetaJson(chDir);
+					chapters.push({
+						chapterId: String(chMeta?.chapterId || meta?.chapterId || '').trim() ||
+							`/disk/${sanitizePathSegment(chName)}`,
+						chapterTitle: String(chMeta?.chapterTitle || chName),
+						savedAt: Number(chMeta?.savedAt || meta?.savedAt) || Date.now(),
+						pageCount: pageCount || undefined
+					});
+				}
+			}
+
+			out.push({
+				kind,
+				folderName: name,
+				mangaTitle,
+				sourceId,
+				mangaId,
+				isNovel,
+				localPath: libraryRelPath(kind, name),
+				chapters: chapters.sort((a, b) => b.savedAt - a.savedAt),
+				coverFileName
+			});
+		}
+	}
+
+	return out;
 }
