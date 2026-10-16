@@ -27,6 +27,11 @@
 	} from 'lucide-svelte';
 	import { exportBackupToFile, importBackupFromFile } from '$lib/utils/backup';
 	import {
+		exportSourceCacheToDisk,
+		getSourceCacheStats,
+		clearSourceCache
+	} from '$lib/utils/sourceJsonCache';
+	import {
 		getDB,
 		idbClearLibrary,
 		idbClearActivityLog,
@@ -59,6 +64,7 @@
 	let ageConfirmed = $state(false);
 
 	let storageBusy = $state(false);
+	let sourceCacheStats = $state<{ count: number; sources: number } | null>(null);
 	let storageMsg = $state('');
 	let storageErr = $state('');
 	let storageInfo = $state<{
@@ -100,7 +106,6 @@
 		}
 	}
 
-	/** Normalized download mode — treat anything other than 'zip' as 'disk'. */
 	function currentDownloadMode(): DownloadMode {
 		return prefs.downloadMode === 'zip' ? 'zip' : 'disk';
 	}
@@ -177,6 +182,12 @@
 				covers,
 				activity
 			};
+			try {
+				const sc = await getSourceCacheStats();
+				sourceCacheStats = { count: sc.count, sources: sc.sources };
+			} catch {
+				sourceCacheStats = { count: 0, sources: 0 };
+			}
 		} catch (e: any) {
 			storageErr = e?.message || 'Failed to read storage';
 		} finally {
@@ -262,6 +273,44 @@
 			await refreshStorage();
 		} catch (e: any) {
 			storageErr = e?.message || 'Failed to clear reading data';
+		} finally {
+			storageBusy = false;
+		}
+	}
+
+	
+	async function handleExportSourceCache() {
+		storageBusy = true;
+		storageMsg = '';
+		storageErr = '';
+		try {
+			const result = await exportSourceCacheToDisk();
+			if (result.written === 0) {
+				storageMsg =
+					'No source cache entries yet. Browse some sources first, then export again.';
+			} else {
+				storageMsg = `Exported ${result.written} source cache file(s) → ${result.pathHint}`;
+			}
+			const sc = await getSourceCacheStats();
+			sourceCacheStats = { count: sc.count, sources: sc.sources };
+		} catch (e: any) {
+			storageErr = e?.message || 'Export source cache failed';
+		} finally {
+			storageBusy = false;
+		}
+	}
+
+	async function handleClearSourceCache() {
+		if (!confirm('Clear all browse source JSON cache in this browser?')) return;
+		storageBusy = true;
+		storageMsg = '';
+		storageErr = '';
+		try {
+			await clearSourceCache();
+			sourceCacheStats = { count: 0, sources: 0 };
+			storageMsg = 'Source JSON cache cleared.';
+		} catch (e: any) {
+			storageErr = e?.message || 'Failed to clear source cache';
 		} finally {
 			storageBusy = false;
 		}
@@ -744,6 +793,44 @@
 				class="hidden"
 				onchange={handleImportFile}
 			/>
+		</div>
+
+		<div
+			class="mt-6 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/80 p-4 dark:border-zinc-700 dark:bg-zinc-900/60"
+		>
+			<p class="mb-1 text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+				Source browse cache (IndexedDB)
+			</p>
+			<p class="mb-3 text-[11px] leading-relaxed text-zinc-500">
+				List JSON per source (latest / search) kept in the browser to reduce Worker CPU. Export
+				writes files under <code class="text-[10px]">Rokuyomu/Cache/sources/</code> (Chrome /
+				Edge; may ask for folder access).
+			</p>
+			{#if sourceCacheStats}
+				<p class="mb-3 text-[11px] text-zinc-600 dark:text-zinc-400">
+					Cached: <strong>{sourceCacheStats.count}</strong> entries ·
+					<strong>{sourceCacheStats.sources}</strong> source(s)
+				</p>
+			{/if}
+			<div class="flex flex-wrap gap-2">
+				<button
+					type="button"
+					disabled={storageBusy}
+					onclick={handleExportSourceCache}
+					class="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:opacity-50"
+				>
+					<Download class="h-3.5 w-3.5" />
+					Export cache to folder
+				</button>
+				<button
+					type="button"
+					disabled={storageBusy}
+					onclick={handleClearSourceCache}
+					class="inline-flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+				>
+					Clear source cache
+				</button>
+			</div>
 		</div>
 
 		{#if msg}

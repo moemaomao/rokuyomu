@@ -9,7 +9,7 @@
  *  1. Read IDB → show immediately if present
  *  2. If age < TTL → skip network
  *  3. If age >= TTL → return stale + caller may revalidate in background
- *  4. Optional: mirror to Rokuyomu/Cache/sources/ on disk when FS is granted
+ *  4. Optional: mirror / export to Rokuyomu/Cache/sources/ on disk when FS is granted
  */
 
 import { browser } from '$app/environment';
@@ -96,7 +96,6 @@ async function trimOldEntries(db: IDBPDatabase<SourceCacheDB>) {
 		for (const e of all) {
 			if (e.savedAt < cutoff) toDelete.push(e.key);
 		}
-		// Cap total
 		const remaining = all.filter((e) => e.savedAt >= cutoff);
 		if (remaining.length > MAX_ENTRIES) {
 			const overflow = remaining
@@ -154,7 +153,6 @@ export async function getSourceCache<T = unknown>(opts: {
 	kind: SourceCacheKind;
 	sourceId: string;
 	scope?: string;
-	/** Override default TTL */
 	ttlMs?: number;
 }): Promise<SourceCacheHit<T> | null> {
 	if (!browser || !opts.sourceId) return null;
@@ -189,46 +187,127 @@ export async function clearSourceCache(sourceId?: string): Promise<void> {
 			await db.clear('entries');
 			return;
 		}
-		const idx = db.transaction('entries', 'readwrite').store.index('by-source');
+		const tx = db.transaction('entries', 'readwrite');
+		const idx = tx.store.index('by-source');
 		let cursor = await idx.openCursor(String(sourceId));
 		while (cursor) {
 			await cursor.delete();
 			cursor = await cursor.continue();
 		}
+		await tx.done;
 	} catch (e) {
 		console.warn('[sourceJsonCache] clear', e);
 	}
 }
 
+export async function listSourceCacheEntries(): Promise<SourceCacheEntry[]> {
+	if (!browser) return [];
+	try {
+		const db = await getDb();
+		return await db.getAll('entries');
+	} catch {
+		return [];
+	}
+}
+
+export async function getSourceCacheStats(): Promise<{
+	count: number;
+	sources: number;
+	oldestAt: number | null;
+	newestAt: number | null;
+}> {
+	const all = await listSourceCacheEntries();
+	if (!all.length) {
+		return { count: 0, sources: 0, oldestAt: null, newestAt: null };
+	}
+	const sourceSet = new Set(all.map((e) => e.sourceId));
+	let oldest = all[0].savedAt;
+	let newest = all[0].savedAt;
+	for (const e of all) {
+		if (e.savedAt < oldest) oldest = e.savedAt;
+		if (e.savedAt > newest) newest = e.savedAt;
+	}
+	return {
+		count: all.length,
+		sources: sourceSet.size,
+		oldestAt: oldest,
+		newestAt: newest
+	};
+}
+
+function safeCacheFileName(entry: SourceCacheEntry): string {
+	const raw = `${entry.kind}__${entry.sourceId}__${entry.scope}`;
+	return (
+		raw
+			.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+			.replace(/[:]/g, '_')
+			.replace(/\s+/g, '_')
+			.replace(/_+/g, '_')
+			.slice(0, 100) + '.json'
+	);
+}
+
 async function mirrorToDisk(entry: SourceCacheEntry): Promise<void> {
 	try {
-		const { supportsFileSystemAccess, getLibraryRoot, getRootFolderName, sanitizePathSegment, writeTextFile } =
-			await import('$lib/utils/localFs');
+		const { supportsFileSystemAccess, getLibraryRoot, writeTextFile } = await import(
+			'$lib/utils/localFs'
+		);
 		if (!supportsFileSystemAccess()) return;
 		const root = await getLibraryRoot();
 		if (!root) return;
 		const cacheDir = await root.getDirectoryHandle('Cache', { create: true });
 		const sourcesDir = await cacheDir.getDirectoryHandle('sources', { create: true });
-		const fname = sanitizePathSegment(`${entry.kind}__${entry.sourceId}__${entry.scope}`).slice(0, 100) + '.json';
-		await writeTextFile(
-			sourcesDir,
-			fname,
-			JSON.stringify(
-				{
-					key: entry.key,
-					sourceId: entry.sourceId,
-					kind: entry.kind,
-					scope: entry.scope,
-					savedAt: entry.savedAt,
-					data: entry.data
-				},
-				null,
-				0
-			)
-		);
-		void getRootFolderName;
+		await writeTextFile(sourcesDir, safeCacheFileName(entry), JSON.stringify(entry));
 	} catch {
 	}
+}
+
+export async function exportSourceCacheToDisk(): Promise<{
+	written: number;
+	pathHint: string;
+}> {
+	if (!browser) return { written: 0, pathHint: '' };
+
+	const { supportsFileSystemAccess, ensureLibraryRoot, writeTextFile } = await import(
+		'$lib/utils/localFs'
+	);
+	if (!supportsFileSystemAccess()) {
+		throw new Error('File System Access API not supported (use Chrome or Edge).');
+	}
+
+	const root = await ensureLibraryRoot();
+	if (!root) {
+		throw new Error('Folder not selected or permission denied.');
+	}
+
+	const all = await listSourceCacheEntries();
+	if (!all.length) {
+		return { written: 0, pathHint: 'Rokuyomu/Cache/sources/' };
+	}
+
+	const cacheDir = await root.getDirectoryHandle('Cache', { create: true });
+	const sourcesDir = await cacheDir.getDirectoryHandle('sources', { create: true });
+
+	const manifest = {
+		exportedAt: new Date().toISOString(),
+		count: all.length,
+		keys: all.map((e) => ({
+			key: e.key,
+			sourceId: e.sourceId,
+			kind: e.kind,
+			scope: e.scope,
+			savedAt: e.savedAt
+		}))
+	};
+	await writeTextFile(sourcesDir, '_manifest.json', JSON.stringify(manifest, null, 2));
+
+	let written = 0;
+	for (const entry of all) {
+		await writeTextFile(sourcesDir, safeCacheFileName(entry), JSON.stringify(entry, null, 2));
+		written++;
+	}
+
+	return { written, pathHint: 'Rokuyomu/Cache/sources/' };
 }
 
 export async function cachedJsonFetch<T>(opts: {
