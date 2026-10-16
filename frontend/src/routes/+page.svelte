@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { goto } from '$app/navigation';
+	import { goto, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { ChevronLeft, ChevronRight, Loader2, ArrowRight } from 'lucide-svelte';
@@ -73,6 +73,92 @@
 		sections = serverSections;
 		currentSource = serverSource;
 		currentPage = serverPage;
+	});
+
+
+	async function tryRestoreFromClientCache(): Promise<boolean> {
+		if (!browser) return false;
+		const q = searchQuery || "";
+		const lang = selectedLang || "all";
+		const type = selectedType || "all";
+		const url = $page.url;
+		const sp = url.searchParams.get("sp") || "";
+		const targetSource = url.searchParams.get("source") || "";
+		const pageNum = Math.max(1, Number(url.searchParams.get("page") || "1") || 1);
+
+		// Single source
+		if (targetSource) {
+			const hit = await getSourceCache({
+				kind: q ? "search" : "latest",
+				sourceId: targetSource,
+				scope: latestScope({ page: pageNum, lang, type, q })
+			});
+			if (hit?.fresh && Array.isArray(hit.data) && hit.data.length > 0) {
+				mangas = hit.data as any;
+				sections = [];
+				currentSource = targetSource;
+				currentPage = pageNum;
+				skipNextServerSync = true;
+				return true;
+			}
+			return false;
+		}
+
+		// Multi sectioned
+		if (isMulti && homeLayout === "sectioned" && preferredSources.length) {
+			const spMap: Record<string, number> = {};
+			if (sp) {
+				for (const part of sp.split(",")) {
+					const idx = part.lastIndexOf(":");
+					if (idx > 0) {
+						const id = part.slice(0, idx);
+						const n = Number(part.slice(idx + 1));
+						if (id && Number.isFinite(n) && n > 0) spMap[id] = n;
+					}
+				}
+			}
+			const nextSections: SectionItem[] = [];
+			let allFresh = true;
+			for (const sid of preferredSources) {
+				const p = spMap[sid] || 1;
+				const hit = await getSourceCache({
+					kind: q ? "search" : "latest",
+					sourceId: sid,
+					scope: latestScope({ page: p, lang, type, q })
+				});
+				if (hit?.fresh && Array.isArray(hit.data) && hit.data.length > 0) {
+					const name = sources.find((s) => s.id === sid)?.name || sid;
+					nextSections.push({
+						sourceId: sid,
+						name,
+						mangas: hit.data as any,
+						page: p,
+						hasMore: (hit.data as any[]).length >= 20 || p > 1
+					});
+				} else {
+					allFresh = false;
+					break;
+				}
+			}
+			if (allFresh && nextSections.length === preferredSources.length) {
+				sections = nextSections;
+				mangas = [];
+				currentSource = null;
+				skipNextServerSync = true;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	afterNavigate(async ({ type, to }) => {
+		if (!browser) return;
+		if (type !== "popstate") return;
+		if (!to || to.url.pathname !== "/") return;
+		const restored = await tryRestoreFromClientCache();
+		if (restored) {
+			loading = false;
+		}
 	});
 
 	let loading = $state(false);

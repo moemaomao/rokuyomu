@@ -314,7 +314,7 @@ export const load: PageServerLoad = async ({ url, request, setHeaders, depends, 
 
 	if (isMulti) {
 		setHeaders({
-			'Cache-Control': 'private, no-store'
+			'Cache-Control': 'private, max-age=60, stale-while-revalidate=300'
 		});
 	} else {
 		setHeaders({
