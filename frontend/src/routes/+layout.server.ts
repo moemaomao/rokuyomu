@@ -16,7 +16,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform }) => {
 		active: i.id === activeId
 	}));
 
-	const primary = items.find((i) => i.id === activeId) || items[0] || null;
+	const primary = activeId ? items.find((i) => i.id === activeId) || null : null;
 	const announcement = primary
 		? {
 				enabled: true as const,
