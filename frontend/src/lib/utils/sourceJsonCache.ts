@@ -113,6 +113,14 @@ async function trimOldEntries(db: IDBPDatabase<SourceCacheDB>) {
 	}
 }
 
+function toPlainJson<T>(data: T): T {
+	try {
+		return JSON.parse(JSON.stringify(data)) as T;
+	} catch {
+		return data;
+	}
+}
+
 export async function putSourceCache(opts: {
 	kind: SourceCacheKind;
 	sourceId: string;
@@ -122,6 +130,9 @@ export async function putSourceCache(opts: {
 	if (!browser || !opts.sourceId || opts.data == null) return;
 	if (Array.isArray(opts.data) && opts.data.length === 0) return;
 
+	const plain = toPlainJson(opts.data);
+	if (Array.isArray(plain) && plain.length === 0) return;
+
 	const key = sourceCacheKey(opts.kind, opts.sourceId, opts.scope || 'p1');
 	const entry: SourceCacheEntry = {
 		key,
@@ -129,12 +140,13 @@ export async function putSourceCache(opts: {
 		kind: opts.kind,
 		scope: opts.scope || 'p1',
 		savedAt: Date.now(),
-		data: opts.data
+		data: plain
 	};
 
 	try {
 		const db = await getDb();
 		await db.put('entries', entry);
+		console.info('[sourceJsonCache] saved', key, Array.isArray(plain) ? plain.length : typeof plain);
 		void trimOldEntries(db);
 		void mirrorToDisk(entry).catch(() => {});
 	} catch (e) {
@@ -315,7 +327,9 @@ export async function cachedJsonFetch<T>(opts: {
 	sourceId: string;
 	scope?: string;
 	ttlMs?: number;
+    
 	fetcher: () => Promise<T>;
+
 	staleWhileRevalidate?: boolean;
 }): Promise<{ data: T; fromCache: boolean; fresh: boolean }> {
 	const hit = await getSourceCache<T>({
