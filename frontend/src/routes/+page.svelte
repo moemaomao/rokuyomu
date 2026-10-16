@@ -9,6 +9,12 @@
 	import { isNsfwConfirmed, setNsfwConfirmed } from '$lib/utils/nsfw';
 	import { getImpl, isMultiMode } from '$lib/stores/impl';
 	import { isNovelSource } from '$lib/utils/novelSources';
+	import { browser } from '$app/environment';
+	import {
+		putSourceCache,
+		getSourceCache,
+		latestScope
+	} from '$lib/utils/sourceJsonCache';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
 	import {
 		getPreferences,
@@ -40,15 +46,34 @@
 		}
 	);
 
-	let mangas = $derived(pageData.mangas);
 	let sources = $derived(pageData.sources);
-	let currentSource = $derived(pageData.currentSource);
-	let currentPage = $derived(pageData.currentPage);
 	let searchQuery = $derived(pageData.searchQuery);
 	let isMulti = $derived(pageData.isMulti ?? false);
 	let preferredSources = $derived(pageData.preferredSources ?? []);
 	let homeLayout = $derived(pageData.homeLayout ?? 'merged');
-	let sections = $derived(pageData.sections ?? []);
+
+	let mangas = $state<PageData['mangas']>([]);
+	let sections = $state<SectionItem[]>([]);
+	let currentSource = $state<string | null>(null);
+	let currentPage = $state(1);
+	let skipNextServerSync = $state(false);
+
+	$effect(() => {
+		const pd = pageData;
+		const serverMangas = pd.mangas;
+		const serverSections = pd.sections ?? [];
+		const serverSource = pd.currentSource;
+		const serverPage = pd.currentPage;
+
+		if (skipNextServerSync) {
+			skipNextServerSync = false;
+			return;
+		}
+		mangas = serverMangas;
+		sections = serverSections;
+		currentSource = serverSource;
+		currentPage = serverPage;
+	});
 
 	let loading = $state(false);
 	let isDarkMode = $state(true);
@@ -62,6 +87,38 @@
 	let selectedLang = $state($page.url.searchParams.get('lang') || 'all');
 	let selectedType = $state($page.url.searchParams.get('type') || 'all');
 	let prefs = $state<AppPreferences>(getPreferences());
+
+	$effect(() => {
+		if (!browser) return;
+		const src = currentSource;
+		const list = mangas;
+		const page = currentPage;
+		const q = searchQuery || '';
+		const lang = selectedLang || 'all';
+		const type = selectedType || 'all';
+		if (src && Array.isArray(list) && list.length > 0) {
+			void putSourceCache({
+				kind: q ? 'search' : 'latest',
+				sourceId: src,
+				scope: latestScope({ page, lang, type, q }),
+				data: list
+			});
+		}
+		for (const sec of sections) {
+			if (!sec?.sourceId || !sec.mangas?.length) continue;
+			void putSourceCache({
+				kind: 'latest',
+				sourceId: sec.sourceId,
+				scope: latestScope({
+					page: sec.page || 1,
+					lang,
+					type,
+					q
+				}),
+				data: sec.mangas
+			});
+		}
+	});
 
 	$effect(() => {
 		selectedLang = $page.url.searchParams.get('lang') || 'all';
@@ -183,6 +240,87 @@
 		loading = true;
 		try {
 			const qs = params.toString();
+			const targetSource = params.get('source') || '';
+			const pageNum = Math.max(1, Number(params.get('page') || '1') || 1);
+			const q = (params.get('q') || '').trim();
+			const lang = params.get('lang') || selectedLang || 'all';
+			const type = params.get('type') || selectedType || 'all';
+			const sp = params.get('sp') || '';
+
+			if (browser && targetSource && !sp) {
+				const hit = await getSourceCache<PageData['mangas']>({
+					kind: q ? 'search' : 'latest',
+					sourceId: targetSource,
+					scope: latestScope({ page: pageNum, lang, type, q })
+				});
+				if (hit?.fresh && Array.isArray(hit.data) && hit.data.length > 0) {
+					mangas = hit.data;
+					currentSource = targetSource;
+					currentPage = pageNum;
+					skipNextServerSync = true;
+					await goto(qs ? `/?${qs}` : '/', {
+						invalidateAll: false,
+						keepFocus: true,
+						noScroll: false
+					});
+					return;
+				}
+			}
+
+			if (
+				browser &&
+				!targetSource &&
+				isMulti &&
+				homeLayout === 'sectioned' &&
+				preferredSources.length
+			) {
+				const spMap: Record<string, number> = {};
+				if (sp) {
+					for (const part of sp.split(',')) {
+						const idx = part.lastIndexOf(':');
+						if (idx > 0) {
+							const id = part.slice(0, idx);
+							const n = Number(part.slice(idx + 1));
+							if (id && Number.isFinite(n) && n > 0) spMap[id] = n;
+						}
+					}
+				}
+				const nextSections: SectionItem[] = [];
+				let allFresh = true;
+				for (const sid of preferredSources) {
+					const p = spMap[sid] || 1;
+					const hit = await getSourceCache<PageData['mangas']>({
+						kind: q ? 'search' : 'latest',
+						sourceId: sid,
+						scope: latestScope({ page: p, lang, type, q })
+					});
+					if (hit?.fresh && Array.isArray(hit.data) && hit.data.length > 0) {
+						const name = sources.find((s) => s.id === sid)?.name || sid;
+						nextSections.push({
+							sourceId: sid,
+							name,
+							mangas: hit.data,
+							page: p,
+							hasMore: hit.data.length >= 20 || p > 1
+						});
+					} else {
+						allFresh = false;
+						break;
+					}
+				}
+				if (allFresh && nextSections.length === preferredSources.length) {
+					sections = nextSections;
+					currentSource = null;
+					skipNextServerSync = true;
+					await goto(qs ? `/?${qs}` : '/', {
+						invalidateAll: false,
+						keepFocus: true,
+						noScroll: false
+					});
+					return;
+				}
+			}
+
 			await goto(qs ? `/?${qs}` : '/', {
 				invalidateAll: true,
 				keepFocus: true,
