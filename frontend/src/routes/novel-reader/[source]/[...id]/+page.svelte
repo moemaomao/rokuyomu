@@ -699,42 +699,47 @@ Nội dung:
 		);
 		const maxScroll = docH - viewport;
 
-		// Content not tall enough to scroll yet (still loading / short paint) → 0%
-		// Require meaningful scroll range so we never fake 100% on open.
-		if (maxScroll < 120) {
-			return 0;
-		}
-
-		// Near the real bottom of the document
-		if (scrollTop >= maxScroll - 48) {
-			return 100;
-		}
+		if (maxScroll < 80) return 0;
+		if (scrollTop >= maxScroll - 64) return 100;
 
 		const el = document.getElementById('novel-content');
 		if (el) {
 			const rect = el.getBoundingClientRect();
-			const articleTop = scrollTop + rect.top;
+			const scrolledPast = Math.max(0, -rect.top);
 			const articleHeight = Math.max(el.scrollHeight, el.offsetHeight, 1);
-			const readable = articleHeight - viewport;
-			if (readable >= 120) {
-				let pct = ((scrollTop - articleTop) / readable) * 100;
-				if (pct < 0) pct = 0;
+			const readable = Math.max(1, articleHeight - viewport);
+			if (readable >= 80) {
+				let pct = (scrolledPast / readable) * 100;
 				if (pct > 100) pct = 100;
 				return Math.round(pct);
 			}
 		}
 
-		// Document-level fallback
 		return Math.min(100, Math.max(0, Math.round((scrollTop / maxScroll) * 100)));
 	}
 
+	let scrollTrackingArmed = false;
+	let lastScrollTopSeen = 0;
+
 	function onScrollProgress() {
+		if (!browser) return;
+		const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+
+		if (!scrollTrackingArmed) {
+			if (Math.abs(scrollTop - lastScrollTopSeen) < 12) {
+				lastScrollTopSeen = scrollTop;
+				return;
+			}
+			scrollTrackingArmed = true;
+		}
+
 		const pct = measureScrollProgress();
+		if (pct <= scrollProgress) return;
 		scrollProgress = pct;
 		if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
 		scrollSaveTimer = setTimeout(() => {
-			persistReadingProgress(pct, false);
-		}, 400);
+			persistReadingProgress(scrollProgress, false);
+		}, 200);
 	}
 
 	function flushScrollProgress() {
@@ -742,12 +747,11 @@ Nội dung:
 			clearTimeout(scrollSaveTimer);
 			scrollSaveTimer = null;
 		}
-		const pct = measureScrollProgress();
-		scrollProgress = pct;
-		persistReadingProgress(pct, false);
+		if (scrollTrackingArmed && scrollProgress > 0) {
+			persistReadingProgress(scrollProgress, false);
+		}
 	}
 
-	// Initial history write when chapter opens
 	$effect(() => {
 		if (!browser) return;
 		const key = `${source}::${chapterId}`;
@@ -760,10 +764,11 @@ Nội dung:
 		if (key === lastSavedChapterKey) return;
 		lastSavedChapterKey = key;
 		scrollProgress = 0;
+		scrollTrackingArmed = false;
+		lastScrollTopSeen = browser ? window.scrollY || 0 : 0;
 		persistReadingProgress(0, true);
 	});
 
-	// Scroll listener + restore previous progress for same chapter
 	$effect(() => {
 		if (!browser) return;
 		const src = String(source || '');
@@ -803,6 +808,8 @@ Nội dung:
 					if (maxScroll > 40) {
 						window.scrollTo({ top: (sp / 100) * maxScroll, behavior: 'auto' });
 						scrollProgress = Math.round(sp);
+						scrollTrackingArmed = true;
+						lastScrollTopSeen = window.scrollY || 0;
 					}
 				}
 			} catch {
