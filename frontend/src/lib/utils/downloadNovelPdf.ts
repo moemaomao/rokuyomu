@@ -333,9 +333,7 @@ export async function buildSimpleEpub(opts: {
 	const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 	const zip = new JSZip();
-	// mimetype must be first and uncompressed
 	zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
-
 	zip.file(
 		'META-INF/container.xml',
 		`<?xml version="1.0" encoding="UTF-8"?>
@@ -427,6 +425,14 @@ p:first-of-type { text-indent: 0; }
 	});
 }
 
+
+function toOfflineHtml(raw: string): string {
+	const s = String(raw || '').trim();
+	if (!s) return '';
+	if (/<(p|div|br|h[1-6]|li|section)\b/i.test(s)) return s;
+	return plainTextToXhtmlParagraphs(s);
+}
+
 export async function downloadNovelChapterPdf(opts: {
 	source: string;
 	chapterId: string;
@@ -487,7 +493,9 @@ export async function downloadNovelChapterPdf(opts: {
 			chapterId: String(chapterId),
 			novelTitle,
 			chapterTitle: title,
-			content: (data.content && String(data.content).trim()) || content,
+			content: toOfflineHtml(
+				(data.content && String(data.content).trim()) || content
+			),
 			pdfBlob: format === 'pdf' ? fileBlob : undefined
 		});
 	} catch (e) {

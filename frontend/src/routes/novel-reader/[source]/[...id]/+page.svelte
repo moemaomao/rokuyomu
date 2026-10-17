@@ -52,6 +52,26 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	let offlineNovelMode = $state(false);
 	let offlineContent = $state<string | null>(null);
 
+	/** Plain text offline chapters need <p>/<br> or {@html} collapses newlines. */
+	function formatNovelHtml(raw: string | null | undefined): string {
+		const s = String(raw || '').trim();
+		if (!s) return '<p>No content</p>';
+		if (/<[a-z][\s\S]*>/i.test(s)) return s;
+		const esc = (t: string) =>
+			t
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;');
+		return s
+			.replace(/\r\n/g, '\n')
+			.replace(/\r/g, '\n')
+			.split(/\n{2,}/)
+			.map((p) => p.trim())
+			.filter(Boolean)
+			.map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`)
+			.join('\n');
+	}
+
 
 	let {
 		content = '',
@@ -846,7 +866,7 @@ Nội dung:
 			try {
 				const row = await getOfflineNovelChapter(src, cid);
 				if (cancelled) return;
-				if (row?.content) {
+				if (row?.content && String(row.content).trim()) {
 					offlineContent = row.content;
 					offlineNovelMode = true;
 					if (row.chapterTitle) {
@@ -971,7 +991,7 @@ onMount(() => {
 		{#if showTranslated && translatedContent}
 			{@html translatedContent.replace(/\n/g, '<br>')}
 		{:else}
-			{@html (offlineContent ?? content) || '<p>No content</p>'}
+			{@html formatNovelHtml(offlineContent ?? content)}
 		{/if}
 	</article>
 
