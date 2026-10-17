@@ -65,61 +65,52 @@ $effect(() => {
 	const incoming = rawPages ?? [];
 	const norm = normChapterId(cid);
 
-	if (pendingChapterId && !chapterIdMatches(norm, pendingChapterId)) return;
+	if (untrack(() => pendingChapterId) && !chapterIdMatches(norm, untrack(() => pendingChapterId) || '')) {
+		return;
+	}
 
 	let cancelled = false;
-
-	// If we already rendered this chapter offline, do not reset to spinner
-	const alreadyOffline =
-		offlineMode &&
-		pages.length > 0 &&
-		chapterIdMatches(norm, normChapterId(cid));
-
-	if (!alreadyOffline) {
-		// Only show spinner when we do not already have offline pages on screen
+	const already = untrack(
+		() => offlineMode && pages.length > 0
+	);
+	if (!already) {
 		chapterLoading = true;
 	}
 
 	(async () => {
 		try {
 			if (src && cid) {
-				const row = await getOfflineMangaChapter(src, cid, {
-					mangaTitle: String(mangaInfo?.title || ''),
-					chapterTitle: String(
-						(currentChapter as { title?: string } | null)?.title || ''
-					),
-					allowDisk: true
-				});
+				const row = await getOfflineMangaChapter(src, cid);
 				if (cancelled) return;
 				if (row?.pages?.length) {
-					revokeOfflineUrls();
-					const firstN = Math.min(6, row.pages.length);
-					const firstUrls = row.pages
-						.slice(0, firstN)
-						.map((pg) => URL.createObjectURL(pg.blob));
-					offlineObjectUrls = firstUrls;
-					pages = firstUrls;
-					offlineMode = true;
-					chapterLoading = false;
-					pendingChapterId = null;
-					currentPageIndex = 0;
-					imgEpoch += 1;
-					if (row.pages.length > firstN) {
-						await new Promise((r) => setTimeout(r, 0));
+					const total = Math.min(row.pages.length, 40);
+					const BATCH = 3;
+					untrack(() => revokeOfflineUrls());
+					const urls: string[] = [];
+					for (let i = 0; i < total; i++) {
 						if (cancelled) return;
-						const rest: string[] = [];
-						for (let i = firstN; i < row.pages.length; i++) {
-							rest.push(URL.createObjectURL(row.pages[i].blob));
-							if ((i - firstN) % 8 === 7) {
-								await new Promise((r) => setTimeout(r, 0));
-								if (cancelled) return;
+						try {
+							urls.push(URL.createObjectURL(row.pages[i].blob));
+						} catch (e) {
+							console.warn('[reader] objectURL', i, e);
+							break;
+						}
+						if (i === Math.min(BATCH, total) - 1 || i === total - 1) {
+							offlineObjectUrls = urls.slice();
+							pages = urls.slice();
+							offlineMode = true;
+							chapterLoading = false;
+							pendingChapterId = null;
+							if (i === Math.min(BATCH, total) - 1) {
+								currentPageIndex = 0;
+								imgEpoch += 1;
 							}
 						}
-						const all = [...firstUrls, ...rest];
-						offlineObjectUrls = all;
-						pages = all;
-						imgEpoch += 1;
+						if (i < total - 1 && (i + 1) % BATCH === 0) {
+							await new Promise((r) => setTimeout(r, 32));
+						}
 					}
+					imgEpoch += 1;
 					return;
 				}
 			}
@@ -127,23 +118,15 @@ $effect(() => {
 			console.warn('[reader] offline lookup', e);
 		}
 		if (cancelled) return;
-		// Network path only if offline miss
-		if (offlineMode && pages.length > 0) {
-			// Keep offline pages if network has nothing useful yet
-			if (!incoming?.length) {
-				chapterLoading = false;
-				return;
-			}
+		if (untrack(() => offlineMode && pages.length > 0) && !(incoming?.length)) {
+			chapterLoading = false;
+			return;
 		}
-		revokeOfflineUrls();
+		untrack(() => revokeOfflineUrls());
 		offlineMode = false;
 		pages = incoming;
 		chapterLoading = false;
-		if (pendingChapterId && chapterIdMatches(norm, pendingChapterId)) {
-			pendingChapterId = null;
-			currentPageIndex = 0;
-			imgEpoch += 1;
-		}
+		pendingChapterId = null;
 	})();
 
 	return () => {
@@ -390,36 +373,28 @@ $effect(() => {
 		imgEpoch += 1;
 		try { window.scrollTo(0, 0); } catch {}
 
-		// Offline-first: paint from IDB immediately, then navigate without waiting network
 		try {
-			const row = await getOfflineMangaChapter(String(source), cleanId, {
-				mangaTitle: String(mangaInfo?.title || ''),
-				chapterTitle:
-					typeof target === 'object' && target !== null
-						? String((target as { title?: string }).title || '')
-						: '',
-				allowDisk: true
-			});
+			const row = await getOfflineMangaChapter(String(source), cleanId);
 			if (row?.pages?.length) {
 				revokeOfflineUrls();
-				const firstN = Math.min(6, row.pages.length);
-				const firstUrls = row.pages
-					.slice(0, firstN)
-					.map((pg) => URL.createObjectURL(pg.blob));
-				offlineObjectUrls = firstUrls;
-				pages = firstUrls;
-				offlineMode = true;
-				chapterLoading = false;
-				if (row.pages.length > firstN) {
-					await new Promise((r) => setTimeout(r, 0));
-					const rest: string[] = [];
-					for (let i = firstN; i < row.pages.length; i++) {
-						rest.push(URL.createObjectURL(row.pages[i].blob));
-						if ((i - firstN) % 8 === 7) await new Promise((r) => setTimeout(r, 0));
+				const total = Math.min(row.pages.length, 40);
+				const BATCH = 3;
+				const urls: string[] = [];
+				for (let i = 0; i < total; i++) {
+					try {
+						urls.push(URL.createObjectURL(row.pages[i].blob));
+					} catch {
+						break;
 					}
-					const all = [...firstUrls, ...rest];
-					offlineObjectUrls = all;
-					pages = all;
+					if (i === Math.min(BATCH, total) - 1 || i === total - 1) {
+						offlineObjectUrls = urls.slice();
+						pages = urls.slice();
+						offlineMode = true;
+						chapterLoading = false;
+					}
+					if (i < total - 1 && (i + 1) % BATCH === 0) {
+						await new Promise((r) => setTimeout(r, 32));
+					}
 				}
 				try {
 					await goto(`/reader/${source}/${cleanId}`, {

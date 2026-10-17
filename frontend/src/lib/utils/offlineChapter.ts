@@ -1,7 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
 import { chapterHref } from '$lib/utils/novelSources';
-import { supportsFileSystemAccess, getLibraryRoot, readMangaChapterFromDisk } from '$lib/utils/localFs';
 
 const DB_NAME = 'rokuyomu-offline-chapters';
 const DB_VERSION = 1;
@@ -48,7 +47,6 @@ function chapterKey(sourceId: string, chapterId: string): string {
 	return `${String(sourceId)}::${normalizeMangaId(chapterId)}`;
 }
 
-/** In-memory cache — avoids repeated IDB reads when flipping chapters offline */
 const mangaChapterCache = new Map<string, OfflineMangaChapter | null>();
 const novelChapterCache = new Map<string, OfflineNovelChapter | null>();
 const CACHE_MAX = 40;
@@ -140,7 +138,7 @@ export async function saveOfflineMangaChapter(opts: {
 export async function getOfflineMangaChapter(
 	sourceId: string,
 	chapterId: string,
-	opts?: { mangaTitle?: string; chapterTitle?: string; allowDisk?: boolean }
+	_opts?: { mangaTitle?: string; chapterTitle?: string; allowDisk?: boolean }
 ): Promise<OfflineMangaChapter | null> {
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
@@ -148,79 +146,43 @@ export async function getOfflineMangaChapter(
 	const primaryKey = chapterKey(sourceId, raw);
 	if (mangaChapterCache.has(primaryKey)) {
 		const hit = mangaChapterCache.get(primaryKey);
-		if (hit?.pages?.length) return hit;
-		// cached miss — still allow disk if titles provided
-		if (hit === null && !(opts?.allowDisk && (opts.mangaTitle || opts.chapterTitle))) {
-			return null;
-		}
+		return hit?.pages?.length ? hit : null;
 	}
 
 	const db = await getDB();
 
-	const candidates = new Set<string>();
+	const candidates: string[] = [];
+	const seen = new Set<string>();
 	const add = (s: string) => {
 		const t = String(s || '').trim();
-		if (!t) return;
-		candidates.add(t);
-		candidates.add(normalizeMangaId(t));
-		const noSlash = t.replace(/^\/+/, '').replace(/\/+$/, '');
-		if (noSlash) {
-			candidates.add(noSlash);
-			candidates.add('/' + noSlash);
+		if (!t || seen.has(t)) return;
+		seen.add(t);
+		candidates.push(t);
+		const n = normalizeMangaId(t);
+		if (n && !seen.has(n)) {
+			seen.add(n);
+			candidates.push(n);
 		}
 	};
 	add(raw);
 	const seg = raw.split('/').filter(Boolean).pop();
 	if (seg) add(seg);
-
-	// Key lookups only — NEVER db.getAll() here (freezes on large offline libraries)
-	for (const c of candidates) {
-		const k = chapterKey(sourceId, c);
-		const row = await db.get('mangaChapters', k);
-		if (row?.pages?.length) {
-			cachePutManga(k, row);
-			cachePutManga(primaryKey, row);
-			return row;
-		}
+	const noSlash = raw.replace(/^\/+/, '').replace(/\/+$/, '');
+	if (noSlash) {
+		add(noSlash);
+		add('/' + noSlash);
 	}
 
-	// Disk only when we have title hints (targeted path). Full library scan is forbidden.
-	const allowDisk = opts?.allowDisk !== false;
-	const titleHint = String(opts?.mangaTitle || '').trim();
-	const chTitleHint = String(opts?.chapterTitle || '').trim();
-	if (allowDisk && supportsFileSystemAccess() && (titleHint || chTitleHint)) {
+	for (const c of candidates) {
+		const k = chapterKey(sourceId, c);
 		try {
-			const root = await getLibraryRoot();
-			if (root) {
-				const fromDisk = await readMangaChapterFromDisk({
-					root,
-					sourceId,
-					chapterId: raw,
-					mangaTitle: titleHint || undefined,
-					chapterTitle: chTitleHint || undefined,
-					// max pages safety; reader will still show what we have
-					maxPages: 200
-				});
-				if (fromDisk?.pages?.length) {
-					const entry: OfflineMangaChapter = {
-						key: primaryKey,
-						sourceId: fromDisk.sourceId || sourceId,
-						mangaId: normalizeMangaId(fromDisk.mangaId || raw),
-						chapterId: normalizeMangaId(fromDisk.chapterId || raw),
-						mangaTitle: fromDisk.mangaTitle || titleHint || 'Manga',
-						chapterTitle: fromDisk.chapterTitle || chTitleHint || 'Chapter',
-						pages: fromDisk.pages,
-						savedAt: Date.now()
-					};
-					cachePutManga(primaryKey, entry);
-					cachePutManga(chapterKey(sourceId, entry.chapterId), entry);
-					// IDB write in background — do NOT block UI with huge blob put
-					void db.put('mangaChapters', entry).catch(() => {});
-					return entry;
-				}
+			const row = await db.get('mangaChapters', k);
+			if (row?.pages?.length) {
+				cachePutManga(k, row);
+				cachePutManga(primaryKey, row);
+				return row;
 			}
-		} catch (e) {
-			console.warn('[offline] disk chapter read', e);
+		} catch {
 		}
 	}
 
