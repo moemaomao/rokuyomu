@@ -428,6 +428,32 @@ export async function downloadChapter(opts: {
 	}
 
 	if (offlineOnly) {
+		void cacheLibraryCover({
+			mangaId: mangaId || chapterId,
+			sourceId: source,
+			coverUrl: cover || '',
+			title: mangaTitle || mangaSafe,
+			isNovel: false
+		});
+		try {
+			await upsertLibraryEntry({
+				mangaId: mangaId || chapterId,
+				mangaTitle: mangaTitle || mangaSafe,
+				cover: cover || '',
+				sourceId: source,
+				isNovel: false,
+				chapters: [
+					{
+						chapterId: String(chapterId),
+						chapterTitle,
+						savedAt: Date.now(),
+						pageCount: pages.length
+					}
+				]
+			});
+		} catch (e) {
+			console.warn('[library] upsert failed (offlineOnly)', e);
+		}
 		report({
 			phase: 'done',
 			current: pages.length,

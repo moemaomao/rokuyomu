@@ -20,7 +20,7 @@
 		Download
 	} from 'lucide-svelte';
 	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
-	import { getOfflineNovelChapter } from '$lib/utils/offlineChapter';
+	import { getOfflineNovelChapter, hasOfflineNovelChapter } from '$lib/utils/offlineChapter';
 import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	import {
 		getOfflineChapterIds,
@@ -165,17 +165,23 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 			isDownloaded = false;
 			return;
 		}
+		const cid = String(chapterId);
 		try {
+			if (await hasOfflineNovelChapter(String(source), cid)) {
+				isDownloaded = true;
+				return;
+			}
 			await ensureLibraryLoaded();
+			const mid = novelMangaId();
+			if (!mid) {
+				isDownloaded = false;
+				return;
+			}
+			const set = getOfflineChapterIds(source, mid);
+			isDownloaded = isOfflineChapter(cid, set);
 		} catch {
-		}
-		const mid = novelMangaId();
-		if (!mid) {
 			isDownloaded = false;
-			return;
 		}
-		const set = getOfflineChapterIds(source, mid);
-		isDownloaded = isOfflineChapter(String(chapterId), set);
 	}
 
 	$effect(() => {
@@ -917,7 +923,7 @@ onMount(() => {
 			mangaId: (novelInfo as { id?: string } | null)?.id || '',
 			cover: (novelInfo as { cover?: string } | null)?.cover || '',
 			content: html
-		});
+		}).then(() => refreshOfflineStatus());
 	});
 
 </script>

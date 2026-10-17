@@ -15,6 +15,7 @@
 import { autoDownloadMangaChapter } from '$lib/utils/autoDownloadOnRead';
 	import {
 		getOfflineMangaChapter,
+		hasOfflineMangaChapter,
 		mangaPagesToObjectUrls
 	} from '$lib/utils/offlineChapter';
 	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/library.svelte';
@@ -368,16 +369,27 @@ $effect(() => {
 	}
 
 	async function refreshOfflineStatus() {
-		if (!browser || !source || !mangaInfo?.id) {
+		if (!browser || !source || !chapterId) {
 			isOfflineChapter = false;
 			return;
 		}
+		const cid = String(chapterId ?? '');
 		try {
-			await ensureLibraryLoaded();
-			const ids = getOfflineChapterIds(source, String(mangaInfo.id));
-			const cid = String(chapterId ?? '');
-			const alt = cid.startsWith('/') ? cid.slice(1) : `/${cid}`;
-			isOfflineChapter = ids.has(cid) || ids.has(alt) || ids.has(cid.replace(/^\/+/, ''));
+		
+			if (await hasOfflineMangaChapter(String(source), cid)) {
+				isOfflineChapter = true;
+				return;
+			}
+	
+			if (mangaInfo?.id) {
+				await ensureLibraryLoaded();
+				const ids = getOfflineChapterIds(source, String(mangaInfo.id));
+				const alt = cid.startsWith('/') ? cid.slice(1) : `/${cid}`;
+				isOfflineChapter =
+					ids.has(cid) || ids.has(alt) || ids.has(cid.replace(/^\/+/, ''));
+				return;
+			}
+			isOfflineChapter = false;
 		} catch {
 			isOfflineChapter = false;
 		}
@@ -388,6 +400,13 @@ $effect(() => {
 		mangaInfo;
 		source;
 		if (browser) void refreshOfflineStatus();
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		const onLibrary = () => void refreshOfflineStatus();
+		window.addEventListener('library-changed', onLibrary);
+		return () => window.removeEventListener('library-changed', onLibrary);
 	});
 
 	async function handleDownload() {
@@ -555,7 +574,7 @@ $effect(() => {
 			mangaId: (mangaInfo as { id?: string } | null)?.id || '',
 			cover: (mangaInfo as { cover?: string } | null)?.cover || '',
 			pageUrls: list.filter(Boolean)
-		});
+		}).then(() => refreshOfflineStatus());
 	});
 
 </script>
