@@ -4,11 +4,16 @@ import {
 	requestStoredLibraryRoot,
 	pickLibraryRoot,
 	saveMangaChapterToDisk,
-	sanitizePathSegment
+	sanitizePathSegment,
+	getLibraryRoot,
+	readMangaChapterFromDisk
 } from '$lib/utils/localFs';
 import { upsertLibraryEntry } from '$lib/stores/library.svelte';
 import { cacheLibraryCover } from '$lib/utils/cacheCover';
-import { saveOfflineMangaChapter } from '$lib/utils/offlineChapter';
+import {
+	saveOfflineMangaChapter,
+	getOfflineMangaChapter
+} from '$lib/utils/offlineChapter';
 
 export type DownloadProgress = {
 	phase: 'pages' | 'images' | 'zip' | 'disk' | 'fetch' | 'pdf' | 'done' | 'error';
@@ -273,6 +278,106 @@ export async function downloadChapter(opts: {
 	);
 
 	report({ phase: 'pages', current: 0, total: 1, message: 'Loading pages…' });
+
+	// Already offline (IDB) — mark library + done, do not re-fetch network
+	try {
+		const existing = await getOfflineMangaChapter(source, String(chapterId));
+		if (existing?.pages?.length) {
+			report({
+				phase: 'done',
+				current: existing.pages.length,
+				total: existing.pages.length,
+				message: 'Already offline'
+			});
+			try {
+				await upsertLibraryEntry({
+					mangaId: mangaId || chapterId,
+					mangaTitle: mangaTitle || existing.mangaTitle || 'Manga',
+					cover: cover || '',
+					sourceId: source,
+					isNovel: false,
+					chapters: [
+						{
+							chapterId: String(chapterId),
+							chapterTitle: existing.chapterTitle || chapterTitle,
+							savedAt: Date.now(),
+							pageCount: existing.pages.length
+						}
+					]
+				});
+			} catch {
+				/* ignore */
+			}
+			return;
+		}
+	} catch (e) {
+		console.warn('[download] offline check', e);
+	}
+
+	// Already on disk — hydrate IDB + library, skip network
+	if (supportsFileSystemAccess() && (mangaTitle || chapterTitle)) {
+		try {
+			const root = await getLibraryRoot();
+			if (root) {
+				const fromDisk = await readMangaChapterFromDisk({
+					root,
+					sourceId: source,
+					chapterId: String(chapterId),
+					mangaTitle: mangaTitle || undefined,
+					chapterTitle: chapterTitle || undefined,
+					maxPages: 200
+				});
+				if (fromDisk?.pages?.length) {
+					report({
+						phase: 'disk',
+						current: fromDisk.pages.length,
+						total: fromDisk.pages.length,
+						message: 'Found on disk…'
+					});
+					try {
+						await saveOfflineMangaChapter({
+							sourceId: source,
+							mangaId: mangaId || chapterId,
+							chapterId: String(chapterId),
+							mangaTitle: fromDisk.mangaTitle || mangaTitle || 'Manga',
+							chapterTitle: fromDisk.chapterTitle || chapterTitle,
+							pages: fromDisk.pages
+						});
+					} catch (e) {
+						console.warn('[download] hydrate IDB from disk', e);
+					}
+					try {
+						await upsertLibraryEntry({
+							mangaId: mangaId || chapterId,
+							mangaTitle: fromDisk.mangaTitle || mangaTitle || 'Manga',
+							cover: cover || '',
+							sourceId: source,
+							isNovel: false,
+							chapters: [
+								{
+									chapterId: String(chapterId),
+									chapterTitle: fromDisk.chapterTitle || chapterTitle,
+									savedAt: Date.now(),
+									pageCount: fromDisk.pages.length
+								}
+							]
+						});
+					} catch {
+						/* ignore */
+					}
+					report({
+						phase: 'done',
+						current: fromDisk.pages.length,
+						total: fromDisk.pages.length,
+						message: 'Loaded from disk'
+					});
+					return;
+				}
+			}
+		} catch (e) {
+			console.warn('[download] disk check', e);
+		}
+	}
 
 	let urls: string[] =
 		Array.isArray(pageUrls) && pageUrls.length > 0
