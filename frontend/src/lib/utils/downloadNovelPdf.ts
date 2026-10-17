@@ -1,6 +1,8 @@
 import {
 	supportsFileSystemAccess,
 	ensureLibraryRoot,
+	requestStoredLibraryRoot,
+	pickLibraryRoot,
 	saveNovelPdfToDisk,
 	sanitizePathSegment
 } from '$lib/utils/localFs';
@@ -333,7 +335,7 @@ export async function downloadNovelChapterPdf(opts: {
 		supportsFileSystemAccess();
 
 	if (preferDisk) {
-		const root = await ensureLibraryRoot();
+		const root = (await requestStoredLibraryRoot()) || (await pickLibraryRoot());
 		if (root) {
 			report({ phase: 'disk', current: 1, total: 1, message: 'Saving to local folder…' });
 			savedPath = await saveNovelPdfToDisk({

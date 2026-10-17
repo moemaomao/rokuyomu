@@ -1,6 +1,8 @@
 import {
 	supportsFileSystemAccess,
 	ensureLibraryRoot,
+	requestStoredLibraryRoot,
+	pickLibraryRoot,
 	saveMangaChapterToDisk,
 	sanitizePathSegment
 } from '$lib/utils/localFs';
@@ -360,7 +362,9 @@ export async function downloadChapter(opts: {
 		supportsFileSystemAccess();
 
 	if (preferDisk) {
-		const root = await ensureLibraryRoot();
+		let root = offlineOnly
+			? await ensureLibraryRoot()
+			: (await requestStoredLibraryRoot()) || (await pickLibraryRoot());
 		if (root) {
 			report({
 				phase: 'disk',
