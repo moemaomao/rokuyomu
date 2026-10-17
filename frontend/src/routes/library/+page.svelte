@@ -469,8 +469,10 @@
 	}
 
 	async function confirmBatchDownload() {
-		const e = warnTarget;
-		if (!e || batch.active || busy) return;
+		const target = warnTarget;
+		if (!target || batch.active || busy) return;
+		// Capture non-null entry for async workers (TS + race-safe)
+		const e: LibraryEntry = target;
 		warnOpen = false;
 		warnTarget = null;
 
@@ -538,48 +540,68 @@
 			};
 
 			let errors = 0;
-			for (let i = 0; i < pending.length; i++) {
-				if (batch.cancelled) break;
-				const ch = pending[i];
-				batch = {
-					...batch,
-					current: i,
-					chapterLabel: `${i + 1} / ${pending.length} — ${ch.title}`,
-					phase: 'download'
-				};
+			let completed = 0;
+			const concurrency = entryIsNovel(e)
+				? Math.min(4, pending.length)
+				: Math.min(2, pending.length);
+			let cursor = 0;
 
-				try {
-					if (entryIsNovel(e)) {
-						await downloadNovelChapterPdf({
-							source: e.sourceId,
-							chapterId: ch.id,
-							chapterTitle: ch.title,
-							novelTitle: e.mangaTitle,
-							mangaId: e.mangaId,
-							cover: e.cover || '',
-							onProgress: (p) => {
-								batch = { ...batch, phase: p.phase || 'download' };
-							}
-						});
-					} else {
-						await downloadChapter({
-							source: e.sourceId,
-							chapterId: ch.id,
-							chapterTitle: ch.title,
-							mangaTitle: e.mangaTitle,
-							mangaId: e.mangaId,
-							cover: e.cover || '',
-							onProgress: (p) => {
-								batch = { ...batch, phase: p.phase || 'download' };
-							}
-						});
+			async function worker() {
+				while (true) {
+					if (batch.cancelled) return;
+					const i = cursor++;
+					if (i >= pending.length) return;
+					const ch = pending[i];
+					batch = {
+						...batch,
+						current: completed,
+						chapterLabel: `${completed + 1} / ${pending.length} — ${ch.title}`,
+						phase: 'download'
+					};
+					try {
+						if (entryIsNovel(e)) {
+							await downloadNovelChapterPdf({
+								source: e.sourceId,
+								chapterId: ch.id,
+								chapterTitle: ch.title,
+								novelTitle: e.mangaTitle,
+								mangaId: e.mangaId,
+								cover: e.cover || '',
+								batchMode: true,
+								onProgress: (p) => {
+									batch = { ...batch, phase: p.phase || 'download' };
+								}
+							});
+						} else {
+							await downloadChapter({
+								source: e.sourceId,
+								chapterId: ch.id,
+								chapterTitle: ch.title,
+								mangaTitle: e.mangaTitle,
+								mangaId: e.mangaId,
+								cover: e.cover || '',
+								offlineOnly: true,
+								onProgress: (p) => {
+									batch = { ...batch, phase: p.phase || 'download' };
+								}
+							});
+						}
+					} catch (err) {
+						console.error('[batch download]', ch.id, err);
+						errors++;
+						batch = { ...batch, errors };
+					} finally {
+						completed++;
+						batch = {
+							...batch,
+							current: completed,
+							chapterLabel: `${completed} / ${pending.length} — ${ch.title}`
+						};
 					}
-				} catch (err) {
-					console.error('[batch download]', ch.id, err);
-					errors++;
-					batch = { ...batch, errors };
 				}
 			}
+
+			await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
 			const done = batch.cancelled
 				? `Batch cancelled for "${e.mangaTitle}" (${batch.current}/${pending.length}).`
@@ -622,23 +644,50 @@
 		.badge-stick {
 			display: inline-flex;
 			align-items: center;
-			padding: 0.12rem 0.35rem;
-			font-size: 0.55rem;
+			padding: 0.08rem 0.28rem;
+			font-size: 0.5rem;
 			font-weight: 700;
 			letter-spacing: 0.02em;
 			text-transform: uppercase;
 			line-height: 1.1;
 			border: 1px solid transparent;
 			box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+			max-width: 48%;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		@media (max-width: 640px) {
+			.badge-stick {
+				padding: 0.05rem 0.2rem;
+				font-size: 0.42rem;
+				letter-spacing: 0.01em;
+				max-width: 42%;
+				box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+			}
+			.badge-source {
+				max-width: 50%;
+			}
+			.badge-offline {
+				max-width: 55%;
+			}
+		}
+		@media (min-width: 641px) {
+			.badge-stick {
+				padding: 0.12rem 0.35rem;
+				font-size: 0.55rem;
+				max-width: 55%;
+			}
 		}
 		.badge-stick-tl {
-			border-radius: 0 0 0.3rem 0;
+			border-radius: 0 0 0.25rem 0;
 		}
 		.badge-stick-bl {
-			border-radius: 0 0.3rem 0 0;
+			border-radius: 0 0.25rem 0 0;
 		}
 		.badge-stick-br {
-			border-radius: 0.3rem 0 0 0;
+			border-radius: 0.25rem 0 0 0;
 		}
 		.badge-type-manga {
 			background: rgba(201, 23, 20, 0.78);
@@ -654,10 +703,6 @@
 			background: rgba(147, 51, 234, 0.78);
 			border-color: rgba(192, 132, 252, 0.35);
 			color: #faf5ff;
-			max-width: 55%;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
 		}
 		.badge-offline {
 			background: rgba(0, 0, 0, 0.82);
@@ -665,7 +710,7 @@
 			color: #fafafa;
 		}
 		.badge-stick-ch {
-			border-radius: 0 0.3rem 0.3rem 0;
+			border-radius: 0 0.25rem 0.25rem 0;
 			margin-top: 1px;
 		}
 		.badge-chapter {
@@ -771,7 +816,7 @@
 				></div>
 			</div>
 			<p class="mt-1.5 text-[10px] text-violet-600 dark:text-violet-400">
-				Keep this tab open. Already offline chapters are skipped.
+				Keep this tab open. Already offline chapters are skipped. Batch runs in parallel (faster).
 			</p>
 		</div>
 	{/if}
@@ -858,7 +903,7 @@
 
 						{#if latestChapterLabel(e)}
 							<span
-								class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 flex items-center gap-0.5 sm:top-[17px]"
+								class="badge-stick badge-stick-ch badge-chapter absolute top-[12px] left-0 z-20 flex max-w-[55%] items-center gap-0.5 sm:top-[17px] sm:max-w-[60%]"
 							>
 								{#if listChapterFlag(effectiveLang(e))}
 									<span
