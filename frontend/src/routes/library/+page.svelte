@@ -275,7 +275,7 @@
 		try {
 			const ok = await chooseLibraryFolder();
 			msg = ok
-				? 'OK — Rokuyomu/ folder is ready (Library + Bookmark). Downloads & bookmarks go there.'
+				? 'OK — folder linked. Metadata, covers, and offline chapters restored from disk when present.'
 				: 'Folder picker cancelled or not supported.';
 		} finally {
 			busy = false;
@@ -283,6 +283,7 @@
 	}
 
 	async function handleRemove(e: LibraryEntry) {
+		// Metadata only — files on disk are never deleted.
 		items = items.filter((x) => x.key !== e.key);
 		try {
 			await removeLibraryEntry(e.mangaId, e.sourceId);
@@ -772,7 +773,7 @@
 					>
 					(JSON + covers) automatically.
 				</li>
-				<li>Manga chapters save as image folders; novels convert each chapter to PDF.</li>
+				<li>Manga chapters save as image folders; novels save PDF/EPUB (+ .txt for offline restore). Deleting a library card only removes metadata — disk files stay. Pick folder again to re-import.</li>
 				<li>
 					<strong>Download</strong> batch-downloads remaining chapters;
 					<strong>Sync</strong> (per card or Sync Updates) refreshes latest chapter and sorts by

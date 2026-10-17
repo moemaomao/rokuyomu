@@ -323,7 +323,6 @@ export async function writeBlobFile(
 	filename: string,
 	blob: Blob
 ): Promise<void> {
-	// Preserve extension: sanitize only the base name (sanitizePathSegment can mangle ".pdf"/".epub").
 	const raw = String(filename || 'file').trim() || 'file';
 	const m = raw.match(/^(.*?)(\.[A-Za-z0-9]{1,10})$/);
 	const baseRaw = (m ? m[1] : raw) || 'file';
@@ -374,9 +373,15 @@ export async function saveMangaChapterToDisk(opts: {
 	const mangaRoot = await getOrCreateDir(library, 'Manga');
 	const titleDir = await getOrCreateDir(mangaRoot, opts.mangaTitle);
 	if (opts.meta) {
-		await writeTextFile(titleDir, 'meta.json', JSON.stringify(opts.meta, null, 2));
+		const titleMeta = { ...opts.meta };
+		delete (titleMeta as any).chapterId;
+		delete (titleMeta as any).chapterTitle;
+		await writeTextFile(titleDir, 'meta.json', JSON.stringify(titleMeta, null, 2));
 	}
 	const chDir = await getOrCreateDir(titleDir, opts.chapterTitle);
+	if (opts.meta) {
+		await writeTextFile(chDir, 'meta.json', JSON.stringify(opts.meta, null, 2));
+	}
 	for (let i = 0; i < opts.pages.length; i++) {
 		const { blob, ext } = opts.pages[i];
 		const name = `${String(i + 1).padStart(3, '0')}.${ext}`;
@@ -392,16 +397,27 @@ export async function saveNovelPdfToDisk(opts: {
 	pdfBlob: Blob;
 	ext?: string;
 	meta?: Record<string, unknown>;
+	contentText?: string;
 }): Promise<string> {
 	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const novelRoot = await getOrCreateDir(library, 'Novel');
 	const titleDir = await getOrCreateDir(novelRoot, opts.novelTitle);
 	if (opts.meta) {
-		await writeTextFile(titleDir, 'meta.json', JSON.stringify(opts.meta, null, 2));
+		const titleMeta = { ...opts.meta };
+		delete (titleMeta as any).chapterId;
+		delete (titleMeta as any).chapterTitle;
+		await writeTextFile(titleDir, 'meta.json', JSON.stringify(titleMeta, null, 2));
 	}
 	const ext = (opts.ext || 'pdf').replace(/^\./, '') || 'pdf';
-	const fname = `${sanitizePathSegment(opts.chapterTitle)}.${ext}`;
+	const base = sanitizePathSegment(opts.chapterTitle);
+	const fname = `${base}.${ext}`;
 	await writeBlobFile(titleDir, fname, opts.pdfBlob);
+	if (opts.meta) {
+		await writeTextFile(titleDir, `${base}.meta.json`, JSON.stringify(opts.meta, null, 2));
+	}
+	if (opts.contentText && String(opts.contentText).trim()) {
+		await writeTextFile(titleDir, `${base}.txt`, String(opts.contentText));
+	}
 	return libraryRelPath('Novel', opts.novelTitle, fname);
 }
 
@@ -775,17 +791,26 @@ export async function scanLibraryFromDisk(
 					if (fhandle.kind !== 'file') continue;
 					const lower = fname.toLowerCase();
 					if (lower === 'meta.json') continue;
+					if (lower.endsWith('.meta.json') || lower.endsWith('.txt')) continue;
 					if (lower.startsWith('cover.')) {
 						coverFileName = fname;
 						continue;
 					}
-					if (!lower.endsWith('.pdf')) continue;
-					const chapterTitle = fname.replace(/\.pdf$/i, '');
-					const chMetaId = String(meta?.chapterId || '').trim();
+					if (!lower.endsWith('.pdf') && !lower.endsWith('.epub')) continue;
+					const chapterTitle = fname.replace(/\.(pdf|epub)$/i, '');
+					let chMeta: Record<string, unknown> | null = null;
+					try {
+						const mfh = await titleDir.getFileHandle(`${chapterTitle}.meta.json`);
+						const mfile = await mfh.getFile();
+						chMeta = JSON.parse(await mfile.text());
+					} catch {
+						chMeta = null;
+					}
+					const chMetaId = String(chMeta?.chapterId || '').trim();
 					chapters.push({
 						chapterId: chMetaId || `/disk/${sanitizePathSegment(chapterTitle)}`,
-						chapterTitle,
-						savedAt: Number(meta?.savedAt) || Date.now(),
+						chapterTitle: String(chMeta?.chapterTitle || chapterTitle),
+						savedAt: Number(chMeta?.savedAt || meta?.savedAt) || Date.now(),
 						pageCount: undefined
 					});
 				}
@@ -832,4 +857,150 @@ export async function scanLibraryFromDisk(
 	}
 
 	return out;
+}
+
+export async function hydrateOfflineFromDisk(
+	root?: FileSystemDirectoryHandle | null
+): Promise<{ titles: number; chapters: number; covers: number }> {
+	const r = root ?? (await getLibraryRoot());
+	const stats = { titles: 0, chapters: 0, covers: 0 };
+	if (!r) return stats;
+
+	const scanned = await scanLibraryFromDisk(r);
+	if (!scanned.length) return stats;
+
+	const { saveOfflineMangaChapter, saveOfflineNovelChapter, hasOfflineMangaChapter, hasOfflineNovelChapter } =
+		await import('$lib/utils/offlineChapter');
+	const { idbPutLibraryCover } = await import('$lib/db');
+	const { normalizeMangaId } = await import('$lib/stores/bookmark.svelte');
+
+	function libCoverKey(mangaId: string, sourceId: string) {
+		return `${sourceId}::${normalizeMangaId(mangaId)}`;
+	}
+
+	let library: FileSystemDirectoryHandle;
+	try {
+		library = await r.getDirectoryHandle(getLibrarySubdirName());
+	} catch {
+		return stats;
+	}
+
+	for (const t of scanned) {
+		stats.titles++;
+		let kindRoot: FileSystemDirectoryHandle;
+		try {
+			kindRoot = await library.getDirectoryHandle(t.kind);
+		} catch {
+			continue;
+		}
+		let titleDir: FileSystemDirectoryHandle;
+		try {
+			titleDir = await kindRoot.getDirectoryHandle(t.folderName);
+		} catch {
+			continue;
+		}
+
+		if (t.coverFileName) {
+			try {
+				const fh = await titleDir.getFileHandle(t.coverFileName);
+				const file = await fh.getFile();
+				const blob = file.slice(0, file.size, file.type || 'image/jpeg');
+				await idbPutLibraryCover(libCoverKey(t.mangaId, t.sourceId), blob);
+				stats.covers++;
+			} catch {
+				/* ignore */
+			}
+		}
+
+		if (t.isNovel) {
+			for await (const [fname, fhandle] of titleDir.entries()) {
+				if (fhandle.kind !== 'file') continue;
+				const lower = fname.toLowerCase();
+				if (!lower.endsWith('.pdf') && !lower.endsWith('.epub')) continue;
+				const base = fname.replace(/\.(pdf|epub)$/i, '');
+				let chMeta: Record<string, unknown> | null = null;
+				try {
+					const mfh = await titleDir.getFileHandle(`${base}.meta.json`);
+					chMeta = JSON.parse(await (await mfh.getFile()).text());
+				} catch {
+					chMeta = null;
+				}
+				const chapterId = String(chMeta?.chapterId || '').trim() || `/disk/${sanitizePathSegment(base)}`;
+				if (await hasOfflineNovelChapter(t.sourceId, chapterId)) continue;
+
+				let content = '';
+				try {
+					const tfh = await titleDir.getFileHandle(`${base}.txt`);
+					content = await (await tfh.getFile()).text();
+				} catch {
+					content = '';
+				}
+				if (!content.trim()) {
+					continue;
+				}
+				try {
+					await saveOfflineNovelChapter({
+						sourceId: t.sourceId,
+						mangaId: t.mangaId,
+						chapterId,
+						novelTitle: t.mangaTitle,
+						chapterTitle: String(chMeta?.chapterTitle || base),
+						content
+					});
+					stats.chapters++;
+				} catch (e) {
+					console.warn('[hydrate] novel chapter', t.sourceId, chapterId, e);
+				}
+			}
+		} else {
+			for await (const [chName, chHandle] of titleDir.entries()) {
+				if (chHandle.kind !== 'directory') continue;
+				const chDir = chHandle as FileSystemDirectoryHandle;
+				const chMeta = await readMetaJson(chDir);
+				const chapterId =
+					String(chMeta?.chapterId || '').trim() || `/disk/${sanitizePathSegment(chName)}`;
+				if (await hasOfflineMangaChapter(t.sourceId, chapterId)) continue;
+
+				const pages: { blob: Blob; ext: string }[] = [];
+				const files: { name: string; handle: FileSystemFileHandle }[] = [];
+				try {
+					for await (const [pn, ph] of chDir.entries()) {
+						if (ph.kind !== 'file') continue;
+						if (pn.toLowerCase() === 'meta.json') continue;
+						files.push({ name: pn, handle: ph as FileSystemFileHandle });
+					}
+				} catch {
+					continue;
+				}
+				files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+				for (const f of files) {
+					try {
+						const file = await f.handle.getFile();
+						const ext =
+							(f.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') ||
+							'jpg';
+						pages.push({ blob: file.slice(0, file.size, file.type || 'image/jpeg'), ext });
+					} catch {
+						/* skip page */
+					}
+				}
+				if (!pages.length) continue;
+				try {
+					await saveOfflineMangaChapter({
+						sourceId: t.sourceId,
+						mangaId: t.mangaId,
+						chapterId,
+						mangaTitle: t.mangaTitle,
+						chapterTitle: String(chMeta?.chapterTitle || chName),
+						pages
+					});
+					stats.chapters++;
+				} catch (e) {
+					console.warn('[hydrate] manga chapter', t.sourceId, chapterId, e);
+				}
+			}
+		}
+	}
+
+	return stats;
 }

@@ -14,7 +14,8 @@ import {
 	getLibraryRoot,
 	supportsFileSystemAccess,
 	pickLibraryRoot,
-	scanLibraryFromDisk
+	scanLibraryFromDisk,
+	hydrateOfflineFromDisk
 } from '$lib/utils/localFs';
 import { isNovelSource } from '$lib/utils/novelSources';
 
@@ -119,6 +120,17 @@ export async function resyncLibraryFromDisk(): Promise<number> {
 		await idbSetAllLibrary(list);
 		entries = list;
 		window.dispatchEvent(new CustomEvent('library-changed'));
+
+		try {
+			const h = await hydrateOfflineFromDisk(root);
+			if (h.chapters || h.covers) {
+				console.info('[library] hydrated from disk', h);
+				window.dispatchEvent(new CustomEvent('library-changed'));
+			}
+		} catch (he) {
+			console.warn('[library] hydrateOfflineFromDisk', he);
+		}
+
 		return added;
 	} catch (e) {
 		console.warn('[library] resyncLibraryFromDisk', e);

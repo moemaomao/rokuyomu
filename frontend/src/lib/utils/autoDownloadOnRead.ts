@@ -175,6 +175,7 @@ export async function autoDownloadNovelChapter(opts: {
 				chapterTitle: chapterFileLabel,
 				pdfBlob: fileBlob,
 				ext: format,
+				contentText: plain,
 				meta: {
 					source,
 					mangaId,

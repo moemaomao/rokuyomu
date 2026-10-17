@@ -514,6 +514,7 @@ export async function downloadNovelChapterPdf(opts: {
 					chapterTitle: chapterFileLabel,
 					pdfBlob: fileBlob,
 					ext: format,
+					contentText: content,
 					meta: {
 						source,
 						mangaId: mangaId || '',
