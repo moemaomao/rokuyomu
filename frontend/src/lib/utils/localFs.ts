@@ -383,6 +383,7 @@ export async function saveNovelPdfToDisk(opts: {
 	novelTitle: string;
 	chapterTitle: string;
 	pdfBlob: Blob;
+	ext?: string;
 	meta?: Record<string, unknown>;
 }): Promise<string> {
 	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
@@ -391,9 +392,16 @@ export async function saveNovelPdfToDisk(opts: {
 	if (opts.meta) {
 		await writeTextFile(titleDir, 'meta.json', JSON.stringify(opts.meta, null, 2));
 	}
-	const fname = `${sanitizePathSegment(opts.chapterTitle)}.pdf`;
+	const ext = (opts.ext || 'pdf').replace(/^\./, '') || 'pdf';
+	const fname = `${sanitizePathSegment(opts.chapterTitle)}.${ext}`;
 	await writeBlobFile(titleDir, fname, opts.pdfBlob);
 	return libraryRelPath('Novel', opts.novelTitle, fname);
+}
+
+export async function saveNovelFileToDisk(
+	opts: Parameters<typeof saveNovelPdfToDisk>[0]
+): Promise<string> {
+	return saveNovelPdfToDisk(opts);
 }
 
 export async function saveCoverToDisk(opts: {

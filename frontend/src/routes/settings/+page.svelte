@@ -47,7 +47,8 @@
 		type AppPreferences,
 		type ThemeMode,
 		type GridSize,
-		type DownloadMode
+		type DownloadMode,
+		type NovelDownloadFormat
 	} from '$lib/stores/preferences';
 	import { supportsFileSystemAccess } from '$lib/utils/localFs';
 	import { clearNsfwConfirmed, isNsfwConfirmed } from '$lib/utils/nsfw';
@@ -576,18 +577,18 @@
 			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Download</h2>
 		</div>
 
+		<!-- 1) Destination -->
+		<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Save destination</p>
 		<p class="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 			Default is <strong class="text-zinc-700 dark:text-zinc-300">Local folder</strong>
 			(Rokuyomu/Library/…). First download may ask you to pick a parent folder (Chrome / Edge).
-			Choose <strong class="text-zinc-700 dark:text-zinc-300">ZIP</strong> to always get a browser
-			download instead.
 		</p>
 
 		{#if !supportsFileSystemAccess()}
 			<p
 				class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
 			>
-				This browser does not support the File System Access API. Downloads will use ZIP / file
+				This browser does not support the File System Access API. Downloads will use browser file
 				save even if Local folder is selected.
 			</p>
 		{/if}
@@ -650,7 +651,7 @@
 							? 'text-violet-800 dark:text-violet-100'
 							: 'text-zinc-800 dark:text-zinc-200'}"
 					>
-						ZIP / file
+						Browser download
 						{#if currentDownloadMode() === 'zip'}
 							<span class="ml-1 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-300"
 								>● active</span
@@ -658,33 +659,115 @@
 						{/if}
 					</span>
 					<span class="text-[11px] text-zinc-500 dark:text-zinc-400"
-						>Browser download (ZIP manga · PDF novel)</span
+						>ZIP for manga · PDF/EPUB for novel</span
 					>
 				</span>
 			</label>
 		</div>
 
-		<label class="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+		<!-- 2) Novel format (separate from manga ZIP) -->
+		<p class="mb-2 mt-5 text-xs font-medium text-zinc-600 dark:text-zinc-400">Novel file format</p>
+		<p class="mb-3 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+			For <strong class="text-zinc-700 dark:text-zinc-300">novel</strong> chapters only.
+			Manga always uses image folders (Local folder) or <strong class="text-zinc-700 dark:text-zinc-300">ZIP</strong> (browser download).
+			Default novel format is <strong class="text-zinc-700 dark:text-zinc-300">PDF</strong>.
+		</p>
+		<div class="flex flex-col gap-2 sm:flex-row sm:gap-3" role="radiogroup" aria-label="Novel file format">
+			<label
+				class="relative flex flex-1 cursor-pointer items-start gap-3 rounded-xl border-2 px-4 py-3 transition
+					{(prefs.novelDownloadFormat || 'pdf') === 'pdf'
+						? 'border-violet-500 bg-violet-50 shadow-sm dark:border-violet-400 dark:bg-violet-500/20'
+						: 'border-zinc-200 bg-zinc-50 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:hover:border-zinc-500'}"
+			>
+				<input
+					type="radio"
+					name="novelDownloadFormat"
+					value="pdf"
+					class="mt-1 h-4 w-4 shrink-0 accent-violet-600"
+					checked={(prefs.novelDownloadFormat || 'pdf') === 'pdf'}
+					onchange={() => {
+						prefs = setPreferences({ novelDownloadFormat: 'pdf' });
+						storageMsg = 'Novel format: PDF';
+						setTimeout(() => (storageMsg = ''), 2000);
+					}}
+				/>
+				<span class="flex flex-col gap-0.5">
+					<span
+						class="text-sm font-semibold {(prefs.novelDownloadFormat || 'pdf') === 'pdf'
+							? 'text-violet-800 dark:text-violet-100'
+							: 'text-zinc-800 dark:text-zinc-200'}"
+					>
+						PDF
+						{#if (prefs.novelDownloadFormat || 'pdf') === 'pdf'}
+							<span class="ml-1 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-300"
+								>● default</span
+							>
+						{/if}
+					</span>
+					<span class="text-[11px] text-zinc-500 dark:text-zinc-400">Novel only · portable document</span>
+				</span>
+			</label>
+			<label
+				class="relative flex flex-1 cursor-pointer items-start gap-3 rounded-xl border-2 px-4 py-3 transition
+					{prefs.novelDownloadFormat === 'epub'
+						? 'border-violet-500 bg-violet-50 shadow-sm dark:border-violet-400 dark:bg-violet-500/20'
+						: 'border-zinc-200 bg-zinc-50 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/50 dark:hover:border-zinc-500'}"
+			>
+				<input
+					type="radio"
+					name="novelDownloadFormat"
+					value="epub"
+					class="mt-1 h-4 w-4 shrink-0 accent-violet-600"
+					checked={prefs.novelDownloadFormat === 'epub'}
+					onchange={() => {
+						prefs = setPreferences({ novelDownloadFormat: 'epub' });
+						storageMsg = 'Novel format: EPUB';
+						setTimeout(() => (storageMsg = ''), 2000);
+					}}
+				/>
+				<span class="flex flex-col gap-0.5">
+					<span
+						class="text-sm font-semibold {prefs.novelDownloadFormat === 'epub'
+							? 'text-violet-800 dark:text-violet-100'
+							: 'text-zinc-800 dark:text-zinc-200'}"
+					>
+						EPUB
+						{#if prefs.novelDownloadFormat === 'epub'}
+							<span class="ml-1 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-300"
+								>● active</span
+							>
+						{/if}
+					</span>
+					<span class="text-[11px] text-zinc-500 dark:text-zinc-400">Novel only · e-reader book file</span>
+				</span>
+			</label>
+		</div>
+
+		<!-- 3) Auto-download at bottom, separate -->
+		<label
+			class="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50"
+		>
 			<input
 				type="checkbox"
 				class="mt-1 h-4 w-4 shrink-0 rounded border-zinc-400 text-violet-600 accent-violet-600 focus:ring-violet-500"
 				checked={prefs.autoDownloadOnRead}
 				onchange={(e) => {
-	              const on = (e.currentTarget as HTMLInputElement).checked;
-	              prefs = setPreferences({ autoDownloadOnRead: on });
-	              storageMsg = on
-		          ? 'Auto-download on: chapters save to Offline Library while reading'
-		          : 'Auto-download off';
-	              setTimeout(() => (storageMsg = ''), 2500);
-               }}
+					const on = (e.currentTarget as HTMLInputElement).checked;
+					prefs = setPreferences({ autoDownloadOnRead: on });
+					storageMsg = on
+						? 'Auto-download on: chapters save to Offline Library while reading'
+						: 'Auto-download off';
+					setTimeout(() => (storageMsg = ''), 2500);
+				}}
 			/>
 			<span class="flex flex-col gap-0.5">
 				<span class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
 					Auto-download while reading
 				</span>
 				<span class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-					Manga and novel chapters open in the reader are saved to Offline Library automatically
-					(no Download button). Uses more storage for image manga.
+					Save chapters to Offline Library automatically when you open them in the reader (no Download
+					button needed). Manga uses image storage; novels keep text offline. Does not trigger ZIP /
+					PDF / EPUB browser downloads.
 				</span>
 			</span>
 		</label>

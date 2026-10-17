@@ -11,7 +11,7 @@ import { cacheLibraryCover } from '$lib/utils/cacheCover';
 import { saveOfflineNovelChapter } from '$lib/utils/offlineChapter';
 
 export type NovelDownloadProgress = {
-	phase: 'fetch' | 'pdf' | 'disk' | 'done' | 'error';
+	phase: 'fetch' | 'pdf' | 'epub' | 'disk' | 'done' | 'error';
 	current: number;
 	total: number;
 	message?: string;
@@ -277,6 +277,157 @@ function resolveNovelTitle(
 }
 
 
+
+function escapeXml(s: string): string {
+	return String(s || '')
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&apos;');
+}
+
+function plainTextToXhtmlParagraphs(body: string): string {
+	const paras = String(body || '')
+		.replace(/\r\n/g, '\n')
+		.replace(/\r/g, '\n')
+		.split(/\n{2,}/)
+		.map((p) => p.replace(/\n/g, '<br/>').trim())
+		.filter(Boolean);
+	if (!paras.length) return '<p></p>';
+	return paras.map((p) => `<p>${escapeXml(p).replace(/&lt;br\/&gt;/g, '<br/>')}</p>`).join('\n');
+}
+
+async function tryLoadJSZip(): Promise<any | null> {
+	try {
+		const mod = await import('jszip');
+		return (mod as any).default || mod;
+	} catch {
+		/* continue */
+	}
+	const g = globalThis as any;
+	if (g.JSZip) return g.JSZip;
+	await new Promise<void>((resolve, reject) => {
+		const s = document.createElement('script');
+		s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+		s.onload = () => resolve();
+		s.onerror = () => reject(new Error('JSZip load failed'));
+		document.head.appendChild(s);
+	});
+	return g.JSZip || null;
+}
+
+/** Minimal EPUB 3.0 (single chapter) — readable in most e-readers. */
+async function buildSimpleEpub(opts: {
+	novelTitle: string;
+	chapterTitle: string;
+	body: string;
+	author?: string;
+}): Promise<Blob> {
+	const JSZip = await tryLoadJSZip();
+	if (!JSZip) throw new Error('JSZip unavailable for EPUB');
+
+	const novelTitle = String(opts.novelTitle || 'Novel').trim() || 'Novel';
+	const chapterTitle = String(opts.chapterTitle || 'Chapter').trim() || 'Chapter';
+	const author = String(opts.author || 'Unknown').trim() || 'Unknown';
+	const uid = `rokuyomu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+	const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+	const zip = new JSZip();
+	// mimetype must be first and uncompressed
+	zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
+
+	zip.file(
+		'META-INF/container.xml',
+		`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`
+	);
+
+	zip.file(
+		'OEBPS/style.css',
+		`body { font-family: serif; line-height: 1.6; margin: 1em; }
+h1 { font-size: 1.4em; margin: 0 0 1em; }
+p { margin: 0 0 0.85em; text-indent: 1.2em; }
+p:first-of-type { text-indent: 0; }
+`
+	);
+
+	const bodyHtml = plainTextToXhtmlParagraphs(opts.body);
+	zip.file(
+		'OEBPS/chapter.xhtml',
+		`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${escapeXml(chapterTitle)}</title>
+  <link rel="stylesheet" type="text/css" href="style.css"/>
+</head>
+<body>
+  <h1>${escapeXml(chapterTitle)}</h1>
+  ${bodyHtml}
+</body>
+</html>
+`
+	);
+
+	zip.file(
+		'OEBPS/nav.xhtml',
+		`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Navigation</title>
+</head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <h1>Table of Contents</h1>
+    <ol>
+      <li><a href="chapter.xhtml">${escapeXml(chapterTitle)}</a></li>
+    </ol>
+  </nav>
+</body>
+</html>
+`
+	);
+
+	zip.file(
+		'OEBPS/content.opf',
+		`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="3.0" xml:lang="en">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="BookId">${escapeXml(uid)}</dc:identifier>
+    <dc:title>${escapeXml(novelTitle)} — ${escapeXml(chapterTitle)}</dc:title>
+    <dc:creator>${escapeXml(author)}</dc:creator>
+    <dc:language>en</dc:language>
+    <meta property="dcterms:modified">${now}</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+    <item id="css" href="style.css" media-type="text/css"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>
+`
+	);
+
+	return zip.generateAsync({
+		type: 'blob',
+		mimeType: 'application/epub+zip',
+		compression: 'DEFLATE',
+		compressionOptions: { level: 6 }
+	});
+}
+
 export async function downloadNovelChapterPdf(opts: {
 	source: string;
 	chapterId: string;
@@ -311,9 +462,25 @@ export async function downloadNovelChapterPdf(opts: {
 	}
 	const chapterFileLabel = shortChapterFilename(title, chapterId);
 
-	report({ phase: 'pdf', current: 0, total: 1, message: 'Building PDF…' });
+	const format =
+		(await import('$lib/stores/preferences')).getNovelDownloadFormat() === 'epub'
+			? 'epub'
+			: 'pdf';
 	const heading = [novelTitle, title].filter(Boolean).join(' — ');
-	const pdfBlob = buildSimplePdf(heading, content);
+
+	let fileBlob: Blob;
+	if (format === 'epub') {
+		report({ phase: 'epub', current: 0, total: 1, message: 'Building EPUB…' });
+		fileBlob = await buildSimpleEpub({
+			novelTitle,
+			chapterTitle: title,
+			body: content
+		});
+	} else {
+		report({ phase: 'pdf', current: 0, total: 1, message: 'Building PDF…' });
+		fileBlob = buildSimplePdf(heading, content);
+	}
+
 	try {
 		await saveOfflineNovelChapter({
 			sourceId: source,
@@ -322,12 +489,12 @@ export async function downloadNovelChapterPdf(opts: {
 			novelTitle,
 			chapterTitle: title,
 			content: (data.content && String(data.content).trim()) || content,
-			pdfBlob
+			pdfBlob: format === 'pdf' ? fileBlob : undefined
 		});
 	} catch (e) {
-		console.warn('[offline] save novel+pdf failed', e);
+		console.warn('[offline] save novel chapter failed', e);
 	}
-	const fileName = sanitizeFilename(chapterFileLabel) + '.pdf';
+	const fileName = sanitizeFilename(chapterFileLabel) + (format === 'epub' ? '.epub' : '.pdf');
 
 	let savedPath = '';
 	const preferDisk =
@@ -342,7 +509,8 @@ export async function downloadNovelChapterPdf(opts: {
 				root,
 				novelTitle: sanitizePathSegment(novelTitle),
 				chapterTitle: chapterFileLabel,
-				pdfBlob,
+				pdfBlob: fileBlob,
+				ext: format,
 				meta: {
 					source,
 					mangaId: mangaId || '',
@@ -350,14 +518,15 @@ export async function downloadNovelChapterPdf(opts: {
 					chapterId,
 					chapterTitle: title,
 					savedAt: Date.now(),
-					isNovel: true
+					isNovel: true,
+					format
 				}
 			});
 		}
 	}
 
 	if (!savedPath) {
-		triggerDownload(pdfBlob, fileName);
+		triggerDownload(fileBlob, fileName);
 	}
 
 	try {

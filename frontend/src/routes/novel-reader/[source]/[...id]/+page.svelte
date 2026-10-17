@@ -594,9 +594,9 @@ Nội dung:
 					if (p.phase === 'fetch') {
 						downloadProgress = 15;
 						downloadLabel = p.message || 'Fetching…';
-					} else if (p.phase === 'pdf') {
+					} else if (p.phase === 'pdf' || p.phase === 'epub') {
 						downloadProgress = 45;
-						downloadLabel = p.message || 'Building PDF…';
+						downloadLabel = p.message || (p.phase === 'epub' ? 'Building EPUB…' : 'Building PDF…');
 					} else if (p.phase === 'disk') {
 						downloadProgress = 80;
 						downloadLabel = p.message || 'Saving to library…';

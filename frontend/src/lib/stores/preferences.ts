@@ -19,6 +19,7 @@ export type ThemeMode =
 
 export type GridSize = 'compact' | 'comfortable';
 export type DownloadMode = 'disk' | 'zip';
+export type NovelDownloadFormat = 'pdf' | 'epub';
 export type HistoryStorageMode = 'cache' | 'disk';
 export type HideOfflineFolders = {
 	root: boolean;
@@ -41,6 +42,7 @@ export type AppPreferences = {
 	autoClearHistoryDays: number;
 	incognitoSession: boolean;
 	downloadMode: DownloadMode;
+	novelDownloadFormat: NovelDownloadFormat;
 	autoDownloadOnRead: boolean;
 	historyStorageMode: HistoryStorageMode;
 	hideOfflineFolders: HideOfflineFolders;
@@ -58,6 +60,7 @@ const DEFAULTS: AppPreferences = {
 	autoClearHistoryDays: 0,
 	incognitoSession: false,
 	downloadMode: 'disk',
+	novelDownloadFormat: 'pdf',
 	autoDownloadOnRead: false,
 	historyStorageMode: 'cache',
 	hideOfflineFolders: {
@@ -106,6 +109,7 @@ function load(): AppPreferences {
 			...parsed,
 			hideBadges: { ...DEFAULTS.hideBadges, ...(parsed.hideBadges || {}) },
 			autoDownloadOnRead: Boolean(parsed.autoDownloadOnRead),
+			novelDownloadFormat: parsed.novelDownloadFormat === 'epub' ? 'epub' : 'pdf',
 			historyStorageMode: parsed.historyStorageMode === 'disk' ? 'disk' : 'cache',
 			hideOfflineFolders: hideFolders
 		};
@@ -246,4 +250,8 @@ export function prefersHistoryDisk(): boolean {
 
 export function getHideOfflineFolders(): HideOfflineFolders {
 	return getPreferences().hideOfflineFolders;
+}
+
+export function getNovelDownloadFormat(): NovelDownloadFormat {
+	return getPreferences().novelDownloadFormat === 'epub' ? 'epub' : 'pdf';
 }
