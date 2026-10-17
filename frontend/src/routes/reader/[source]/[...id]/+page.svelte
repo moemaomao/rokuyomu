@@ -68,6 +68,8 @@ $effect(() => {
 	if (pendingChapterId && !chapterIdMatches(norm, pendingChapterId)) return;
 
 	let cancelled = false;
+	// Keep spinner until offline or network pages are ready — never flash "Images not available"
+	chapterLoading = true;
 	(async () => {
 		try {
 			if (src && cid) {
@@ -93,6 +95,7 @@ $effect(() => {
 		revokeOfflineUrls();
 		offlineMode = false;
 		pages = incoming;
+		// If server still has no pages, stay in loading only briefly; empty state after
 		chapterLoading = false;
 		if (pendingChapterId && chapterIdMatches(norm, pendingChapterId)) {
 			pendingChapterId = null;
@@ -120,7 +123,7 @@ $effect(() => {
 	let dataSaver = $state(false);
 	let imageQuality = $state(600);
 	let imgEpoch = $state(0);
-	let chapterLoading = $state(false);
+	let chapterLoading = $state(true);
 	let pendingChapterId = $state<string | null>(null);
 
 	// ── Theme ──────────────────────────────────────────────────

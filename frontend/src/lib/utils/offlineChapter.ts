@@ -114,13 +114,48 @@ export async function getOfflineMangaChapter(
 	chapterId: string
 ): Promise<OfflineMangaChapter | null> {
 	const db = await getDB();
-	const key = chapterKey(sourceId, chapterId);
-	let row = await db.get('mangaChapters', key);
-	if (row) return row;
-	const alt = chapterId.startsWith('/') ? chapterId.slice(1) : `/${chapterId}`;
-	row = await db.get('mangaChapters', chapterKey(sourceId, alt));
-	return row || null;
+	const raw = String(chapterId || '').trim();
+	if (!raw) return null;
+
+	const candidates = new Set<string>();
+	const add = (s: string) => {
+		const t = String(s || '').trim();
+		if (!t) return;
+		candidates.add(t);
+		candidates.add(normalizeMangaId(t));
+		const noSlash = t.replace(/^\/+/, '').replace(/\/+$/, '');
+		if (noSlash) {
+			candidates.add(noSlash);
+			candidates.add('/' + noSlash);
+		}
+	};
+	add(raw);
+	const seg = raw.split('/').filter(Boolean).pop();
+	if (seg) add(seg);
+
+	for (const c of candidates) {
+		const row = await db.get('mangaChapters', chapterKey(sourceId, c));
+		if (row?.pages?.length) return row;
+	}
+
+	try {
+		const all = await db.getAll('mangaChapters');
+		const src = String(sourceId);
+		const needle = normalizeMangaId(raw).toLowerCase();
+		const needleSeg = (seg || '').toLowerCase();
+		for (const row of all) {
+			if (row.sourceId !== src || !row.pages?.length) continue;
+			const id = normalizeMangaId(row.chapterId).toLowerCase();
+			if (id === needle) return row;
+			if (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) return row;
+			if (needle && (id.endsWith(needle) || needle.endsWith(id))) return row;
+		}
+	} catch {
+		/* ignore */
+	}
+	return null;
 }
+
 
 export async function hasOfflineMangaChapter(
 	sourceId: string,
@@ -180,13 +215,48 @@ export async function getOfflineNovelChapter(
 	chapterId: string
 ): Promise<OfflineNovelChapter | null> {
 	const db = await getDB();
-	const key = chapterKey(sourceId, chapterId);
-	let row = await db.get('novelChapters', key);
-	if (row) return row;
-	const alt = chapterId.startsWith('/') ? chapterId.slice(1) : `/${chapterId}`;
-	row = await db.get('novelChapters', chapterKey(sourceId, alt));
-	return row || null;
+	const raw = String(chapterId || '').trim();
+	if (!raw) return null;
+
+	const candidates = new Set<string>();
+	const add = (s: string) => {
+		const t = String(s || '').trim();
+		if (!t) return;
+		candidates.add(t);
+		candidates.add(normalizeMangaId(t));
+		const noSlash = t.replace(/^\/+/, '').replace(/\/+$/, '');
+		if (noSlash) {
+			candidates.add(noSlash);
+			candidates.add('/' + noSlash);
+		}
+	};
+	add(raw);
+	const seg = raw.split('/').filter(Boolean).pop();
+	if (seg) add(seg);
+
+	for (const c of candidates) {
+		const row = await db.get('novelChapters', chapterKey(sourceId, c));
+		if (row && String(row.content || '').trim()) return row;
+	}
+
+	try {
+		const all = await db.getAll('novelChapters');
+		const src = String(sourceId);
+		const needle = normalizeMangaId(raw).toLowerCase();
+		const needleSeg = (seg || '').toLowerCase();
+		for (const row of all) {
+			if (row.sourceId !== src || !String(row.content || '').trim()) continue;
+			const id = normalizeMangaId(row.chapterId).toLowerCase();
+			if (id === needle) return row;
+			if (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) return row;
+			if (needle && (id.endsWith(needle) || needle.endsWith(id))) return row;
+		}
+	} catch {
+		/* ignore */
+	}
+	return null;
 }
+
 
 export async function hasOfflineNovelChapter(
 	sourceId: string,

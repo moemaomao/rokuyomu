@@ -91,16 +91,30 @@
 	}
 
 	async function loadCovers(list: LibraryEntry[]) {
-		const next: Record<string, string> = { ...coverUrls };
-		for (const e of list) {
-			if (next[e.key]) continue;
-			try {
-				const url = await getOfflineCoverObjectUrl(e.mangaId, e.sourceId);
-				if (url) next[e.key] = url;
-			} catch {
+		const pending = list.filter((e) => !coverUrls[e.key]);
+		if (!pending.length) return;
+
+		// Parallel workers — update coverUrls as each finishes so covers appear ASAP.
+		const concurrency = Math.min(16, Math.max(4, pending.length));
+		let cursor = 0;
+		async function worker() {
+			while (cursor < pending.length) {
+				const i = cursor++;
+				const e = pending[i];
+				try {
+					const url = await getOfflineCoverObjectUrl(e.mangaId, e.sourceId, {
+						title: e.mangaTitle,
+						isNovel: entryIsNovel(e)
+					});
+					if (url) {
+						coverUrls = { ...coverUrls, [e.key]: url };
+					}
+				} catch {
+					/* ignore */
+				}
 			}
 		}
-		coverUrls = next;
+		await Promise.all(Array.from({ length: concurrency }, () => worker()));
 	}
 
 	async function resolveOfflineHrefs(list: LibraryEntry[]) {

@@ -3,9 +3,10 @@ import {
 	getLibraryRoot,
 	saveCoverToDisk,
 	saveBookmarkCoverToDisk,
-	saveHistoryCoverToDisk
+	saveHistoryCoverToDisk,
+	readCoverFromDisk
 } from '$lib/utils/localFs';
-import { idbPutLibraryCover } from '$lib/db';
+import { idbPutLibraryCover, idbGetLibraryCover } from '$lib/db';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
 
 function libKey(mangaId: string, sourceId: string): string {
@@ -16,7 +17,10 @@ function bmCoverKey(mangaId: string, sourceId: string): string {
 	return `bm::${libKey(mangaId, sourceId)}`;
 }
 
-async function fetchCoverBlob(coverUrl: string, source: string): Promise<Blob | null> {
+async function fetchCoverBlob(
+	coverUrl: string,
+	source: string
+): Promise<Blob | null> {
 	if (!coverUrl) return null;
 	try {
 		const proxy = `/api/proxy?url=${encodeURIComponent(coverUrl)}&source=${encodeURIComponent(source)}`;
@@ -105,7 +109,6 @@ export async function cacheBookmarkCover(opts: {
 	}
 }
 
-
 function histCoverKey(mangaId: string, sourceId: string): string {
 	return `hist::${libKey(mangaId, sourceId)}`;
 }
@@ -163,16 +166,41 @@ export async function getOfflineHistoryCoverObjectUrl(
 
 export async function getOfflineCoverObjectUrl(
 	mangaId: string,
-	sourceId: string
+	sourceId: string,
+	opts?: { title?: string; isNovel?: boolean }
 ): Promise<string | null> {
+	const key = libKey(mangaId, sourceId);
 	try {
-		const { idbGetLibraryCover } = await import('$lib/db');
-		const blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
-		if (!blob) return null;
-		return URL.createObjectURL(blob);
+		const blob = await idbGetLibraryCover(key);
+		if (blob) return URL.createObjectURL(blob);
 	} catch {
-		return null;
+		/* fall through */
 	}
+
+	if (opts?.title && supportsFileSystemAccess()) {
+		try {
+			const root = await getLibraryRoot();
+			if (root) {
+				const file = await readCoverFromDisk({
+					root,
+					kind: opts.isNovel ? 'Novel' : 'Manga',
+					title: opts.title
+				});
+				if (file && file.size) {
+					const blob = file.slice(0, file.size, file.type || 'image/jpeg');
+					try {
+						await idbPutLibraryCover(key, blob);
+					} catch {
+						/* ignore */
+					}
+					return URL.createObjectURL(blob);
+				}
+			}
+		} catch {
+			/* ignore */
+		}
+	}
+	return null;
 }
 
 export async function getOfflineBookmarkCoverObjectUrl(
@@ -180,7 +208,6 @@ export async function getOfflineBookmarkCoverObjectUrl(
 	sourceId: string
 ): Promise<string | null> {
 	try {
-		const { idbGetLibraryCover } = await import('$lib/db');
 		let blob = await idbGetLibraryCover(bmCoverKey(mangaId, sourceId));
 		if (!blob) blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
 		if (!blob) return null;
