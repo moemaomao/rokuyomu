@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { normalizeMangaId } from '$lib/stores/bookmark.svelte';
 import { chapterHref } from '$lib/utils/novelSources';
+import { supportsFileSystemAccess, getLibraryRoot, readMangaChapterFromDisk } from '$lib/utils/localFs';
 
 const DB_NAME = 'rokuyomu-offline-chapters';
 const DB_VERSION = 1;
@@ -138,7 +139,8 @@ export async function saveOfflineMangaChapter(opts: {
 
 export async function getOfflineMangaChapter(
 	sourceId: string,
-	chapterId: string
+	chapterId: string,
+	opts?: { mangaTitle?: string; chapterTitle?: string; allowDisk?: boolean }
 ): Promise<OfflineMangaChapter | null> {
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
@@ -147,10 +149,9 @@ export async function getOfflineMangaChapter(
 	if (mangaChapterCache.has(primaryKey)) {
 		const hit = mangaChapterCache.get(primaryKey);
 		if (hit?.pages?.length) return hit;
-		if (hit === null) {
-			/* known miss for exact key — still try alternate keys below */
-		} else if (hit) {
-			return hit;
+		// cached miss — still allow disk if titles provided
+		if (hit === null && !(opts?.allowDisk && (opts.mangaTitle || opts.chapterTitle))) {
+			return null;
 		}
 	}
 
@@ -172,15 +173,9 @@ export async function getOfflineMangaChapter(
 	const seg = raw.split('/').filter(Boolean).pop();
 	if (seg) add(seg);
 
+	// Key lookups only — NEVER db.getAll() here (freezes on large offline libraries)
 	for (const c of candidates) {
 		const k = chapterKey(sourceId, c);
-		if (mangaChapterCache.has(k)) {
-			const cached = mangaChapterCache.get(k);
-			if (cached?.pages?.length) {
-				cachePutManga(primaryKey, cached);
-				return cached;
-			}
-		}
 		const row = await db.get('mangaChapters', k);
 		if (row?.pages?.length) {
 			cachePutManga(k, row);
@@ -189,23 +184,46 @@ export async function getOfflineMangaChapter(
 		}
 	}
 
-	try {
-		const all = await db.getAll('mangaChapters');
-		const src = String(sourceId);
-		const needle = normalizeMangaId(raw).toLowerCase();
-		const needleSeg = (seg || '').toLowerCase();
-		for (const row of all) {
-			if (row.sourceId !== src || !row.pages?.length) continue;
-			const id = normalizeMangaId(row.chapterId).toLowerCase();
-			if (id === needle || (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) || (needle && (id.endsWith(needle) || needle.endsWith(id)))) {
-				cachePutManga(primaryKey, row);
-				cachePutManga(chapterKey(sourceId, row.chapterId), row);
-				return row;
+	// Disk only when we have title hints (targeted path). Full library scan is forbidden.
+	const allowDisk = opts?.allowDisk !== false;
+	const titleHint = String(opts?.mangaTitle || '').trim();
+	const chTitleHint = String(opts?.chapterTitle || '').trim();
+	if (allowDisk && supportsFileSystemAccess() && (titleHint || chTitleHint)) {
+		try {
+			const root = await getLibraryRoot();
+			if (root) {
+				const fromDisk = await readMangaChapterFromDisk({
+					root,
+					sourceId,
+					chapterId: raw,
+					mangaTitle: titleHint || undefined,
+					chapterTitle: chTitleHint || undefined,
+					// max pages safety; reader will still show what we have
+					maxPages: 200
+				});
+				if (fromDisk?.pages?.length) {
+					const entry: OfflineMangaChapter = {
+						key: primaryKey,
+						sourceId: fromDisk.sourceId || sourceId,
+						mangaId: normalizeMangaId(fromDisk.mangaId || raw),
+						chapterId: normalizeMangaId(fromDisk.chapterId || raw),
+						mangaTitle: fromDisk.mangaTitle || titleHint || 'Manga',
+						chapterTitle: fromDisk.chapterTitle || chTitleHint || 'Chapter',
+						pages: fromDisk.pages,
+						savedAt: Date.now()
+					};
+					cachePutManga(primaryKey, entry);
+					cachePutManga(chapterKey(sourceId, entry.chapterId), entry);
+					// IDB write in background — do NOT block UI with huge blob put
+					void db.put('mangaChapters', entry).catch(() => {});
+					return entry;
+				}
 			}
+		} catch (e) {
+			console.warn('[offline] disk chapter read', e);
 		}
-	} catch {
-		/* ignore */
 	}
+
 	cachePutManga(primaryKey, null);
 	return null;
 }

@@ -486,6 +486,222 @@ export async function readCoverFromDisk(opts: {
 	return null;
 }
 
+
+/** Read chapter page images from Library/Manga/<title>/<chapter>/ on disk.
+ * Targeted only — requires mangaTitle and/or chapterTitle. Never scans entire library.
+ */
+export async function readMangaChapterFromDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	chapterId: string;
+	mangaTitle?: string;
+	chapterTitle?: string;
+	maxPages?: number;
+}): Promise<{
+	pages: { blob: Blob; ext: string }[];
+	mangaTitle: string;
+	chapterTitle: string;
+	mangaId: string;
+	chapterId: string;
+	sourceId: string;
+} | null> {
+	const titleHint = sanitizePathSegment(opts.mangaTitle || '');
+	const chTitleHint = sanitizePathSegment(opts.chapterTitle || '');
+	// Refuse full-library scan (main-thread freeze on mobile)
+	if (!titleHint && !chTitleHint) return null;
+
+	const root = opts.root ?? (await getLibraryRoot());
+	if (!root) return null;
+
+	let library: FileSystemDirectoryHandle;
+	try {
+		library = await root.getDirectoryHandle(getLibrarySubdirName());
+	} catch {
+		return null;
+	}
+
+	let mangaRoot: FileSystemDirectoryHandle;
+	try {
+		mangaRoot = await library.getDirectoryHandle('Manga');
+	} catch {
+		return null;
+	}
+
+	const wantCh = String(opts.chapterId || '').trim();
+	const wantChNorm = wantCh.replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
+	const wantChSeg = wantChNorm.split('/').filter(Boolean).pop() || wantChNorm;
+	const maxPages = Math.max(1, Math.min(opts.maxPages ?? 200, 400));
+
+	function yieldMain(): Promise<void> {
+		return new Promise((r) => setTimeout(r, 0));
+	}
+
+	function idMatch(stored: string, target: string, seg: string): boolean {
+		const s = String(stored || '')
+			.replace(/^\/+/, '')
+			.replace(/\/+$/, '')
+			.toLowerCase();
+		const t = target.toLowerCase();
+		if (!s || !t) return false;
+		if (s === t) return true;
+		if (s.endsWith(t) || t.endsWith(s)) return true;
+		if (seg && (s === seg || s.endsWith('/' + seg) || s.endsWith(seg))) return true;
+		return false;
+	}
+
+	async function readMeta(dir: FileSystemDirectoryHandle): Promise<Record<string, unknown> | null> {
+		try {
+			const fh = await dir.getFileHandle('meta.json');
+			const data = JSON.parse(await (await fh.getFile()).text());
+			return data && typeof data === 'object' ? data : null;
+		} catch {
+			return null;
+		}
+	}
+
+	async function loadPages(
+		chDir: FileSystemDirectoryHandle
+	): Promise<{ blob: Blob; ext: string }[]> {
+		const files: { name: string; handle: FileSystemFileHandle }[] = [];
+		for await (const [pn, ph] of chDir.entries()) {
+			if (ph.kind !== 'file') continue;
+			const lower = pn.toLowerCase();
+			if (lower === 'meta.json' || lower.endsWith('.json')) continue;
+			if (!/\.(jpe?g|png|webp|gif|avif|bmp)$/i.test(pn) && !/^\d/.test(pn)) continue;
+			files.push({ name: pn, handle: ph as FileSystemFileHandle });
+		}
+		files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+		if (files.length > maxPages) files.length = maxPages;
+
+		const pages: { blob: Blob; ext: string }[] = [];
+		for (let i = 0; i < files.length; i++) {
+			const f = files[i];
+			try {
+				const file = await f.handle.getFile();
+				if (!file.size) continue;
+				let ext =
+					(f.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') ||
+					'jpg';
+				if (ext === 'jpeg') ext = 'jpg';
+				// Prefer reference to File (Blob subclass) — avoid extra copy
+				pages.push({ blob: file, ext });
+			} catch {
+				/* skip */
+			}
+			// Yield every 4 pages so UI stays responsive on mobile
+			if (i > 0 && i % 4 === 0) await yieldMain();
+		}
+		return pages;
+	}
+
+	// Resolve title folder directly when possible
+	const titleCandidates: string[] = [];
+	if (titleHint) {
+		titleCandidates.push(titleHint);
+		// common alternate sanitizations
+		titleCandidates.push(titleHint.replace(/_/g, ' '));
+	}
+
+	const titleDirs: { name: string; handle: FileSystemDirectoryHandle }[] = [];
+	for (const name of titleCandidates) {
+		try {
+			const h = await mangaRoot.getDirectoryHandle(name);
+			titleDirs.push({ name, handle: h });
+		} catch {
+			/* not found */
+		}
+	}
+
+	// If direct open failed, scan names but STOP after first match (bounded)
+	if (!titleDirs.length && titleHint) {
+		let n = 0;
+		for await (const [name, handle] of mangaRoot.entries()) {
+			if (handle.kind !== 'directory') continue;
+			n++;
+			if (n > 80) break; // hard cap
+			const nn = name.toLowerCase();
+			const th = titleHint.toLowerCase();
+			if (nn === th || nn.includes(th) || th.includes(nn)) {
+				titleDirs.push({ name, handle: handle as FileSystemDirectoryHandle });
+				break;
+			}
+			if (n % 10 === 0) await yieldMain();
+		}
+	}
+
+	if (!titleDirs.length && chTitleHint && !titleHint) {
+		// Without title, refuse deep scan
+		return null;
+	}
+
+	for (const td of titleDirs) {
+		const titleMeta = await readMeta(td.handle);
+		const folderSrc = String(titleMeta?.source || titleMeta?.sourceId || '').trim();
+		const mangaTitle = String(
+			titleMeta?.mangaTitle || titleMeta?.title || td.name || 'Manga'
+		).slice(0, 160);
+		const mangaId = String(titleMeta?.mangaId || titleMeta?.id || '').trim() || wantCh;
+
+		// Prefer direct chapter folder open by title
+		const chTryNames: string[] = [];
+		if (chTitleHint) {
+			chTryNames.push(chTitleHint);
+			chTryNames.push(chTitleHint.replace(/_/g, ' '));
+		}
+
+		for (const cn of chTryNames) {
+			try {
+				const chDir = await td.handle.getDirectoryHandle(cn);
+				const chMeta = await readMeta(chDir);
+				const pages = await loadPages(chDir);
+				if (!pages.length) continue;
+				return {
+					pages,
+					mangaTitle,
+					chapterTitle: String(chMeta?.chapterTitle || cn),
+					mangaId,
+					chapterId: String(chMeta?.chapterId || chMeta?.id || wantCh),
+					sourceId: folderSrc || opts.sourceId || 'disk'
+				};
+			} catch {
+				/* try next */
+			}
+		}
+
+		// Bounded chapter scan inside this title only
+		let scanned = 0;
+		for await (const [chName, chHandle] of td.handle.entries()) {
+			if (chHandle.kind !== 'directory') continue;
+			scanned++;
+			if (scanned > 120) break;
+			const chDir = chHandle as FileSystemDirectoryHandle;
+			const chMeta = await readMeta(chDir);
+			const metaId = String(chMeta?.chapterId || chMeta?.id || '').trim();
+			const matched =
+				(metaId && idMatch(metaId, wantChNorm, wantChSeg)) ||
+				(chTitleHint &&
+					(sanitizePathSegment(chName).toLowerCase() === chTitleHint.toLowerCase() ||
+						sanitizePathSegment(chName).toLowerCase().includes(chTitleHint.toLowerCase())));
+			if (!matched) {
+				if (scanned % 8 === 0) await yieldMain();
+				continue;
+			}
+			const pages = await loadPages(chDir);
+			if (!pages.length) continue;
+			return {
+				pages,
+				mangaTitle,
+				chapterTitle: String(chMeta?.chapterTitle || chName),
+				mangaId,
+				chapterId: metaId || wantCh,
+				sourceId: folderSrc || opts.sourceId || 'disk'
+			};
+		}
+	}
+
+	return null;
+}
+
 export function bookmarkCoverKey(sourceId: string, mangaId: string): string {
 	const src = sanitizePathSegment(sourceId || 'src').replace(/\s+/g, '_');
 	const id = sanitizePathSegment(String(mangaId || 'id').replace(/\//g, '_')).replace(/\s+/g, '_');

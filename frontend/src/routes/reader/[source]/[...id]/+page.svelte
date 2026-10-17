@@ -83,18 +83,43 @@ $effect(() => {
 	(async () => {
 		try {
 			if (src && cid) {
-				const row = await getOfflineMangaChapter(src, cid);
+				const row = await getOfflineMangaChapter(src, cid, {
+					mangaTitle: String(mangaInfo?.title || ''),
+					chapterTitle: String(
+						(currentChapter as { title?: string } | null)?.title || ''
+					),
+					allowDisk: true
+				});
 				if (cancelled) return;
 				if (row?.pages?.length) {
 					revokeOfflineUrls();
-					const urls = mangaPagesToObjectUrls(row);
-					offlineObjectUrls = urls;
-					pages = urls;
+					const firstN = Math.min(6, row.pages.length);
+					const firstUrls = row.pages
+						.slice(0, firstN)
+						.map((pg) => URL.createObjectURL(pg.blob));
+					offlineObjectUrls = firstUrls;
+					pages = firstUrls;
 					offlineMode = true;
 					chapterLoading = false;
 					pendingChapterId = null;
 					currentPageIndex = 0;
 					imgEpoch += 1;
+					if (row.pages.length > firstN) {
+						await new Promise((r) => setTimeout(r, 0));
+						if (cancelled) return;
+						const rest: string[] = [];
+						for (let i = firstN; i < row.pages.length; i++) {
+							rest.push(URL.createObjectURL(row.pages[i].blob));
+							if ((i - firstN) % 8 === 7) {
+								await new Promise((r) => setTimeout(r, 0));
+								if (cancelled) return;
+							}
+						}
+						const all = [...firstUrls, ...rest];
+						offlineObjectUrls = all;
+						pages = all;
+						imgEpoch += 1;
+					}
 					return;
 				}
 			}
@@ -367,15 +392,35 @@ $effect(() => {
 
 		// Offline-first: paint from IDB immediately, then navigate without waiting network
 		try {
-			const row = await getOfflineMangaChapter(String(source), cleanId);
+			const row = await getOfflineMangaChapter(String(source), cleanId, {
+				mangaTitle: String(mangaInfo?.title || ''),
+				chapterTitle:
+					typeof target === 'object' && target !== null
+						? String((target as { title?: string }).title || '')
+						: '',
+				allowDisk: true
+			});
 			if (row?.pages?.length) {
 				revokeOfflineUrls();
-				const urls = mangaPagesToObjectUrls(row);
-				offlineObjectUrls = urls;
-				pages = urls;
+				const firstN = Math.min(6, row.pages.length);
+				const firstUrls = row.pages
+					.slice(0, firstN)
+					.map((pg) => URL.createObjectURL(pg.blob));
+				offlineObjectUrls = firstUrls;
+				pages = firstUrls;
 				offlineMode = true;
 				chapterLoading = false;
-				// Soft navigate — keep offline pages; do not force full invalidate if possible
+				if (row.pages.length > firstN) {
+					await new Promise((r) => setTimeout(r, 0));
+					const rest: string[] = [];
+					for (let i = firstN; i < row.pages.length; i++) {
+						rest.push(URL.createObjectURL(row.pages[i].blob));
+						if ((i - firstN) % 8 === 7) await new Promise((r) => setTimeout(r, 0));
+					}
+					const all = [...firstUrls, ...rest];
+					offlineObjectUrls = all;
+					pages = all;
+				}
 				try {
 					await goto(`/reader/${source}/${cleanId}`, {
 						replaceState: true,
