@@ -323,7 +323,14 @@ export async function writeBlobFile(
 	filename: string,
 	blob: Blob
 ): Promise<void> {
-	const safe = sanitizePathSegment(filename).replace(/\s+/g, '_');
+	// Preserve extension: sanitize only the base name (sanitizePathSegment can mangle ".pdf"/".epub").
+	const raw = String(filename || 'file').trim() || 'file';
+	const m = raw.match(/^(.*?)(\.[A-Za-z0-9]{1,10})$/);
+	const baseRaw = (m ? m[1] : raw) || 'file';
+	const ext = m ? m[2].toLowerCase() : '';
+	let base = sanitizePathSegment(baseRaw).replace(/\s+/g, '_') || 'file';
+	if (base.length > 100) base = base.slice(0, 100);
+	const safe = base + ext;
 	const fileHandle = await dir.getFileHandle(safe, { create: true });
 	const writable = await fileHandle.createWritable();
 	await writable.write(blob);

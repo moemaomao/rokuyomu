@@ -1,5 +1,9 @@
 import { browser } from '$app/environment';
-import { shouldAutoDownloadOnRead } from '$lib/stores/preferences';
+import {
+	shouldAutoDownloadOnRead,
+	prefersDiskDownload,
+	getNovelDownloadFormat
+} from '$lib/stores/preferences';
 import { downloadChapter } from '$lib/utils/downloadChapter';
 import {
 	hasOfflineMangaChapter,
@@ -7,11 +11,61 @@ import {
 	saveOfflineNovelChapter
 } from '$lib/utils/offlineChapter';
 import { upsertLibraryEntry } from '$lib/stores/library.svelte';
+import {
+	ensureLibraryRoot,
+	saveNovelPdfToDisk,
+	sanitizePathSegment,
+	supportsFileSystemAccess
+} from '$lib/utils/localFs';
+
+function htmlToPlain(raw: string): string {
+	let s = String(raw || '');
+	s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
+	s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
+	s = s.replace(/<br\s*\/?>/gi, '\n');
+	s = s.replace(/<\/p>/gi, '\n\n');
+	s = s.replace(/<\/div>/gi, '\n');
+	s = s.replace(/<\/h[1-6]>/gi, '\n\n');
+	s = s.replace(/<[^>]+>/g, '');
+	s = s
+		.replace(/&nbsp;/gi, ' ')
+		.replace(/&amp;/gi, '&')
+		.replace(/&lt;/gi, '<')
+		.replace(/&gt;/gi, '>')
+		.replace(/&quot;/gi, '"')
+		.replace(/&#39;/gi, "'");
+	return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
 
 const inFlight = new Set<string>();
 
 function key(source: string, chapterId: string) {
 	return `${source}::${chapterId}`;
+}
+
+function shortChapterFilename(chapterTitle: string, chapterId?: string): string {
+	const t = String(chapterTitle || '').trim();
+	const m =
+		t.match(/\b(?:chapter|ch\.?|bab|episode|ep\.?)\s*[-_.]?\s*(\d+(?:\.\d+)?)/i) ||
+		t.match(/^\s*(\d+(?:\.\d+)?)\s*$/);
+	if (m) return `Chapter ${m[1]}`;
+	const id = String(chapterId || '');
+	const fromId =
+		id.match(/(?:chapter|ch|bab|ep)[-_]?(\d+(?:\.\d+)?)/i) ||
+		id.match(/[-_](\d+(?:\.\d+)?)(?:p\d+)?\/?$/i);
+	if (fromId) return `Chapter ${fromId[1]}`;
+	const any = t.match(/(\d+(?:\.\d+)?)/);
+	if (any) return `Chapter ${any[1]}`;
+	return 'Chapter';
+}
+
+async function getSilentLibraryRoot() {
+	if (!prefersDiskDownload() || !supportsFileSystemAccess()) return null;
+	try {
+		return await ensureLibraryRoot();
+	} catch {
+		return null;
+	}
 }
 
 export async function autoDownloadMangaChapter(opts: {
@@ -69,20 +123,22 @@ export async function autoDownloadNovelChapter(opts: {
 	inFlight.add(k);
 
 	try {
-		if (await hasOfflineNovelChapter(source, chapterId)) return;
-
 		const mangaId = opts.mangaId || chapterId;
 		const novelTitle = opts.novelTitle || 'Novel';
 		const chapterTitle = opts.chapterTitle || 'Chapter';
+		const plain = String(content);
+		const alreadyOffline = await hasOfflineNovelChapter(source, chapterId);
 
-		await saveOfflineNovelChapter({
-			sourceId: source,
-			mangaId,
-			chapterId,
-			novelTitle,
-			chapterTitle,
-			content: String(content)
-		});
+		if (!alreadyOffline) {
+			await saveOfflineNovelChapter({
+				sourceId: source,
+				mangaId,
+				chapterId,
+				novelTitle,
+				chapterTitle,
+				content: plain
+			});
+		}
 
 		try {
 			await upsertLibraryEntry({
@@ -90,15 +146,62 @@ export async function autoDownloadNovelChapter(opts: {
 				mangaTitle: novelTitle,
 				cover: opts.cover || '',
 				sourceId: source,
-				type: 'novel',
-				chapters: [
-					{
-						chapterId,
-						chapterTitle
-					}
-				]
-			} as any);
+				isNovel: true,
+				chapters: [{ chapterId, chapterTitle, savedAt: Date.now() }]
+			});
 		} catch {
+			/* ignore */
+		}
+
+		const root = await getSilentLibraryRoot();
+		if (!root) return;
+
+		try {
+			const format = getNovelDownloadFormat();
+			const chapterFileLabel = shortChapterFilename(chapterTitle, chapterId);
+			const body = htmlToPlain(plain) || plain;
+			let fileBlob: Blob;
+			if (format === 'epub') {
+				const { buildSimpleEpubForAuto } = await import('$lib/utils/downloadNovelPdf');
+				fileBlob = await buildSimpleEpubForAuto({ novelTitle, chapterTitle, body });
+			} else {
+				const { buildSimplePdfForAuto } = await import('$lib/utils/downloadNovelPdf');
+				const heading = [novelTitle, chapterTitle].filter(Boolean).join(' — ');
+				fileBlob = buildSimplePdfForAuto(heading, body);
+			}
+			const path = await saveNovelPdfToDisk({
+				root,
+				novelTitle: sanitizePathSegment(novelTitle),
+				chapterTitle: chapterFileLabel,
+				pdfBlob: fileBlob,
+				ext: format,
+				meta: {
+					source,
+					mangaId,
+					novelTitle,
+					chapterId,
+					chapterTitle,
+					savedAt: Date.now(),
+					isNovel: true,
+					format,
+					auto: true
+				}
+			});
+			try {
+				await upsertLibraryEntry({
+					mangaId,
+					mangaTitle: novelTitle,
+					cover: opts.cover || '',
+					sourceId: source,
+					isNovel: true,
+					localPath: path || undefined,
+					chapters: [{ chapterId, chapterTitle, savedAt: Date.now() }]
+				});
+			} catch {
+				/* ignore */
+			}
+		} catch (e) {
+			console.warn('[auto-download novel] disk save failed', e);
 		}
 	} catch (e) {
 		console.warn('[auto-download novel]', source, chapterId, e);

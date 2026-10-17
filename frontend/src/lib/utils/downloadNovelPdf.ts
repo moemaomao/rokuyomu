@@ -69,7 +69,7 @@ function triggerDownload(blob: Blob, filename: string) {
 	setTimeout(() => URL.revokeObjectURL(href), 4000);
 }
 
-function buildSimplePdf(title: string, body: string): Blob {
+export function buildSimplePdf(title: string, body: string): Blob {
 	const escapePdf = (s: string) =>
 		s
 			.replace(/\\/g, '\\\\')
@@ -317,8 +317,7 @@ async function tryLoadJSZip(): Promise<any | null> {
 	return g.JSZip || null;
 }
 
-/** Minimal EPUB 3.0 (single chapter) — readable in most e-readers. */
-async function buildSimpleEpub(opts: {
+export async function buildSimpleEpub(opts: {
 	novelTitle: string;
 	chapterTitle: string;
 	body: string;
@@ -502,26 +501,34 @@ export async function downloadNovelChapterPdf(opts: {
 		supportsFileSystemAccess();
 
 	if (preferDisk) {
-		const root = (await requestStoredLibraryRoot()) || (await pickLibraryRoot());
-		if (root) {
-			report({ phase: 'disk', current: 1, total: 1, message: 'Saving to local folder…' });
-			savedPath = await saveNovelPdfToDisk({
-				root,
-				novelTitle: sanitizePathSegment(novelTitle),
-				chapterTitle: chapterFileLabel,
-				pdfBlob: fileBlob,
-				ext: format,
-				meta: {
-					source,
-					mangaId: mangaId || '',
-					novelTitle,
-					chapterId,
-					chapterTitle: title,
-					savedAt: Date.now(),
-					isNovel: true,
-					format
-				}
-			});
+		try {
+			const root =
+				(await requestStoredLibraryRoot()) ||
+				(await ensureLibraryRoot()) ||
+				(await pickLibraryRoot());
+			if (root) {
+				report({ phase: 'disk', current: 1, total: 1, message: 'Saving to local folder…' });
+				savedPath = await saveNovelPdfToDisk({
+					root,
+					novelTitle: sanitizePathSegment(novelTitle),
+					chapterTitle: chapterFileLabel,
+					pdfBlob: fileBlob,
+					ext: format,
+					meta: {
+						source,
+						mangaId: mangaId || '',
+						novelTitle,
+						chapterId,
+						chapterTitle: title,
+						savedAt: Date.now(),
+						isNovel: true,
+						format
+					}
+				});
+			}
+		} catch (e) {
+			console.warn('[novel] save to local folder failed', e);
+			savedPath = '';
 		}
 	}
 
@@ -559,3 +566,6 @@ export async function downloadNovelChapterPdf(opts: {
 
 	report({ phase: 'done', current: 1, total: 1, message: savedPath || fileName });
 }
+
+export const buildSimplePdfForAuto = buildSimplePdf;
+export const buildSimpleEpubForAuto = buildSimpleEpub;

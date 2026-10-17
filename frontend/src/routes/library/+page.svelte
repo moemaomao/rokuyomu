@@ -25,6 +25,7 @@
 		Download
 	} from 'lucide-svelte';
 	import { getFirstOfflineChapterHref } from '$lib/utils/offlineChapter';
+	import { isNovelSource } from '$lib/utils/novelSources';
 	import { proxyImage } from '$lib/utils/image';
 	import { getOfflineCoverObjectUrl } from '$lib/utils/cacheCover';
 
@@ -59,6 +60,16 @@
 	let warnOpen = $state(false);
 	let warnTarget = $state<LibraryEntry | null>(null);
 
+	/** Prefer stored flag; fall back to source registry (fixes bad auto-download upserts). */
+	function entryIsNovel(e: LibraryEntry): boolean {
+		if (e.isNovel) return true;
+		try {
+			return isNovelSource(e.sourceId);
+		} catch {
+			return false;
+		}
+	}
+
 	async function load() {
 		diskOk = librarySupportsDisk();
 		if (!isLibraryReady()) {
@@ -87,7 +98,12 @@
 		const next: Record<string, string> = { ...offlineHrefs };
 		for (const e of list) {
 			try {
-				const href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, e.isNovel);
+				const preferNovel = entryIsNovel(e);
+				let href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, preferNovel);
+				// Fallback: chapter may live in the other offline store if isNovel was wrong before
+				if (!href) {
+					href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, !preferNovel);
+				}
 				if (href) next[e.key] = href;
 				else delete next[e.key];
 			} catch {
@@ -130,7 +146,7 @@
 		const offline = getOfflineChapterIds(e.sourceId, e.mangaId);
 		let latest = e.latestChapter || '';
 		let maxN = -1;
-		let lang = e.lang || defaultLangForSource(e.sourceId, e.isNovel);
+		let lang = e.lang || defaultLangForSource(e.sourceId, entryIsNovel(e));
 		let newCount = 0;
 		for (const c of chapters) {
 			const m = String(c.title || c.number || '').match(/(\d+(?:\.\d+)?)/);
@@ -149,7 +165,7 @@
 			mangaTitle: e.mangaTitle,
 			cover: e.cover || '',
 			sourceId: e.sourceId,
-			isNovel: e.isNovel,
+			isNovel: entryIsNovel(e),
 			latestChapter: latest || undefined,
 			lang: lang || undefined
 		});
@@ -162,7 +178,7 @@
 					sourceId: e.sourceId,
 					coverUrl: e.cover,
 					title: e.mangaTitle,
-					isNovel: e.isNovel
+					isNovel: entryIsNovel(e)
 				});
 			} catch {
 			}
@@ -335,7 +351,7 @@
 	}
 
 	function effectiveLang(e: LibraryEntry): string {
-		return (e.lang && String(e.lang).trim()) || defaultLangForSource(e.sourceId, e.isNovel);
+		return (e.lang && String(e.lang).trim()) || defaultLangForSource(e.sourceId, entryIsNovel(e));
 	}
 
 	function latestChapterLabel(e: LibraryEntry): string {
@@ -444,7 +460,7 @@
 			try {
 				let latest = '';
 				let maxN = -1;
-				let lang = e.lang || defaultLangForSource(e.sourceId, e.isNovel);
+				let lang = e.lang || defaultLangForSource(e.sourceId, entryIsNovel(e));
 				for (const c of chapters) {
 					const m = String(c.title || c.number || '').match(/(\d+(?:\.\d+)?)/);
 					const n = m ? parseFloat(m[1]) : Number(c.number) || -1;
@@ -461,7 +477,7 @@
 						mangaTitle: e.mangaTitle,
 						cover: e.cover || '',
 						sourceId: e.sourceId,
-						isNovel: e.isNovel,
+						isNovel: entryIsNovel(e),
 						latestChapter: latest || undefined,
 						lang: lang || undefined
 					});
@@ -501,7 +517,7 @@
 				};
 
 				try {
-					if (e.isNovel) {
+					if (entryIsNovel(e)) {
 						await downloadNovelChapterPdf({
 							source: e.sourceId,
 							chapterId: ch.id,
@@ -823,11 +839,11 @@
 						{/if}
 
 						<span
-							class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {e.isNovel
+							class="badge-stick badge-stick-bl absolute bottom-0 left-0 z-20 {entryIsNovel(e)
 								? 'badge-type-novel'
 								: 'badge-type-manga'}"
 						>
-							{e.isNovel ? 'NOVEL' : 'MANGA'}
+							{entryIsNovel(e) ? 'NOVEL' : 'MANGA'}
 						</span>
 
 						{#if e.chapters?.length}
