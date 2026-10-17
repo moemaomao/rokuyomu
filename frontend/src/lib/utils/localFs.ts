@@ -420,19 +420,47 @@ export async function saveNovelPdfToDisk(opts: {
 	const novelRoot = await getOrCreateDir(library, 'Novel');
 	const titleDir = await getOrCreateDir(novelRoot, opts.novelTitle);
 	if (opts.meta) {
-		const titleMeta = { ...opts.meta };
-		delete (titleMeta as any).chapterId;
-		delete (titleMeta as any).chapterTitle;
+		let prev: Record<string, unknown> = {};
+		try {
+			const existing = await titleDir.getFileHandle('meta.json');
+			prev = JSON.parse(await (await existing.getFile()).text()) || {};
+		} catch {
+			/* first save */
+		}
+		const titleMeta: Record<string, unknown> = {
+			...prev,
+			...opts.meta,
+			source: opts.meta.source || prev.source,
+			novelTitle: opts.meta.novelTitle || prev.novelTitle || opts.novelTitle,
+			mangaId: opts.meta.mangaId || prev.mangaId,
+			isNovel: true,
+			updatedAt: Date.now()
+		};
+		delete titleMeta.chapterId;
+		delete titleMeta.chapterTitle;
+		const chapters = Array.isArray(prev.chapters) ? [...(prev.chapters as unknown[])] : [];
+		const chId = String((opts.meta as any).chapterId || '');
+		const chTitle = String((opts.meta as any).chapterTitle || opts.chapterTitle || '');
+		if (chId || chTitle) {
+			const entry = {
+				chapterId: chId,
+				chapterTitle: chTitle,
+				file: `${sanitizePathSegment(opts.chapterTitle)}.${(opts.ext || 'pdf').replace(/^\./, '') || 'pdf'}`,
+				savedAt: Date.now()
+			};
+			const ix = chapters.findIndex(
+				(c: any) => c && (c.chapterId === chId || c.chapterTitle === chTitle)
+			);
+			if (ix >= 0) chapters[ix] = { ...(chapters[ix] as object), ...entry };
+			else chapters.push(entry);
+			titleMeta.chapters = chapters;
+		}
 		await writeTextFile(titleDir, 'meta.json', JSON.stringify(titleMeta, null, 2));
 	}
 	const ext = (opts.ext || 'pdf').replace(/^\./, '') || 'pdf';
 	const base = sanitizePathSegment(opts.chapterTitle);
 	const fname = `${base}.${ext}`;
 	await writeBlobFile(titleDir, fname, opts.pdfBlob);
-	if (opts.meta) {
-		await writeTextFile(titleDir, `${base}.meta.json`, JSON.stringify(opts.meta, null, 2));
-	}
-	// Do NOT auto-write .txt companion — only epub/pdf/html main file
 	return libraryRelPath('Novel', opts.novelTitle, fname);
 }
 
@@ -484,10 +512,6 @@ export async function readCoverFromDisk(opts: {
 	return null;
 }
 
-
-/** Read chapter page images from Library/Manga/<title>/<chapter>/ on disk.
- * Targeted only — requires mangaTitle and/or chapterTitle. Never scans entire library.
- */
 export async function readMangaChapterFromDisk(opts: {
 	root?: FileSystemDirectoryHandle | null;
 	sourceId: string;
@@ -505,7 +529,6 @@ export async function readMangaChapterFromDisk(opts: {
 } | null> {
 	const titleHint = sanitizePathSegment(opts.mangaTitle || '');
 	const chTitleHint = sanitizePathSegment(opts.chapterTitle || '');
-	// Refuse full-library scan (main-thread freeze on mobile)
 	if (!titleHint && !chTitleHint) return null;
 
 	const root = opts.root ?? (await getLibraryRoot());
@@ -581,22 +604,18 @@ export async function readMangaChapterFromDisk(opts: {
 					(f.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') ||
 					'jpg';
 				if (ext === 'jpeg') ext = 'jpg';
-				// Prefer reference to File (Blob subclass) — avoid extra copy
 				pages.push({ blob: file, ext });
 			} catch {
 				/* skip */
 			}
-			// Yield every 4 pages so UI stays responsive on mobile
 			if (i > 0 && i % 4 === 0) await yieldMain();
 		}
 		return pages;
 	}
 
-	// Resolve title folder directly when possible
 	const titleCandidates: string[] = [];
 	if (titleHint) {
 		titleCandidates.push(titleHint);
-		// common alternate sanitizations
 		titleCandidates.push(titleHint.replace(/_/g, ' '));
 	}
 
@@ -610,13 +629,12 @@ export async function readMangaChapterFromDisk(opts: {
 		}
 	}
 
-	// If direct open failed, scan names but STOP after first match (bounded)
 	if (!titleDirs.length && titleHint) {
 		let n = 0;
 		for await (const [name, handle] of mangaRoot.entries()) {
 			if (handle.kind !== 'directory') continue;
 			n++;
-			if (n > 80) break; // hard cap
+			if (n > 80) break;
 			const nn = name.toLowerCase();
 			const th = titleHint.toLowerCase();
 			if (nn === th || nn.includes(th) || th.includes(nn)) {
@@ -628,7 +646,6 @@ export async function readMangaChapterFromDisk(opts: {
 	}
 
 	if (!titleDirs.length && chTitleHint && !titleHint) {
-		// Without title, refuse deep scan
 		return null;
 	}
 
@@ -640,7 +657,6 @@ export async function readMangaChapterFromDisk(opts: {
 		).slice(0, 160);
 		const mangaId = String(titleMeta?.mangaId || titleMeta?.id || '').trim() || wantCh;
 
-		// Prefer direct chapter folder open by title
 		const chTryNames: string[] = [];
 		if (chTitleHint) {
 			chTryNames.push(chTitleHint);
@@ -666,7 +682,6 @@ export async function readMangaChapterFromDisk(opts: {
 			}
 		}
 
-		// Bounded chapter scan inside this title only
 		let scanned = 0;
 		for await (const [chName, chHandle] of td.handle.entries()) {
 			if (chHandle.kind !== 'directory') continue;
