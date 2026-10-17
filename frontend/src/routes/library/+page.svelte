@@ -471,7 +471,6 @@
 	async function confirmBatchDownload() {
 		const target = warnTarget;
 		if (!target || batch.active || busy) return;
-		// Capture non-null entry for async workers (TS + race-safe)
 		const e: LibraryEntry = target;
 		warnOpen = false;
 		warnTarget = null;
