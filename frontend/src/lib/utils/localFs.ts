@@ -432,9 +432,7 @@ export async function saveNovelPdfToDisk(opts: {
 	if (opts.meta) {
 		await writeTextFile(titleDir, `${base}.meta.json`, JSON.stringify(opts.meta, null, 2));
 	}
-	if (opts.contentText && String(opts.contentText).trim()) {
-		await writeTextFile(titleDir, `${base}.txt`, String(opts.contentText));
-	}
+	// Do NOT auto-write .txt companion — only epub/pdf/html main file
 	return libraryRelPath('Novel', opts.novelTitle, fname);
 }
 

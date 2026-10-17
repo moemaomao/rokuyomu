@@ -208,7 +208,7 @@ type NovelChapterJson = {
 async function fetchNovelChapter(
 	source: string,
 	chapterId: string
-): Promise<{ title: string; content: string; novelTitle?: string; novelId?: string }> {
+): Promise<{ title: string; content: string; rawHtml?: string; novelTitle?: string; novelId?: string }> {
 	const chapter = chapterId.startsWith('/') ? chapterId : `/${chapterId}`;
 	const params = new URLSearchParams({ source, chapter });
 	const res = await fetch(`/api/novel-chapter?${params}`);
@@ -228,6 +228,7 @@ async function fetchNovelChapter(
 	return {
 		title,
 		content,
+		rawHtml: raw.trim() || undefined,
 		novelTitle: novelTitle ? String(novelTitle) : undefined,
 		novelId: novelId ? String(novelId) : undefined
 	};
@@ -333,6 +334,7 @@ export async function buildSimpleEpub(opts: {
 	const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 	const zip = new JSZip();
+
 	zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
 	zip.file(
 		'META-INF/container.xml',
@@ -425,7 +427,6 @@ p:first-of-type { text-indent: 0; }
 	});
 }
 
-
 function toOfflineHtml(raw: string): string {
 	const s = String(raw || '').trim();
 	if (!s) return '';
@@ -440,9 +441,10 @@ export async function downloadNovelChapterPdf(opts: {
 	novelTitle?: string;
 	mangaId?: string;
 	cover?: string;
+	batchMode?: boolean;
 	onProgress?: ProgressCb;
 }): Promise<void> {
-	const { source, chapterId, cover, onProgress } = opts;
+	const { source, chapterId, cover, onProgress, batchMode = false } = opts;
 	const report = (p: NovelDownloadProgress) => onProgress?.(p);
 
 	report({ phase: 'fetch', current: 0, total: 1, message: 'Fetching chapter…' });
@@ -466,6 +468,103 @@ export async function downloadNovelChapterPdf(opts: {
 		if (stripped.length > 1 && stripped !== mid) mangaId = stripped;
 	}
 	const chapterFileLabel = shortChapterFilename(title, chapterId);
+
+	const offlineHtml = (() => {
+		const raw = String((data as any).rawHtml || '').trim();
+		if (raw && /<[a-z][\s\S]*>/i.test(raw)) {
+			// Keep original HTML (images, formatting); only strip scripts
+			return raw
+				.replace(/<script[\s\S]*?<\/script>/gi, '')
+				.replace(/<iframe[\s\S]*?<\/iframe>/gi, '');
+		}
+		return toOfflineHtml((data.content && String(data.content).trim()) || content);
+	})();
+
+	if (batchMode) {
+		report({ phase: 'fetch', current: 1, total: 1, message: 'Saving offline…' });
+		try {
+			await saveOfflineNovelChapter({
+				sourceId: source,
+				mangaId: mangaId || chapterId,
+				chapterId: String(chapterId),
+				novelTitle,
+				chapterTitle: title,
+				content: offlineHtml
+			});
+		} catch (e) {
+			console.warn('[offline] save novel chapter failed', e);
+		}
+		let savedPath = '';
+		try {
+			const preferDisk =
+				(await import('$lib/stores/preferences')).prefersDiskDownload() &&
+				supportsFileSystemAccess();
+			if (preferDisk) {
+				const root =
+					(await requestStoredLibraryRoot()) ||
+					(await ensureLibraryRoot());
+				if (root) {
+					report({ phase: 'disk', current: 1, total: 1, message: 'Saving HTML…' });
+					const htmlDoc = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>${escapeXml(title)}</title>
+<style>body{font-family:serif;line-height:1.6;max-width:40rem;margin:1.5rem auto;padding:0 1rem}
+img{max-width:100%;height:auto}p{margin:0 0 .85em}</style>
+</head><body><h1>${escapeXml(title)}</h1>
+${offlineHtml}
+</body></html>`;
+					const htmlBlob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+					savedPath = await saveNovelPdfToDisk({
+						root,
+						novelTitle: sanitizePathSegment(novelTitle),
+						chapterTitle: chapterFileLabel,
+						pdfBlob: htmlBlob,
+						ext: 'html',
+						meta: {
+							source,
+							mangaId: mangaId || '',
+							novelTitle,
+							chapterId,
+							chapterTitle: title,
+							savedAt: Date.now(),
+							isNovel: true,
+							format: 'html'
+						}
+					});
+				}
+			}
+		} catch (e) {
+			console.warn('[novel] batch disk save', e);
+		}
+		try {
+			void cacheLibraryCover({
+				mangaId: mangaId || chapterId,
+				sourceId: source,
+				coverUrl: cover || '',
+				title: novelTitle,
+				isNovel: true
+			});
+			await upsertLibraryEntry({
+				mangaId: mangaId || chapterId,
+				mangaTitle: novelTitle,
+				cover: cover || '',
+				sourceId: source,
+				isNovel: true,
+				localPath: savedPath || undefined,
+				chapters: [
+					{
+						chapterId: String(chapterId),
+						chapterTitle: title,
+						savedAt: Date.now(),
+						pageCount: 1
+					}
+				]
+			});
+		} catch (e) {
+			console.warn('[library] upsert failed', e);
+		}
+		report({ phase: 'done', current: 1, total: 1, message: 'Offline saved' });
+		return;
+	}
 
 	const format =
 		(await import('$lib/stores/preferences')).getNovelDownloadFormat() === 'epub'
@@ -493,9 +592,7 @@ export async function downloadNovelChapterPdf(opts: {
 			chapterId: String(chapterId),
 			novelTitle,
 			chapterTitle: title,
-			content: toOfflineHtml(
-				(data.content && String(data.content).trim()) || content
-			),
+			content: offlineHtml,
 			pdfBlob: format === 'pdf' ? fileBlob : undefined
 		});
 	} catch (e) {
@@ -522,7 +619,6 @@ export async function downloadNovelChapterPdf(opts: {
 					chapterTitle: chapterFileLabel,
 					pdfBlob: fileBlob,
 					ext: format,
-					contentText: content,
 					meta: {
 						source,
 						mangaId: mangaId || '',
@@ -544,7 +640,6 @@ export async function downloadNovelChapterPdf(opts: {
 	if (!savedPath) {
 		triggerDownload(fileBlob, fileName);
 	}
-
 	try {
 		void cacheLibraryCover({
 			mangaId: mangaId || chapterId,
