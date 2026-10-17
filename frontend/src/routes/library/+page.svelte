@@ -25,7 +25,7 @@
 		Download
 	} from 'lucide-svelte';
 	import { getFirstOfflineChapterHref } from '$lib/utils/offlineChapter';
-	import { isNovelSource } from '$lib/utils/novelSources';
+	import { isNovelSource, chapterHref } from '$lib/utils/novelSources';
 	import { proxyImage } from '$lib/utils/image';
 	import { getOfflineCoverObjectUrl } from '$lib/utils/cacheCover';
 
@@ -33,7 +33,6 @@
 	let busy = $state(false);
 	let msg = $state('');
 	let diskOk = $state(false);
-	/** Read-offline links keyed by entry.key */
 	let offlineHrefs = $state<Record<string, string>>({});
 	let coverUrls = $state<Record<string, string>>({});
 
@@ -60,7 +59,6 @@
 	let warnOpen = $state(false);
 	let warnTarget = $state<LibraryEntry | null>(null);
 
-	/** Prefer stored flag; fall back to source registry (fixes bad auto-download upserts). */
 	function entryIsNovel(e: LibraryEntry): boolean {
 		if (e.isNovel) return true;
 		try {
@@ -70,7 +68,18 @@
 		}
 	}
 
+	function offlineReadHref(e: LibraryEntry): string | null {
+		const ch = e.chapters?.[0];
+		if (!ch?.chapterId) return null;
+		try {
+			return chapterHref(e.sourceId, String(ch.chapterId));
+		} catch {
+			return null;
+		}
+	}
+
 	async function load() {
+
 		diskOk = librarySupportsDisk();
 		if (!isLibraryReady()) {
 			items = sortedItems(await ensureLibraryLoaded());
@@ -97,20 +106,29 @@
 	async function resolveOfflineHrefs(list: LibraryEntry[]) {
 		const next: Record<string, string> = { ...offlineHrefs };
 		for (const e of list) {
-			try {
-				const preferNovel = entryIsNovel(e);
-				let href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, preferNovel);
-				// Fallback: chapter may live in the other offline store if isNovel was wrong before
-				if (!href) {
-					href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, !preferNovel);
-				}
-				if (href) next[e.key] = href;
-				else delete next[e.key];
-			} catch {
-				delete next[e.key];
-			}
+			const sync = offlineReadHref(e);
+			if (sync) next[e.key] = sync;
 		}
 		offlineHrefs = next;
+
+		const results = await Promise.all(
+			list.map(async (e) => {
+				try {
+					const preferNovel = entryIsNovel(e);
+					let href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, preferNovel);
+					if (!href) href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, !preferNovel);
+					return [e.key, href || offlineReadHref(e) || ''] as const;
+				} catch {
+					return [e.key, offlineReadHref(e) || ''] as const;
+				}
+			})
+		);
+		const refined: Record<string, string> = { ...offlineHrefs };
+		for (const [k, h] of results) {
+			if (h) refined[k] = h;
+			else delete refined[k];
+		}
+		offlineHrefs = refined;
 	}
 
 	function coverSrc(e: LibraryEntry): string {
@@ -283,7 +301,6 @@
 	}
 
 	async function handleRemove(e: LibraryEntry) {
-		// Metadata only — files on disk are never deleted.
 		items = items.filter((x) => x.key !== e.key);
 		try {
 			await removeLibraryEntry(e.mangaId, e.sourceId);
@@ -869,9 +886,9 @@
 							</p>
 						{/if}
 						<div class="mt-3 flex items-center justify-center gap-2">
-							{#if offlineHrefs[e.key]}
+							{#if offlineHrefs[e.key] || offlineReadHref(e)}
 								<a
-									href={offlineHrefs[e.key]}
+									href={offlineHrefs[e.key] || offlineReadHref(e) || '#'}
 									class="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 transition hover:bg-sky-500 hover:text-white dark:text-sky-400"
 									title="Read offline"
 									aria-label="Read offline"
