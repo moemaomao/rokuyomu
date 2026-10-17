@@ -142,18 +142,27 @@ if (browser) {
 	(async () => {
 		try {
 			await reloadFromIdb();
-			const root = await getLibraryRoot().catch(() => null);
-			hasRoot = !!root || supportsFileSystemAccess();
-			if (root && entries.length === 0) {
-				const n = await resyncLibraryFromDisk();
-				if (n > 0) console.info('[library] restored', n, 'titles from disk');
-			}
+			ready = true;
+			window.dispatchEvent(new CustomEvent('library-changed'));
 			loadError = null;
+
+			void (async () => {
+				try {
+					const root = await getLibraryRoot().catch(() => null);
+					hasRoot = !!root || supportsFileSystemAccess();
+					if (root && entries.length === 0) {
+						const n = await resyncLibraryFromDisk();
+						if (n > 0) console.info('[library] restored', n, 'titles from disk');
+					}
+				} catch (e) {
+					console.warn('[library] background FS', e);
+					hasRoot = supportsFileSystemAccess();
+				}
+			})();
 		} catch (e: any) {
 			console.error('[library] load failed', e);
 			entries = [];
 			loadError = e?.message || 'Failed to load library';
-		} finally {
 			ready = true;
 			window.dispatchEvent(new CustomEvent('library-changed'));
 		}

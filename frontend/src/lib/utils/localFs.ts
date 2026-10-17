@@ -18,6 +18,7 @@ const HIDDEN = {
 export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
 
 let memoryRoot: FileSystemDirectoryHandle | null = null;
+let permissionGranted = false;
 
 export function supportsFileSystemAccess(): boolean {
 	return (
@@ -78,19 +79,27 @@ async function ensurePermission(
 	handle: FileSystemDirectoryHandle,
 	opts?: { request?: boolean }
 ): Promise<boolean> {
+	if (permissionGranted && memoryRoot === handle) return true;
 	try {
 		const h = handle as any;
 		if (typeof h.queryPermission === 'function') {
 			let state = await h.queryPermission({ mode: 'readwrite' });
-			if (state === 'granted') return true;
+			if (state === 'granted') {
+				permissionGranted = true;
+				return true;
+			}
 			if (opts?.request && typeof h.requestPermission === 'function') {
 				state = await h.requestPermission({ mode: 'readwrite' });
-				return state === 'granted';
+				const ok = state === 'granted';
+				permissionGranted = ok;
+				return ok;
 			}
 			return false;
 		}
+		permissionGranted = true;
 		return true;
 	} catch {
+		permissionGranted = false;
 		return false;
 	}
 }
@@ -181,10 +190,14 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	if (memoryRoot) {
 		const ok = await ensurePermission(memoryRoot, { request: false });
 		if (ok) {
-			await ensureSubdirs(memoryRoot).catch(() => {});
+			if (!(memoryRoot as any).__rokuyomuSubdirs) {
+				await ensureSubdirs(memoryRoot).catch(() => {});
+				(memoryRoot as any).__rokuyomuSubdirs = true;
+			}
 			return memoryRoot;
 		}
 		memoryRoot = null;
+		permissionGranted = false;
 	}
 
 	const stored = await idbGetHandle();
@@ -194,7 +207,11 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	if (!ok) return null;
 
 	memoryRoot = stored;
-	await ensureSubdirs(stored).catch(() => {});
+	permissionGranted = true;
+	if (!(stored as any).__rokuyomuSubdirs) {
+		await ensureSubdirs(stored).catch(() => {});
+		(stored as any).__rokuyomuSubdirs = true;
+	}
 	return stored;
 }
 

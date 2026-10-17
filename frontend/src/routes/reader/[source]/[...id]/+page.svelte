@@ -68,8 +68,18 @@ $effect(() => {
 	if (pendingChapterId && !chapterIdMatches(norm, pendingChapterId)) return;
 
 	let cancelled = false;
-	// Keep spinner until offline or network pages are ready — never flash "Images not available"
-	chapterLoading = true;
+
+	// If we already rendered this chapter offline, do not reset to spinner
+	const alreadyOffline =
+		offlineMode &&
+		pages.length > 0 &&
+		chapterIdMatches(norm, normChapterId(cid));
+
+	if (!alreadyOffline) {
+		// Only show spinner when we do not already have offline pages on screen
+		chapterLoading = true;
+	}
+
 	(async () => {
 		try {
 			if (src && cid) {
@@ -92,10 +102,17 @@ $effect(() => {
 			console.warn('[reader] offline lookup', e);
 		}
 		if (cancelled) return;
+		// Network path only if offline miss
+		if (offlineMode && pages.length > 0) {
+			// Keep offline pages if network has nothing useful yet
+			if (!incoming?.length) {
+				chapterLoading = false;
+				return;
+			}
+		}
 		revokeOfflineUrls();
 		offlineMode = false;
 		pages = incoming;
-		// If server still has no pages, stay in loading only briefly; empty state after
 		chapterLoading = false;
 		if (pendingChapterId && chapterIdMatches(norm, pendingChapterId)) {
 			pendingChapterId = null;
@@ -344,11 +361,39 @@ $effect(() => {
 		if (chapterIdMatches(cleanId, normChapterId(chapterId)) && pages.length > 0) return;
 
 		pendingChapterId = cleanId;
-		chapterLoading = true;
-		pages = [];
 		currentPageIndex = 0;
 		imgEpoch += 1;
 		try { window.scrollTo(0, 0); } catch {}
+
+		// Offline-first: paint from IDB immediately, then navigate without waiting network
+		try {
+			const row = await getOfflineMangaChapter(String(source), cleanId);
+			if (row?.pages?.length) {
+				revokeOfflineUrls();
+				const urls = mangaPagesToObjectUrls(row);
+				offlineObjectUrls = urls;
+				pages = urls;
+				offlineMode = true;
+				chapterLoading = false;
+				// Soft navigate — keep offline pages; do not force full invalidate if possible
+				try {
+					await goto(`/reader/${source}/${cleanId}`, {
+						replaceState: true,
+						invalidateAll: false,
+						noScroll: true
+					});
+				} catch (e) {
+					console.warn('[reader] offline goto', e);
+				}
+				pendingChapterId = null;
+				return;
+			}
+		} catch (e) {
+			console.warn('[reader] offline prefetch', e);
+		}
+
+		chapterLoading = true;
+		pages = [];
 
 		try {
 			await goto(`/reader/${source}/${cleanId}`, {

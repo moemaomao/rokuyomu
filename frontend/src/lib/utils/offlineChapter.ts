@@ -47,6 +47,32 @@ function chapterKey(sourceId: string, chapterId: string): string {
 	return `${String(sourceId)}::${normalizeMangaId(chapterId)}`;
 }
 
+/** In-memory cache — avoids repeated IDB reads when flipping chapters offline */
+const mangaChapterCache = new Map<string, OfflineMangaChapter | null>();
+const novelChapterCache = new Map<string, OfflineNovelChapter | null>();
+const CACHE_MAX = 40;
+
+function cachePutManga(key: string, row: OfflineMangaChapter | null) {
+	if (mangaChapterCache.size >= CACHE_MAX) {
+		const first = mangaChapterCache.keys().next().value;
+		if (first !== undefined) mangaChapterCache.delete(first);
+	}
+	mangaChapterCache.set(key, row);
+}
+
+function cachePutNovel(key: string, row: OfflineNovelChapter | null) {
+	if (novelChapterCache.size >= CACHE_MAX) {
+		const first = novelChapterCache.keys().next().value;
+		if (first !== undefined) novelChapterCache.delete(first);
+	}
+	novelChapterCache.set(key, row);
+}
+
+export function clearOfflineChapterMemoryCache() {
+	mangaChapterCache.clear();
+	novelChapterCache.clear();
+}
+
 let dbp: Promise<IDBPDatabase<OfflineDB>> | null = null;
 
 function getDB() {
@@ -106,6 +132,7 @@ export async function saveOfflineMangaChapter(opts: {
 		savedAt: Date.now()
 	};
 	await db.put('mangaChapters', entry);
+	cachePutManga(key, entry);
 	return key;
 }
 
@@ -113,9 +140,21 @@ export async function getOfflineMangaChapter(
 	sourceId: string,
 	chapterId: string
 ): Promise<OfflineMangaChapter | null> {
-	const db = await getDB();
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
+
+	const primaryKey = chapterKey(sourceId, raw);
+	if (mangaChapterCache.has(primaryKey)) {
+		const hit = mangaChapterCache.get(primaryKey);
+		if (hit?.pages?.length) return hit;
+		if (hit === null) {
+			/* known miss for exact key — still try alternate keys below */
+		} else if (hit) {
+			return hit;
+		}
+	}
+
+	const db = await getDB();
 
 	const candidates = new Set<string>();
 	const add = (s: string) => {
@@ -134,8 +173,20 @@ export async function getOfflineMangaChapter(
 	if (seg) add(seg);
 
 	for (const c of candidates) {
-		const row = await db.get('mangaChapters', chapterKey(sourceId, c));
-		if (row?.pages?.length) return row;
+		const k = chapterKey(sourceId, c);
+		if (mangaChapterCache.has(k)) {
+			const cached = mangaChapterCache.get(k);
+			if (cached?.pages?.length) {
+				cachePutManga(primaryKey, cached);
+				return cached;
+			}
+		}
+		const row = await db.get('mangaChapters', k);
+		if (row?.pages?.length) {
+			cachePutManga(k, row);
+			cachePutManga(primaryKey, row);
+			return row;
+		}
 	}
 
 	try {
@@ -146,13 +197,16 @@ export async function getOfflineMangaChapter(
 		for (const row of all) {
 			if (row.sourceId !== src || !row.pages?.length) continue;
 			const id = normalizeMangaId(row.chapterId).toLowerCase();
-			if (id === needle) return row;
-			if (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) return row;
-			if (needle && (id.endsWith(needle) || needle.endsWith(id))) return row;
+			if (id === needle || (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) || (needle && (id.endsWith(needle) || needle.endsWith(id)))) {
+				cachePutManga(primaryKey, row);
+				cachePutManga(chapterKey(sourceId, row.chapterId), row);
+				return row;
+			}
 		}
 	} catch {
 		/* ignore */
 	}
+	cachePutManga(primaryKey, null);
 	return null;
 }
 
@@ -207,6 +261,7 @@ export async function saveOfflineNovelChapter(opts: {
 		savedAt: Date.now()
 	};
 	await db.put('novelChapters', entry);
+	cachePutNovel(key, entry);
 	return key;
 }
 
@@ -214,9 +269,16 @@ export async function getOfflineNovelChapter(
 	sourceId: string,
 	chapterId: string
 ): Promise<OfflineNovelChapter | null> {
-	const db = await getDB();
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
+
+	const primaryKey = chapterKey(sourceId, raw);
+	if (novelChapterCache.has(primaryKey)) {
+		const hit = novelChapterCache.get(primaryKey);
+		if (hit && String(hit.content || '').trim()) return hit;
+	}
+
+	const db = await getDB();
 
 	const candidates = new Set<string>();
 	const add = (s: string) => {
@@ -235,8 +297,13 @@ export async function getOfflineNovelChapter(
 	if (seg) add(seg);
 
 	for (const c of candidates) {
-		const row = await db.get('novelChapters', chapterKey(sourceId, c));
-		if (row && String(row.content || '').trim()) return row;
+		const k = chapterKey(sourceId, c);
+		const row = await db.get('novelChapters', k);
+		if (row && String(row.content || '').trim()) {
+			cachePutNovel(k, row);
+			cachePutNovel(primaryKey, row);
+			return row;
+		}
 	}
 
 	try {
@@ -247,13 +314,15 @@ export async function getOfflineNovelChapter(
 		for (const row of all) {
 			if (row.sourceId !== src || !String(row.content || '').trim()) continue;
 			const id = normalizeMangaId(row.chapterId).toLowerCase();
-			if (id === needle) return row;
-			if (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) return row;
-			if (needle && (id.endsWith(needle) || needle.endsWith(id))) return row;
+			if (id === needle || (needleSeg && (id.endsWith('/' + needleSeg) || id.endsWith(needleSeg))) || (needle && (id.endsWith(needle) || needle.endsWith(id)))) {
+				cachePutNovel(primaryKey, row);
+				return row;
+			}
 		}
 	} catch {
 		/* ignore */
 	}
+	cachePutNovel(primaryKey, null);
 	return null;
 }
 
@@ -289,8 +358,13 @@ export async function deleteOfflineChapter(
 ): Promise<void> {
 	const db = await getDB();
 	const key = chapterKey(sourceId, chapterId);
-	if (isNovel) await db.delete('novelChapters', key);
-	else await db.delete('mangaChapters', key);
+	if (isNovel) {
+		await db.delete('novelChapters', key);
+		novelChapterCache.delete(key);
+	} else {
+		await db.delete('mangaChapters', key);
+		mangaChapterCache.delete(key);
+	}
 }
 
 export function mangaPagesToObjectUrls(chapter: OfflineMangaChapter): string[] {

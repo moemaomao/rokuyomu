@@ -13,6 +13,39 @@ function libKey(mangaId: string, sourceId: string): string {
 	return `${sourceId}::${normalizeMangaId(mangaId)}`;
 }
 
+const coverUrlCache = new Map<string, string>();
+const COVER_URL_MAX = 120;
+
+function rememberCoverUrl(key: string, url: string): string {
+	if (coverUrlCache.size >= COVER_URL_MAX) {
+		const first = coverUrlCache.keys().next().value;
+		if (first !== undefined) {
+			const old = coverUrlCache.get(first);
+			coverUrlCache.delete(first);
+			if (old) {
+				try {
+					URL.revokeObjectURL(old);
+				} catch {
+					/* ignore */
+				}
+			}
+		}
+	}
+	coverUrlCache.set(key, url);
+	return url;
+}
+
+export function clearCoverObjectUrlCache() {
+	for (const u of coverUrlCache.values()) {
+		try {
+			URL.revokeObjectURL(u);
+		} catch {
+			/* ignore */
+		}
+	}
+	coverUrlCache.clear();
+}
+
 function bmCoverKey(mangaId: string, sourceId: string): string {
 	return `bm::${libKey(mangaId, sourceId)}`;
 }
@@ -153,12 +186,15 @@ export async function getOfflineHistoryCoverObjectUrl(
 	mangaId: string,
 	sourceId: string
 ): Promise<string | null> {
+	const key = histCoverKey(mangaId, sourceId);
+	const cached = coverUrlCache.get(key);
+	if (cached) return cached;
 	try {
 		const { idbGetLibraryCover } = await import('$lib/db');
-		let blob = await idbGetLibraryCover(histCoverKey(mangaId, sourceId));
+		let blob = await idbGetLibraryCover(key);
 		if (!blob) blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
 		if (!blob) return null;
-		return URL.createObjectURL(blob);
+		return rememberCoverUrl(key, URL.createObjectURL(blob));
 	} catch {
 		return null;
 	}
@@ -170,9 +206,12 @@ export async function getOfflineCoverObjectUrl(
 	opts?: { title?: string; isNovel?: boolean }
 ): Promise<string | null> {
 	const key = libKey(mangaId, sourceId);
+	const cached = coverUrlCache.get(key);
+	if (cached) return cached;
+
 	try {
 		const blob = await idbGetLibraryCover(key);
-		if (blob) return URL.createObjectURL(blob);
+		if (blob) return rememberCoverUrl(key, URL.createObjectURL(blob));
 	} catch {
 		/* fall through */
 	}
@@ -193,7 +232,7 @@ export async function getOfflineCoverObjectUrl(
 					} catch {
 						/* ignore */
 					}
-					return URL.createObjectURL(blob);
+					return rememberCoverUrl(key, URL.createObjectURL(blob));
 				}
 			}
 		} catch {
@@ -207,11 +246,14 @@ export async function getOfflineBookmarkCoverObjectUrl(
 	mangaId: string,
 	sourceId: string
 ): Promise<string | null> {
+	const key = bmCoverKey(mangaId, sourceId);
+	const cached = coverUrlCache.get(key);
+	if (cached) return cached;
 	try {
-		let blob = await idbGetLibraryCover(bmCoverKey(mangaId, sourceId));
+		let blob = await idbGetLibraryCover(key);
 		if (!blob) blob = await idbGetLibraryCover(libKey(mangaId, sourceId));
 		if (!blob) return null;
-		return URL.createObjectURL(blob);
+		return rememberCoverUrl(key, URL.createObjectURL(blob));
 	} catch {
 		return null;
 	}
