@@ -1492,7 +1492,7 @@
 					</div>
 				{/if}
 				{:else}
-					<p class="detail-muted py-12 text-center text-sm">Belum ada chapter</p>
+					<p class="detail-muted py-12 text-center text-sm">No chapter yet</p>
 				{/if}
 			</div>
 		</div>
