@@ -41,6 +41,7 @@ export async function autoDownloadMangaChapter(opts: {
 			mangaId: opts.mangaId,
 			cover: opts.cover,
 			pageUrls: opts.pageUrls,
+			offlineOnly: true,
 			onProgress: undefined
 		});
 	} catch (e) {

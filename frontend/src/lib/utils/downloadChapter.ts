@@ -247,6 +247,7 @@ export async function downloadChapter(opts: {
 	useReaderDom?: boolean;
 	concurrency?: number;
 	forceZip?: boolean;
+	offlineOnly?: boolean;
 	onProgress?: ProgressCb;
 }): Promise<void> {
 	const {
@@ -257,6 +258,7 @@ export async function downloadChapter(opts: {
 		cover,
 		pageUrls,
 		forceZip = false,
+		offlineOnly = false,
 		onProgress
 	} = opts;
 	const concurrency = Math.max(1, Math.min(opts.concurrency ?? 6, 12));
@@ -419,6 +421,16 @@ export async function downloadChapter(opts: {
 			});
 			return;
 		}
+	}
+
+	if (offlineOnly) {
+		report({
+			phase: 'done',
+			current: pages.length,
+			total: pages.length,
+			message: 'Saved to Offline Library'
+		});
+		return;
 	}
 
 	const JSZip = await tryLoadJSZip();
