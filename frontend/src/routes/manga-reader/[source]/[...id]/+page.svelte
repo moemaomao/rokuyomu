@@ -113,7 +113,11 @@ $effect(() => {
 	(async () => {
 		try {
 			if (src && cid) {
-				const row = await getOfflineMangaChapter(src, cid);
+				const row = await getOfflineMangaChapter(src, cid, {
+					mangaTitle: String(mangaInfo?.title || ''),
+					chapterTitle: String(currentChapter?.title || ''),
+					allowDisk: true
+				});
 				if (cancelled) return;
 				if (row?.pages?.length) {
 					const total = Math.min(row.pages.length, 40);
@@ -433,7 +437,14 @@ $effect(() => {
 		try { window.scrollTo(0, 0); } catch {}
 
 		try {
-			const row = await getOfflineMangaChapter(String(source), cleanId);
+			const targetChapter = chapters.find(
+				(ch) => chapterIdMatches(normChapterId(ch.id), cleanId)
+			);
+			const row = await getOfflineMangaChapter(String(source), cleanId, {
+				mangaTitle: String(mangaInfo?.title || ''),
+				chapterTitle: String(targetChapter?.title || ''),
+				allowDisk: true
+			});
 			if (row?.pages?.length) {
 				revokeOfflineUrls();
 				const total = Math.min(row.pages.length, 40);

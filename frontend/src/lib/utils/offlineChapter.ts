@@ -138,7 +138,7 @@ export async function saveOfflineMangaChapter(opts: {
 export async function getOfflineMangaChapter(
 	sourceId: string,
 	chapterId: string,
-	_opts?: { mangaTitle?: string; chapterTitle?: string; allowDisk?: boolean }
+	opts?: { mangaTitle?: string; chapterTitle?: string; allowDisk?: boolean }
 ): Promise<OfflineMangaChapter | null> {
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
@@ -146,7 +146,36 @@ export async function getOfflineMangaChapter(
 	const primaryKey = chapterKey(sourceId, raw);
 	if (mangaChapterCache.has(primaryKey)) {
 		const hit = mangaChapterCache.get(primaryKey);
-		return hit?.pages?.length ? hit : null;
+		if (hit?.pages?.length) return hit;
+		if (!opts?.allowDisk) return null;
+	}
+
+	if (opts?.allowDisk && opts.mangaTitle && opts.chapterTitle) {
+		try {
+			const { readMangaChapterFromDisk } = await import('$lib/utils/localFs');
+			const disk = await readMangaChapterFromDisk({
+				sourceId,
+				chapterId: raw,
+				mangaTitle: opts.mangaTitle,
+				chapterTitle: opts.chapterTitle
+			});
+			if (disk?.pages.length) {
+				const entry: OfflineMangaChapter = {
+					key: primaryKey,
+					sourceId: disk.sourceId,
+					mangaId: disk.mangaId,
+					chapterId: disk.chapterId,
+					mangaTitle: disk.mangaTitle,
+					chapterTitle: disk.chapterTitle,
+					pages: disk.pages,
+					savedAt: Date.now()
+				};
+				cachePutManga(primaryKey, entry);
+				return entry;
+			}
+		} catch (e) {
+			console.warn('[offline] read manga chapter from disk', e);
+		}
 	}
 
 	const db = await getDB();
@@ -247,7 +276,8 @@ export async function saveOfflineNovelChapter(opts: {
 
 export async function getOfflineNovelChapter(
 	sourceId: string,
-	chapterId: string
+	chapterId: string,
+	opts?: { novelTitle?: string; chapterTitle?: string; allowDisk?: boolean }
 ): Promise<OfflineNovelChapter | null> {
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
@@ -256,6 +286,35 @@ export async function getOfflineNovelChapter(
 	if (novelChapterCache.has(primaryKey)) {
 		const hit = novelChapterCache.get(primaryKey);
 		if (hit && String(hit.content || '').trim()) return hit;
+		if (!opts?.allowDisk) return null;
+	}
+
+	if (opts?.allowDisk && opts.novelTitle) {
+		try {
+			const { readNovelChapterFromDisk } = await import('$lib/utils/localFs');
+			const disk = await readNovelChapterFromDisk({
+				sourceId,
+				chapterId: raw,
+				novelTitle: opts.novelTitle,
+				chapterTitle: opts.chapterTitle
+			});
+			if (disk?.content.trim()) {
+				const entry: OfflineNovelChapter = {
+					key: primaryKey,
+					sourceId: disk.sourceId,
+					mangaId: disk.mangaId,
+					chapterId: disk.chapterId,
+					novelTitle: disk.novelTitle,
+					chapterTitle: disk.chapterTitle,
+					content: disk.content,
+					savedAt: Date.now()
+				};
+				cachePutNovel(primaryKey, entry);
+				return entry;
+			}
+		} catch (e) {
+			console.warn('[offline] read novel chapter from disk', e);
+		}
 	}
 
 	const db = await getDB();

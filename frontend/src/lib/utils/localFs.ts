@@ -15,6 +15,10 @@ const HIDDEN = {
 	history: '_recent'
 } as const;
 
+type DirectoryHandleWithEntries = FileSystemDirectoryHandle & {
+	entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+};
+
 /** @deprecated */
 export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
 
@@ -455,6 +459,7 @@ export async function saveNovelPdfToDisk(opts: {
 	ext?: string;
 	meta?: Record<string, unknown>;
 	contentText?: string;
+	contentHtml?: string;
 }): Promise<string> {
 	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const novelRoot = await getOrCreateDir(library, 'Novel');
@@ -501,6 +506,16 @@ export async function saveNovelPdfToDisk(opts: {
 	const base = sanitizePathSegment(opts.chapterTitle);
 	const fname = `${base}.${ext}`;
 	await writeBlobFile(titleDir, fname, opts.pdfBlob);
+	if (opts.meta) {
+		await writeTextFile(titleDir, `${base}.meta.json`, JSON.stringify(opts.meta, null, 2));
+	}
+	if (opts.contentHtml) {
+		await writeBlobFile(
+			titleDir,
+			`${base}.html`,
+			new Blob([opts.contentHtml], { type: 'text/html;charset=utf-8' })
+		);
+	}
 	return libraryRelPath('Novel', opts.novelTitle, fname);
 }
 
@@ -764,6 +779,86 @@ export async function readMangaChapterFromDisk(opts: {
 		}
 	}
 
+	return null;
+}
+
+export async function readNovelChapterFromDisk(opts: {
+	root?: FileSystemDirectoryHandle | null;
+	sourceId: string;
+	chapterId: string;
+	novelTitle?: string;
+	chapterTitle?: string;
+}): Promise<{
+	content: string;
+	novelTitle: string;
+	chapterTitle: string;
+	mangaId: string;
+	chapterId: string;
+	sourceId: string;
+} | null> {
+	const root = opts.root ?? (await getLibraryRoot());
+	if (!root || !opts.novelTitle) return null;
+	const titleHint = sanitizePathSegment(opts.novelTitle);
+	const wantedId = String(opts.chapterId || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+	const wantedTitle = sanitizePathSegment(opts.chapterTitle || '').toLowerCase();
+
+	for (const { handle: library } of await getExistingLibraryDirs(root)) {
+		let titleDir: FileSystemDirectoryHandle;
+		try {
+			const novelRoot = await library.getDirectoryHandle('Novel');
+			titleDir = await novelRoot.getDirectoryHandle(titleHint);
+		} catch {
+			continue;
+		}
+
+		let titleMeta: Record<string, unknown> | null = null;
+		try {
+			const metaFile = await (await titleDir.getFileHandle('meta.json')).getFile();
+			titleMeta = JSON.parse(await metaFile.text());
+		} catch {
+			titleMeta = null;
+		}
+		const files: { name: string; handle: FileSystemFileHandle }[] = [];
+		for await (const [name, handle] of (titleDir as DirectoryHandleWithEntries).entries()) {
+			if (handle.kind === 'file' && name.toLowerCase().endsWith('.meta.json')) {
+				files.push({ name, handle: handle as FileSystemFileHandle });
+			}
+		}
+		for (const metaFile of files) {
+			let chapterMeta: Record<string, unknown>;
+			try {
+				chapterMeta = JSON.parse(await (await metaFile.handle.getFile()).text());
+			} catch {
+				continue;
+			}
+			const storedId = String(chapterMeta.chapterId || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+			const storedTitle = sanitizePathSegment(String(chapterMeta.chapterTitle || '')).toLowerCase();
+			if (
+				(wantedId && storedId !== wantedId && !storedId.endsWith(`/${wantedId}`) && !wantedId.endsWith(`/${storedId}`)) &&
+				(!wantedTitle || storedTitle !== wantedTitle)
+			) {
+				continue;
+			}
+			const base = metaFile.name.slice(0, -'.meta.json'.length);
+			for (const ext of ['html', 'txt']) {
+				try {
+					const file = await (await titleDir.getFileHandle(`${base}.${ext}`)).getFile();
+					const content = await file.text();
+					if (!content.trim()) continue;
+					return {
+						content,
+						novelTitle: String(titleMeta?.novelTitle || titleMeta?.title || opts.novelTitle),
+						chapterTitle: String(chapterMeta.chapterTitle || opts.chapterTitle || base),
+						mangaId: String(chapterMeta.mangaId || titleMeta?.mangaId || ''),
+						chapterId: String(chapterMeta.chapterId || opts.chapterId),
+						sourceId: String(chapterMeta.source || titleMeta?.source || opts.sourceId)
+					};
+				} catch {
+					continue;
+				}
+			}
+		}
+	}
 	return null;
 }
 
@@ -1088,8 +1183,12 @@ export async function scanLibraryFromDisk(
 							coverFileName = fname;
 							continue;
 						}
-						if (!lower.endsWith('.pdf') && !lower.endsWith('.epub')) continue;
-						const chapterTitle = fname.replace(/\.(pdf|epub)$/i, '');
+						if (
+							!lower.endsWith('.pdf') &&
+							!lower.endsWith('.epub') &&
+							!lower.endsWith('.html')
+						) continue;
+						const chapterTitle = fname.replace(/\.(pdf|epub|html)$/i, '');
 						let chMeta: Record<string, unknown> | null = null;
 						try {
 							const mfh = await titleDir.getFileHandle(`${chapterTitle}.meta.json`);
@@ -1214,8 +1313,12 @@ export async function hydrateOfflineFromDisk(
 			for await (const [fname, fhandle] of titleDir.entries()) {
 				if (fhandle.kind !== 'file') continue;
 				const lower = fname.toLowerCase();
-				if (!lower.endsWith('.pdf') && !lower.endsWith('.epub')) continue;
-				const base = fname.replace(/\.(pdf|epub)$/i, '');
+				if (
+					!lower.endsWith('.pdf') &&
+					!lower.endsWith('.epub') &&
+					!lower.endsWith('.html')
+				) continue;
+				const base = fname.replace(/\.(pdf|epub|html)$/i, '');
 				let chMeta: Record<string, unknown> | null = null;
 				try {
 					const mfh = await titleDir.getFileHandle(`${base}.meta.json`);
@@ -1229,10 +1332,15 @@ export async function hydrateOfflineFromDisk(
 
 				let content = '';
 				try {
-					const tfh = await titleDir.getFileHandle(`${base}.txt`);
+					const tfh = await titleDir.getFileHandle(`${base}.html`);
 					content = await (await tfh.getFile()).text();
 				} catch {
-					content = '';
+					try {
+						const tfh = await titleDir.getFileHandle(`${base}.txt`);
+						content = await (await tfh.getFile()).text();
+					} catch {
+						content = '';
+					}
 				}
 				if (!content.trim()) {
 					continue;

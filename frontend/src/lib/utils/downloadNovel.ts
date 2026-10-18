@@ -628,7 +628,8 @@ ${offlineHtml}
 						savedAt: Date.now(),
 						isNovel: true,
 						format
-					}
+					},
+					contentHtml: offlineHtml
 				});
 			}
 		} catch (e) {

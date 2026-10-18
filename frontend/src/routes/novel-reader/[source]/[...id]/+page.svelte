@@ -920,7 +920,11 @@ Nội dung:
 		let cancelled = false;
 		(async () => {
 			try {
-				const row = await getOfflineNovelChapter(src, cid);
+				const row = await getOfflineNovelChapter(src, cid, {
+					novelTitle: String(novelInfo?.title || ''),
+					chapterTitle: String(currentChapter?.title || title || ''),
+					allowDisk: true
+				});
 				if (cancelled) return;
 				if (row?.content && String(row.content).trim()) {
 					offlineContent = row.content;
