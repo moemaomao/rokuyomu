@@ -182,8 +182,8 @@ $effect(() => {
 
 	let isMenuOpen = $state(false);
 	let showChapterList = $state(false);
-	let chapterListContainer: HTMLDivElement | null = null;
-	let chapterListElement: HTMLDivElement | null = null;
+	let chapterListContainer = $state<HTMLDivElement | null>(null);
+	let chapterListElement = $state<HTMLDivElement | null>(null);
 	let dataSaver = $state(false);
 	let imageQuality = $state(600);
 	let imgEpoch = $state(0);

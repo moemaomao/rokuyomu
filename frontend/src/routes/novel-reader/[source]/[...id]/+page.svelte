@@ -107,8 +107,8 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	let showVoiceDropdown = $state(false);
 	let showTools = $state(false);
 	let showChapterList = $state(false);
-	let chapterListContainer: HTMLDivElement | null = null;
-	let chapterListElement: HTMLDivElement | null = null;
+	let chapterListContainer = $state<HTMLDivElement | null>(null);
+	let chapterListElement = $state<HTMLDivElement | null>(null);
 	let isSpeaking = $state(false);
 	let isPaused = $state(false);
 	let settingsReady = $state(false);
@@ -127,7 +127,6 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	let downloadingChapterId = $state('');
 	let downloadedChapterIds = $state(new Set<string>());
 
-	/** 0–100 reading scroll progress in current chapter */
 	let scrollProgress = $state(0);
 	let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastSavedChapterKey = $state('');

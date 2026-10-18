@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import { remoteNovelChapter, remoteMangaDetails } from '$lib/server/scraperClient';
 import { isValidSource } from '$lib/server/sources';
 import { isNovelSource } from '$lib/utils/novelSources';
-import { getSeriesMetadata } from '$lib/utils/seriesMetadata';
+import { getSeriesMetadata } from '$lib/server/scraperClient';
 
 function novelIdFromChapter(chapterId: string): string {
 	let path = chapterId.replace(/\/+$/, '');

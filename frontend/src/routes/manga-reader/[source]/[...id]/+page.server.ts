@@ -8,7 +8,7 @@ import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import debug from '$lib/utils/debug';
 import { isNovelSource } from '$lib/utils/novelSources';
-import { getSeriesMetadata } from '$lib/utils/seriesMetadata';
+import { getSeriesMetadata } from '$lib/server/scraperClient';
 
 const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	komiku: '/manga',
