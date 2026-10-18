@@ -1,6 +1,6 @@
 # Rokuyomu — Frontend
 
-SvelteKit app deployed as a **Cloudflare Worker**. UI, KV cache, hybrid scrape routing, and offline client (Library / Bookmark / History).
+SvelteKit app deployed as a **Cloudflare Worker**. UI, KV cache, hybrid scrape routing, and offline client (Download / Bookmark / History).
 
 Monorepo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · package: `frontend/`  
 **Live:** [rokuyomu.mikoroku.workers.dev](https://rokuyomu.mikoroku.workers.dev)
@@ -28,7 +28,7 @@ frontend/
 │   ├── worker-configuration.d.ts
 │   │
 │   ├── lib/
-│   │   ├── db.ts                 # IndexedDB (bookmarks, history, library, covers…)
+│   │   ├── db.ts                 # IndexedDB (bookmarks, history, download metadata, covers…)
 │   │   ├── firebase.ts           # Optional Firebase
 │   │   ├── admin.ts
 │   │   ├── assets/               # favicon, logo, placeholders
@@ -37,15 +37,15 @@ frontend/
 │   │   │   ├── auth.svelte.ts
 │   │   │   ├── bookmark.svelte.ts
 │   │   │   ├── history.ts          # Reading history (cache 80 / disk unlimited)
-│   │   │   ├── library.svelte.ts   # Offline library
+│   │   │   ├── download.svelte.ts  # Download metadata and offline status
 │   │   │   ├── preferences.ts      # Theme, privacy, historyStorageMode, hide folders
 │   │   │   ├── notification.svelte.ts
 │   │   │   └── …
 │   │   ├── utils/
-│   │   │   ├── localFs.ts          # File System Access: Library / Bookmark / History
+│   │   │   ├── localFs.ts          # File System Access: Download / Bookmark / History
 │   │   │   ├── cacheCover.ts       # Cover blobs + disk covers
-│   │   │   ├── downloadChapter.ts  # Manga chapter → disk / zip
-│   │   │   ├── downloadNovelPdf.ts
+│   │   │   ├── downloadManga.ts    # Manga chapter → disk / zip
+│   │   │   ├── downloadNovel.ts
 │   │   │   ├── offlineChapter.ts
 │   │   │   └── …
 │   │   └── server/               # Worker-only
@@ -62,10 +62,10 @@ frontend/
 │       ├── +page.server.ts
 │       ├── layout.css
 │       │
-│       ├── manga/[source]/[...id]/   # Title detail  → /manga/weloma/m/00oDS
-│       ├── reader/[source]/[...id]/  # Image reader
+│       ├── series/[source]/[...id]/  # Title detail  → /series/weloma/m/00oDS
+│       ├── manga-reader/[source]/[...id]/  # Image reader
 │       ├── novel-reader/[source]/[...id]/
-│       ├── library/              # Offline Library UI
+│       ├── download/             # Download manager UI
 │       ├── bookmark/
 │       ├── history/              # History + storage mode toggle
 │       ├── notification/
@@ -97,14 +97,14 @@ frontend/
 | Pattern (folder) | Example URL | Page |
 |------------------|-------------|------|
 | `/` | `/` | Home browse |
-| `/manga/[source]/[...id]` | `/manga/weloma/m/00oDS` | Title detail + chapters |
-| `/reader/[source]/[...id]` | `/reader/weloma/...` | Manga reader |
+| `/series/[source]/[...id]` | `/series/weloma/m/00oDS` | Title detail + chapters |
+| `/manga-reader/[source]/[...id]` | `/manga-reader/weloma/...` | Manga reader |
 | `/novel-reader/[source]/[...id]` | `/novel-reader/...` | Novel reader |
-| `/library` | `/library` | Offline Library |
+| `/download` | `/download` | Download manager |
 | `/bookmark` · `/history` · `/notification` | | User lists |
 | `/settings` | `/settings` | Preferences & privacy |
 | `/deep-search` | `/deep-search` | Cross-source search |
-| `/api/chapters` · `/api/pages` · … | | Worker APIs |
+| `/api/manga-chapter` · `/api/pages` · … | | Worker APIs |
 
 `[source]` = dynamic segment (source id).  
 `[...id]` = catch-all (title id / path from the source).
@@ -117,7 +117,7 @@ Granted parent folder creates a root (default **`Rokuyomu`**):
 
 ```
 Rokuyomu/                 # or AppCache/ if “Hide main folder”
-├── Library/              # or _media/
+├── Download/             # or _media/
 │   ├── Manga/<Title>/…
 │   └── Novel/<Title>/…
 ├── Bookmark/             # or _fav/
@@ -176,4 +176,4 @@ Point `SCRAPER_BASE_URL` at the scraper (env / `wrangler.jsonc`).
 ## Related
 
 - [../README.md](../README.md) — monorepo overview  
-- [../scraper/README.md](../scraper/README.md) — Node scrape API  
+- [../scraper/README.md](../scraper/README.md) — Node scrape API

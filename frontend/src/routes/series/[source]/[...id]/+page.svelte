@@ -9,9 +9,9 @@
 		getReadSets,
 		unmarkChapterRead
 	} from '$lib/utils/readChapters';
-	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadChapter';
-	import { downloadNovelChapterPdf, type NovelDownloadProgress } from '$lib/utils/downloadNovelPdf';
-	import { getOfflineChapterIds, ensureLibraryLoaded, isLibraryReady } from '$lib/stores/library.svelte';
+	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadManga';
+	import { downloadNovelChapterPdf, type NovelDownloadProgress } from '$lib/utils/downloadNovel';
+	import { getOfflineChapterIds, ensureLibraryLoaded, isLibraryReady } from '$lib/stores/download.svelte';
 	import { Bell, BellOff, Check } from 'lucide-svelte';
 	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
 	import coverNotFound from '$lib/assets/cover not found.jpg';
@@ -142,6 +142,8 @@
 					chapterTitle: chapter.title || `Chapter ${chapter.number}`,
 					mangaTitle: manga?.title,
 					mangaId: manga?.id,
+					synopsis,
+					genres: manga?.genres,
 					cover: manga?.cover || '',
 					onProgress: (p) => {
 						dlState = { ...dlState, [id]: p };
@@ -292,7 +294,7 @@
 				limit: String(limit),
 				sort: newest ? 'newest' : 'oldest'
 			});
-			const res = await fetch(`/api/chapters?${params}`);
+			const res = await fetch(`/api/manga-chapter?${params}`);
 			if (!res.ok) throw new Error(await res.text());
 			const json = (await res.json()) as ChaptersApiResponse;
 			const batch = Array.isArray(json.chapters) ? json.chapters : [];
@@ -330,7 +332,7 @@
 					limit: String(LOAD_MORE_STEP),
 					sort: sortNewest ? 'newest' : 'oldest'
 				});
-				const res = await fetch(`/api/chapters?${params}`);
+				const res = await fetch(`/api/manga-chapter?${params}`);
 				if (!res.ok) break;
 				const json = (await res.json()) as ChaptersApiResponse;
 				const batch = Array.isArray(json.chapters) ? json.chapters : [];
@@ -1330,7 +1332,7 @@
 										</div>
 									{/if}
 									<a
-										href="/reader/{source}{chapter.id}"
+										href={chapterHref(source, chapter.id)}
 										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''} {isChapterRead(chapter) ? 'chapter-read' : ''}"
 									>
 										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
@@ -1398,7 +1400,7 @@
 										</div>
 									{/if}
 									<a
-										href="/reader/{source}{chapter.id}"
+										href={chapterHref(source, chapter.id)}
 										class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40 {isChapterRead(chapter) ? 'chapter-read' : ''}"
 									>
 									<div class="h-full w-[90px] shrink-0 overflow-hidden bg-zinc-300 dark:bg-zinc-900">

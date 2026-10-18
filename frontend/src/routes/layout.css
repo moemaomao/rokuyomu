@@ -301,13 +301,15 @@ html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-th
     border-color: var(--accent) !important;
 }
 
-html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600 {
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.pagination-active {
     background-color: var(--accent) !important;
     box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent) !important;
     color: #fff !important;
     border-color: transparent !important;
 }
-html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600:hover:not(:disabled) {
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600:hover:not(:disabled),
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.pagination-active:hover:not(:disabled) {
     filter: brightness(1.08);
 }
 
@@ -581,8 +583,8 @@ html[data-theme] main button.fixed[class*="text-"] {
 }
 
 html[data-theme] main .fixed.right-0.bottom-0.left-0 {
-	background-color: rgba(255, 255, 255, 0.75) !important;
-	border-color: rgba(0, 0, 0, 0.12) !important;
+	background-color: transparent !important;
+	border-color: transparent !important;
 }
 html.dark[data-theme] main .fixed.right-0.bottom-0.left-0,
 html[data-theme="miku"] main .fixed.right-0.bottom-0.left-0,

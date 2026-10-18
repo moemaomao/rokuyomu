@@ -10,6 +10,7 @@
 	} from '$lib/stores/history';
 	import { browser } from '$app/environment';
 	import { proxyImage } from '$lib/utils/image';
+	import { chapterHref } from '$lib/utils/novelSources';
 
 	let {
 		open = $bindable(true),
@@ -155,7 +156,7 @@
 		{:else}
 			<ul class="space-y-1">
 				{#each history as entry (entry.mangaId + entry.chapterId)}
-					{@const readHref = `/reader/${entry.sourceId}${entry.chapterId}`}
+					{@const readHref = chapterHref(entry.sourceId, entry.chapterId)}
 					<li class="group relative">
 						<a
 							href={readHref}

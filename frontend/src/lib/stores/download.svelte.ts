@@ -121,15 +121,16 @@ export async function resyncLibraryFromDisk(): Promise<number> {
 		entries = list;
 		window.dispatchEvent(new CustomEvent('library-changed'));
 
-		try {
-			const h = await hydrateOfflineFromDisk(root);
-			if (h.chapters || h.covers) {
-				console.info('[library] hydrated from disk', h);
-				window.dispatchEvent(new CustomEvent('library-changed'));
-			}
-		} catch (he) {
-			console.warn('[library] hydrateOfflineFromDisk', he);
-		}
+		void hydrateOfflineFromDisk(root)
+			.then((h) => {
+				if (h.chapters || h.covers) {
+					console.info('[library] hydrated from disk', h);
+					window.dispatchEvent(new CustomEvent('library-changed'));
+				}
+			})
+			.catch((he) => {
+				console.warn('[library] hydrateOfflineFromDisk', he);
+			});
 
 		return added;
 	} catch (e) {

@@ -6,7 +6,7 @@ import {
 	saveNovelPdfToDisk,
 	sanitizePathSegment
 } from '$lib/utils/localFs';
-import { upsertLibraryEntry } from '$lib/stores/library.svelte';
+import { upsertLibraryEntry } from '$lib/stores/download.svelte';
 import { cacheLibraryCover } from '$lib/utils/cacheCover';
 import { saveOfflineNovelChapter } from '$lib/utils/offlineChapter';
 

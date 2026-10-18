@@ -93,8 +93,8 @@ export function isNovelSource(sourceId: string | null | undefined): boolean {
 	return NOVEL_SOURCE_IDS.has(sourceId.toLowerCase());
 }
 
-export function chapterReadBase(sourceId: string): '/novel-reader' | '/reader' {
-	return isNovelSource(sourceId) ? '/novel-reader' : '/reader';
+export function chapterReadBase(sourceId: string): '/novel-reader' | '/manga-reader' {
+	return isNovelSource(sourceId) ? '/novel-reader' : '/manga-reader';
 }
 
 export function chapterHref(sourceId: string, chapterId: string): string {

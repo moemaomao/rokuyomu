@@ -4,13 +4,13 @@ import {
 	prefersDiskDownload,
 	getNovelDownloadFormat
 } from '$lib/stores/preferences';
-import { downloadChapter } from '$lib/utils/downloadChapter';
+import { downloadChapter } from '$lib/utils/downloadManga';
 import {
 	hasOfflineMangaChapter,
 	hasOfflineNovelChapter,
 	saveOfflineNovelChapter
 } from '$lib/utils/offlineChapter';
-import { upsertLibraryEntry } from '$lib/stores/library.svelte';
+import { upsertLibraryEntry } from '$lib/stores/download.svelte';
 import {
 	ensureLibraryRoot,
 	saveNovelPdfToDisk,
@@ -74,6 +74,8 @@ export async function autoDownloadMangaChapter(opts: {
 	chapterTitle?: string;
 	mangaTitle?: string;
 	mangaId?: string;
+	synopsis?: string;
+	genres?: string[];
 	cover?: string;
 	pageUrls?: string[];
 }): Promise<void> {
@@ -93,6 +95,8 @@ export async function autoDownloadMangaChapter(opts: {
 			chapterTitle: opts.chapterTitle,
 			mangaTitle: opts.mangaTitle,
 			mangaId: opts.mangaId,
+			synopsis: opts.synopsis,
+			genres: opts.genres,
 			cover: opts.cover,
 			pageUrls: opts.pageUrls,
 			offlineOnly: true,
@@ -162,10 +166,10 @@ export async function autoDownloadNovelChapter(opts: {
 			const body = htmlToPlain(plain) || plain;
 			let fileBlob: Blob;
 			if (format === 'epub') {
-				const { buildSimpleEpubForAuto } = await import('$lib/utils/downloadNovelPdf');
+				const { buildSimpleEpubForAuto } = await import('$lib/utils/downloadNovel');
 				fileBlob = await buildSimpleEpubForAuto({ novelTitle, chapterTitle, body });
 			} else {
-				const { buildSimplePdfForAuto } = await import('$lib/utils/downloadNovelPdf');
+				const { buildSimplePdfForAuto } = await import('$lib/utils/downloadNovel');
 				const heading = [novelTitle, chapterTitle].filter(Boolean).join(' — ');
 				fileBlob = buildSimplePdfForAuto(heading, body);
 			}

@@ -61,7 +61,7 @@
 
 	function formatMangaHref(sourceId: string, mangaId: string): string {
 		const cleanMangaId = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
-		return `/manga/${sourceId}${cleanMangaId}`;
+		return `/series/${sourceId}${cleanMangaId}`;
 	}
 
 	function onCoverError(e: Event) {

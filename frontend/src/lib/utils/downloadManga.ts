@@ -8,7 +8,7 @@ import {
 	getLibraryRoot,
 	readMangaChapterFromDisk
 } from '$lib/utils/localFs';
-import { upsertLibraryEntry } from '$lib/stores/library.svelte';
+import { upsertLibraryEntry } from '$lib/stores/download.svelte';
 import { cacheLibraryCover } from '$lib/utils/cacheCover';
 import {
 	saveOfflineMangaChapter,
@@ -25,6 +25,16 @@ export type DownloadProgress = {
 type ProgressCb = (p: DownloadProgress) => void;
 
 export type PageBlob = { blob: Blob; ext: string };
+
+function mangaSynopsis(description: string | undefined): string {
+	const metadataLine =
+		/^\s*(alttitle|alt title|alternative(?: title)?|type|language|artists?|groups?|pages|author|publication|published|serialization|demographic|latest(?: update)?|updated|rating|volume|vol)\s*:/i;
+	return String(description || '')
+		.split(/\n+/)
+		.filter((line) => !metadataLine.test(line))
+		.join('\n')
+		.trim();
+}
 
 function sanitizeFilename(name: string): string {
 	return (
@@ -248,6 +258,8 @@ export async function downloadChapter(opts: {
 	chapterTitle?: string;
 	mangaTitle?: string;
 	mangaId?: string;
+	synopsis?: string;
+	genres?: string[];
 	cover?: string;
 	pageUrls?: string[];
 	pageBlobs?: (PageBlob | null)[];
@@ -262,6 +274,8 @@ export async function downloadChapter(opts: {
 		chapterId,
 		mangaTitle,
 		mangaId,
+		synopsis,
+		genres,
 		cover,
 		pageUrls,
 		forceZip = false,
@@ -486,6 +500,10 @@ export async function downloadChapter(opts: {
 					source,
 					mangaId: mangaId || '',
 					mangaTitle: mangaTitle || mangaSafe,
+					synopsis: mangaSynopsis(synopsis),
+					genres: Array.isArray(genres)
+						? genres.map((genre) => String(genre).trim()).filter(Boolean)
+						: [],
 					chapterId,
 					chapterTitle,
 					savedAt: Date.now(),
@@ -563,7 +581,7 @@ export async function downloadChapter(opts: {
 			phase: 'done',
 			current: pages.length,
 			total: pages.length,
-			message: 'Saved to Offline Library'
+			message: 'Saved for offline reading'
 		});
 		return;
 	}

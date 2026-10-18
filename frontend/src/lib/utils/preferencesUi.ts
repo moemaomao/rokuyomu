@@ -14,7 +14,7 @@ export function homepageGridClass(size?: GridSize): string {
 }
 
 export function shouldHideBadge(
-	kind: 'status' | 'type' | 'source',
+	kind: 'status' | 'type' | 'source' | 'chapter',
 	prefs?: AppPreferences
 ): boolean {
 	const p = prefs ?? getPreferences();

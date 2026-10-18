@@ -361,7 +361,7 @@
 
 	function mangaHref(m: Manga): string {
 		const id = String(m.id || '').replace(/^\/+/, '');
-		return `/manga/${encodeURIComponent(m.sourceId)}/${id}`;
+		return `/series/${encodeURIComponent(m.sourceId)}/${id}`;
 	}
 
 	function proxyCover(url: string, sourceId: string): string {

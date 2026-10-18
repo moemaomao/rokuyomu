@@ -305,63 +305,70 @@
 
 	<!-- Storage info card -->
 	<div
-		class="mb-6 rounded-xl border border-amber-500/25 bg-amber-50/80 px-4 py-3.5
-			dark:border-amber-500/20 dark:bg-amber-950/30"
+		class="mb-6 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-4 py-3.5 text-[var(--text-color)]"
 	>
 		<div class="flex gap-2.5">
-			<Info class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+			<Info class="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
 			<div class="min-w-0 flex-1 space-y-2">
-				<p class="text-sm font-semibold text-amber-900 dark:text-amber-100">
+				<p class="text-sm font-semibold">
 					Where is history stored?
 				</p>
-				<p class="text-xs leading-relaxed text-amber-900/80 dark:text-amber-100/75">
+				<p class="text-xs leading-relaxed text-[var(--text-muted)]">
 					<span class="font-semibold">Browser cache</span>
 					keeps reading history in IndexedDB on this device only (max 80 titles). Covers stay as remote
 					URLs. Fast and private to the browser profile.
 				</p>
-				<p class="text-xs leading-relaxed text-amber-900/80 dark:text-amber-100/75">
+				<p class="text-xs leading-relaxed text-[var(--text-muted)]">
 					<span class="font-semibold">Local disk (offline)</span>
 					also writes
-					<code class="rounded bg-black/10 px-1 py-0.5 text-[10px] dark:bg-white/10">history.json</code>
+					<code class="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-[10px]">history.json</code>
 					and cover files under
-					<code class="rounded bg-black/10 px-1 py-0.5 text-[10px] dark:bg-white/10">{diskPathLabel}</code>.
+					<code class="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-[10px]">{diskPathLabel}</code>.
 					<span class="font-semibold">No 80-title limit</span>
 					— useful for long-term offline progress. Requires Chrome/Edge and a folder grant.
 				</p>
 
-				<div class="flex flex-wrap items-center gap-2 pt-1">
-					<button
-						type="button"
-						onclick={() => setStorageMode('cache')}
-						class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition
-							{storageMode === 'cache'
-							? 'border-zinc-400 bg-white text-zinc-900 shadow-sm dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-100'
-							: 'border-transparent bg-white/50 text-zinc-600 hover:bg-white dark:bg-zinc-900/40 dark:text-zinc-400 dark:hover:bg-zinc-800'}"
+				<div class="w-full max-w-md pt-1">
+					<div
+						class="grid w-full grid-cols-2 gap-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-subtle)] p-1"
+						role="group"
+						aria-label="History storage location"
 					>
-						<Database class="h-3.5 w-3.5" />
-						Browser cache (max 80)
-					</button>
-					<button
-						type="button"
-						onclick={() => setStorageMode('disk')}
-						disabled={!fsSupported}
-						class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition
-							{storageMode === 'disk'
-							? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-800 shadow-sm dark:text-emerald-300'
-							: 'border-transparent bg-white/50 text-zinc-600 hover:bg-white dark:bg-zinc-900/40 dark:text-zinc-400 dark:hover:bg-zinc-800'}
-							disabled:cursor-not-allowed disabled:opacity-40"
-					>
-						<HardDrive class="h-3.5 w-3.5" />
-						Local disk (unlimited)
-					</button>
+						<button
+							type="button"
+							onclick={() => setStorageMode('cache')}
+							aria-pressed={storageMode === 'cache'}
+							class="flex min-w-0 items-center justify-center gap-1.5 rounded-lg border border-transparent px-2 py-2 text-center text-xs font-medium leading-tight text-[var(--text-muted)] transition hover:bg-[var(--hover-bg)] sm:px-3
+								{storageMode === 'cache'
+								? 'bg-[color-mix(in_srgb,var(--accent)_16%,var(--bg-card))] text-[var(--text-color)] shadow-sm ring-1 ring-inset ring-[color-mix(in_srgb,var(--accent)_40%,transparent)]'
+								: ''}"
+						>
+							<Database class="h-3.5 w-3.5 shrink-0" />
+							<span>Browser cache</span>
+						</button>
+						<button
+							type="button"
+							onclick={() => setStorageMode('disk')}
+							disabled={!fsSupported}
+							aria-pressed={storageMode === 'disk'}
+							class="flex min-w-0 items-center justify-center gap-1.5 rounded-lg border border-transparent px-2 py-2 text-center text-xs font-medium leading-tight text-[var(--text-muted)] transition hover:bg-[var(--hover-bg)] sm:px-3
+								{storageMode === 'disk'
+								? 'bg-[color-mix(in_srgb,var(--accent)_16%,var(--bg-card))] text-[var(--text-color)] shadow-sm ring-1 ring-inset ring-[color-mix(in_srgb,var(--accent)_40%,transparent)]'
+								: ''}
+								disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							<HardDrive class="h-3.5 w-3.5 shrink-0" />
+							<span>Local disk</span>
+						</button>
+					</div>
 					{#if storageMode === 'disk'}
-						<span class="text-[11px] text-emerald-700 dark:text-emerald-400">
-							{history.length} titles · no 80 cap · offline JSON
-						</span>
+						<p class="mt-1.5 text-[11px] text-[var(--text-muted)]">
+							{history.length} titles · unlimited · offline JSON
+						</p>
 					{:else}
-						<span class="text-[11px] text-zinc-500">
+						<p class="mt-1.5 text-[11px] text-[var(--text-muted)]">
 							{history.length} / 80 titles · IndexedDB only
-						</span>
+						</p>
 					{/if}
 				</div>
 			</div>
@@ -382,7 +389,7 @@
 	{:else}
 		<ul class="grid grid-cols-1 gap-2 lg:grid-cols-2 lg:gap-3">
 			{#each history as entry (entry.mangaId + '-' + entry.timestamp)}
-				{@const mangaHref = `/manga/${entry.sourceId}${entry.mangaId}`}
+				{@const mangaHref = `/series/${entry.sourceId}${entry.mangaId}`}
 				{@const readHref = chapterHref(entry.sourceId, entry.chapterId)}
 				{@const pct = progressPct(entry)}
 				<li

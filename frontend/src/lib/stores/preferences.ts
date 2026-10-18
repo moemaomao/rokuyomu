@@ -21,6 +21,7 @@ export type GridSize = 'compact' | 'comfortable';
 export type DownloadMode = 'disk' | 'zip';
 export type NovelDownloadFormat = 'pdf' | 'epub';
 export type HistoryStorageMode = 'cache' | 'disk';
+export type MangaReaderMode = 'webtoon' | 'page' | 'ltr';
 export type HideOfflineFolders = {
 	root: boolean;
 	library: boolean;
@@ -35,6 +36,7 @@ export type AppPreferences = {
 		status: boolean;
 		type: boolean;
 		source: boolean;
+		chapter: boolean;
 	};
 	hideR18Sources: boolean;
 	blurR18Covers: boolean;
@@ -43,6 +45,8 @@ export type AppPreferences = {
 	incognitoSession: boolean;
 	downloadMode: DownloadMode;
 	novelDownloadFormat: NovelDownloadFormat;
+	mangaReaderMode: MangaReaderMode;
+	mangaDataSaver: boolean;
 	autoDownloadOnRead: boolean;
 	historyStorageMode: HistoryStorageMode;
 	hideOfflineFolders: HideOfflineFolders;
@@ -53,7 +57,7 @@ const STORAGE_KEY = 'rokuyomu_preferences';
 const DEFAULTS: AppPreferences = {
 	theme: 'dark',
 	gridSize: 'compact',
-	hideBadges: { status: false, type: false, source: false },
+	hideBadges: { status: false, type: false, source: false, chapter: false },
 	hideR18Sources: false,
 	blurR18Covers: false,
 	dontSaveHistory: false,
@@ -61,6 +65,8 @@ const DEFAULTS: AppPreferences = {
 	incognitoSession: false,
 	downloadMode: 'disk',
 	novelDownloadFormat: 'pdf',
+	mangaReaderMode: 'webtoon',
+	mangaDataSaver: false,
 	autoDownloadOnRead: false,
 	historyStorageMode: 'cache',
 	hideOfflineFolders: {
@@ -85,8 +91,9 @@ function load(): AppPreferences {
 	if (!browser) return { ...DEFAULTS, hideBadges: { ...DEFAULTS.hideBadges } };
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return { ...DEFAULTS, hideBadges: { ...DEFAULTS.hideBadges } };
-		const parsed = JSON.parse(raw) as Partial<AppPreferences>;
+		const parsed: Partial<AppPreferences> = raw
+			? (JSON.parse(raw) as Partial<AppPreferences>)
+			: {};
 		const t = parsed.theme as string | undefined;
 		if (t === 'amoled' || t === 'sepia' || t === 'midnight' || t === 'cyan' || t === 'pink') {
 			parsed.theme = 'dark';
@@ -110,6 +117,18 @@ function load(): AppPreferences {
 			hideBadges: { ...DEFAULTS.hideBadges, ...(parsed.hideBadges || {}) },
 			autoDownloadOnRead: Boolean(parsed.autoDownloadOnRead),
 			novelDownloadFormat: parsed.novelDownloadFormat === 'epub' ? 'epub' : 'pdf',
+			mangaReaderMode:
+				parsed.mangaReaderMode === 'page' ||
+				parsed.mangaReaderMode === 'webtoon' ||
+				parsed.mangaReaderMode === 'ltr'
+					? parsed.mangaReaderMode
+					: localStorage.getItem('readerMode') === 'page'
+						? 'page'
+						: 'webtoon',
+			mangaDataSaver:
+				typeof parsed.mangaDataSaver === 'boolean'
+					? parsed.mangaDataSaver
+					: localStorage.getItem('dataSaver') === 'true',
 			historyStorageMode: parsed.historyStorageMode === 'disk' ? 'disk' : 'cache',
 			hideOfflineFolders: hideFolders
 		};
@@ -147,6 +166,26 @@ export function setPreferences(partial: Partial<AppPreferences>): AppPreferences
 	};
 	try {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+	} catch {
+		/* ignore */
+	}
+	window.dispatchEvent(new CustomEvent('preferences-changed', { detail: prefs }));
+	return prefs;
+}
+
+export function resetPreferences(): AppPreferences {
+	prefs = {
+		...DEFAULTS,
+		hideBadges: { ...DEFAULTS.hideBadges },
+		hideOfflineFolders: { ...DEFAULTS.hideOfflineFolders }
+	};
+	if (!browser) return prefs;
+
+	try {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+		localStorage.removeItem('readerMode');
+		localStorage.removeItem('dataSaver');
+		localStorage.removeItem('imageQuality');
 	} catch {
 		/* ignore */
 	}

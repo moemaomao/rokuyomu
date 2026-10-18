@@ -1,24 +1,28 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto, invalidateAll } from '$app/navigation';
 	import {
 		ChevronsUp,
 		Download,
 		Settings,
-		CloudDownload
+		BookOpen,
+		ChevronDown,
+		WifiOff
 	} from 'lucide-svelte';
 	import { saveReading } from '$lib/stores/history';
-	import { markChapterRead } from '$lib/utils/readChapters';
-	import { downloadChapter } from '$lib/utils/downloadChapter';
-import { autoDownloadMangaChapter } from '$lib/utils/autoDownloadOnRead';
+	import { getReadSets, markChapterRead } from '$lib/utils/readChapters';
+	import { downloadChapter } from '$lib/utils/downloadManga';
+	import { autoDownloadMangaChapter } from '$lib/utils/autoDownloadOnRead';
 	import {
 		getOfflineMangaChapter,
 		hasOfflineMangaChapter,
+		listOfflineMangaChapters,
 		mangaPagesToObjectUrls
 	} from '$lib/utils/offlineChapter';
-	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/library.svelte';
+	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/download.svelte';
+	import { getPreferences, setPreferences } from '$lib/stores/preferences';
 
 	const { data }: { data: PageData } = $props();
 let {
@@ -35,6 +39,8 @@ let {
 let pages = $state<string[]>([]);
 	let offlineMode = $state(false);
 	let offlineObjectUrls = $state<string[]>([]);
+	let readChapterIds = $state(new Set<string>());
+	let readChapterNumbers = $state(new Set<number>());
 
 function normChapterId(id: unknown): string {
 	return String(id ?? '').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -44,6 +50,33 @@ function chapterIdMatches(a: string, b: string): boolean {
 	if (!a || !b) return false;
 	if (a === b) return true;
 	return a.endsWith(b) || b.endsWith(a);
+}
+
+function refreshReadChapters() {
+	const mangaId = String(mangaInfo?.id || '');
+	if (!source || !mangaId) {
+		readChapterIds = new Set();
+		readChapterNumbers = new Set();
+		return;
+	}
+	const sets = getReadSets(source, mangaId);
+	readChapterIds = sets.ids;
+	readChapterNumbers = sets.nums;
+}
+
+function isReadChapter(chapter: { id?: string | number; number?: number } | null): boolean {
+	if (!chapter) return false;
+	const chapterKey = normChapterId(chapter.id);
+	if (
+		chapterKey &&
+		[...readChapterIds].some((readId) =>
+			chapterIdMatches(normChapterId(readId), chapterKey)
+		)
+	) {
+		return true;
+	}
+	const number = Number(chapter.number);
+	return Number.isFinite(number) && number > 0 && readChapterNumbers.has(number);
 }
 
 function revokeOfflineUrls() {
@@ -136,7 +169,7 @@ $effect(() => {
 
 	// ── Reader state ─────────────────────────────────────────────────────────
 	let currentPageIndex = $state(0);
-	let currentMode = $state<'webtoon' | 'page'>('webtoon');
+	let currentMode = $state<'webtoon' | 'page' | 'ltr'>('webtoon');
 	let showControls = $state(true);
 	let scrollProgress = $state(0);
 	let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -145,11 +178,36 @@ $effect(() => {
 
 	let isMenuOpen = $state(false);
 	let showChapterList = $state(false);
+	let chapterListContainer: HTMLDivElement | null = null;
+	let chapterListElement: HTMLDivElement | null = null;
 	let dataSaver = $state(false);
 	let imageQuality = $state(600);
 	let imgEpoch = $state(0);
 	let chapterLoading = $state(true);
 	let pendingChapterId = $state<string | null>(null);
+
+	$effect(() => {
+		if (!showChapterList) return;
+		const activeChapterId = normChapterId(chapterId);
+		void tick().then(() => {
+			if (!showChapterList || !chapterListElement) return;
+			const activeChapter = [
+				...chapterListElement.querySelectorAll<HTMLElement>('[data-chapter-id]')
+			].find((element) => element.dataset.chapterId === activeChapterId);
+			activeChapter?.scrollIntoView({ block: 'nearest' });
+		});
+	});
+
+	function handlePointerDown(e: PointerEvent) {
+		if (
+			showChapterList &&
+			chapterListContainer &&
+			e.target instanceof Node &&
+			!chapterListContainer.contains(e.target)
+		) {
+			showChapterList = false;
+		}
+	}
 
 	// ── Theme ──────────────────────────────────────────────────
 	let isDarkMode = $state(true);
@@ -166,11 +224,11 @@ $effect(() => {
 
 	// ── Download ─────────────────────────────────────────────────────────────
 	let isDownloading = $state(false);
-	let downloadBannerActive = $state(false);
 	let downloadText = $state('Preparing download...');
-	let downloadCount = $state('0/0');
 	let downloadPercent = $state(0);
 	let isOfflineChapter = $state(false);
+	let downloadingChapterId = $state('');
+	let offlineChapterIds = $state(new Set<string>());
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 	function proxyImage(url: string, forDownload = false): string {
@@ -204,7 +262,7 @@ $effect(() => {
 		if (!browser) return 0;
 		const total = pages?.length || 0;
 
-		if (currentMode === 'page') {
+		if (currentMode !== 'webtoon') {
 			if (total <= 1) return total === 1 ? 100 : 0;
 			const idx = Math.max(0, Math.min(currentPageIndex, total - 1));
 			if (idx >= total - 1) return 100;
@@ -314,9 +372,9 @@ $effect(() => {
 			isMenuOpen = false;
 			showChapterList = false;
 		}
-		if (currentMode === 'page') {
-			if (e.key === 'ArrowLeft') prevPage();
-			if (e.key === 'ArrowRight') nextPage();
+		if (currentMode !== 'webtoon') {
+			if (e.key === 'ArrowLeft') currentMode === 'ltr' ? prevPage() : nextPage();
+			if (e.key === 'ArrowRight') currentMode === 'ltr' ? nextPage() : prevPage();
 		}
 	}
 
@@ -326,14 +384,15 @@ $effect(() => {
 	}
 
 	function toggleMode() {
-		currentMode = currentMode === 'webtoon' ? 'page' : 'webtoon';
-		localStorage.setItem('readerMode', currentMode);
+		currentMode =
+			currentMode === 'webtoon' ? 'page' : currentMode === 'page' ? 'ltr' : 'webtoon';
+		setPreferences({ mangaReaderMode: currentMode });
 		currentPageIndex = 0;
 	}
 
 	function toggleDataSaver() {
 		dataSaver = !dataSaver;
-		localStorage.setItem('dataSaver', String(dataSaver));
+		setPreferences({ mangaDataSaver: dataSaver });
 		imgEpoch++;
 		currentPageIndex = 0;
 		if (currentMode === 'webtoon') window.scrollTo(0, 0);
@@ -397,7 +456,7 @@ $effect(() => {
 					}
 				}
 				try {
-					await goto(`/reader/${source}/${cleanId}`, {
+					await goto(`/manga-reader/${source}/${cleanId}`, {
 						replaceState: true,
 						invalidateAll: false,
 						noScroll: true
@@ -416,7 +475,7 @@ $effect(() => {
 		pages = [];
 
 		try {
-			await goto(`/reader/${source}/${cleanId}`, {
+			await goto(`/manga-reader/${source}/${cleanId}`, {
 				replaceState: true,
 				invalidateAll: true
 			});
@@ -436,28 +495,44 @@ $effect(() => {
 		}, 12000);
 	}
 
+	function isChapterOffline(id: unknown): boolean {
+		const chapterId = normChapterId(id);
+		return Boolean(
+			chapterId &&
+				[...offlineChapterIds].some((offlineId) =>
+					chapterIdMatches(normChapterId(offlineId), chapterId)
+				)
+		);
+	}
+
 	async function refreshOfflineStatus() {
 		if (!browser || !source || !chapterId) {
 			isOfflineChapter = false;
+			offlineChapterIds = new Set();
 			return;
 		}
 		const cid = String(chapterId ?? '');
 		try {
-		
-			if (await hasOfflineMangaChapter(String(source), cid)) {
-				isOfflineChapter = true;
-				return;
-			}
-	
 			if (mangaInfo?.id) {
 				await ensureLibraryLoaded();
 				const ids = getOfflineChapterIds(source, String(mangaInfo.id));
+				const savedChapters = await listOfflineMangaChapters(source, String(mangaInfo.id));
+				offlineChapterIds = new Set([
+					...ids,
+					...savedChapters.map((chapter) => chapter.chapterId)
+				]);
 				const alt = cid.startsWith('/') ? cid.slice(1) : `/${cid}`;
-				isOfflineChapter =
-					ids.has(cid) || ids.has(alt) || ids.has(cid.replace(/^\/+/, ''));
+				isOfflineChapter = [...offlineChapterIds].some((id) =>
+					chapterIdMatches(normChapterId(id), normChapterId(cid))
+				) || ids.has(cid) || ids.has(alt);
+				if (!isOfflineChapter && await hasOfflineMangaChapter(String(source), cid)) {
+					isOfflineChapter = true;
+					offlineChapterIds = new Set([...offlineChapterIds, cid]);
+				}
 				return;
 			}
-			isOfflineChapter = false;
+			isOfflineChapter = await hasOfflineMangaChapter(String(source), cid);
+			offlineChapterIds = isOfflineChapter ? new Set([cid]) : new Set();
 		} catch {
 			isOfflineChapter = false;
 		}
@@ -472,33 +547,51 @@ $effect(() => {
 
 	$effect(() => {
 		if (!browser) return;
+		refreshReadChapters();
+		const onReadChaptersChanged = () => refreshReadChapters();
+		window.addEventListener('read-chapters-changed', onReadChaptersChanged);
 		const onLibrary = () => void refreshOfflineStatus();
 		window.addEventListener('library-changed', onLibrary);
-		return () => window.removeEventListener('library-changed', onLibrary);
+		return () => {
+			window.removeEventListener('read-chapters-changed', onReadChaptersChanged);
+			window.removeEventListener('library-changed', onLibrary);
+		};
 	});
 
-	async function handleDownload() {
-		if (isDownloading || !chapterId || !source) return;
+	async function handleDownload(chapter: { id?: string | number; title?: string } | null = null) {
+		const targetChapterId = String(chapter?.id ?? chapterId ?? '');
+		if (isDownloading || !targetChapterId || !source) return;
 		isDownloading = true;
-		downloadBannerActive = true;
+		downloadingChapterId = targetChapterId;
 		downloadPercent = 0;
-		downloadCount = '0/0';
 		downloadText = 'Preparing download…';
 
 		try {
 			await downloadChapter({
 				source: String(source),
-				chapterId: String(chapterId),
-				pageUrls: pages?.length ? [...pages] : undefined,
-				useReaderDom: true,
+				chapterId: targetChapterId,
+				pageUrls:
+					chapterIdMatches(normChapterId(targetChapterId), normChapterId(chapterId)) &&
+					pages?.length
+						? [...pages]
+						: undefined,
+				useReaderDom: chapterIdMatches(
+					normChapterId(targetChapterId),
+					normChapterId(chapterId)
+				),
 				concurrency: 6,
 				chapterTitle:
-					(currentChapter as { title?: string } | null)?.title ||
-					String(chapterId),
+					chapter?.title ||
+					(chapterIdMatches(normChapterId(targetChapterId), normChapterId(chapterId))
+						? (currentChapter as { title?: string } | null)?.title
+						: undefined) ||
+					targetChapterId,
 				mangaTitle: (mangaInfo as { title?: string } | null)?.title || 'Manga',
 				mangaId: (mangaInfo as { id?: string } | null)?.id
 					? String((mangaInfo as { id?: string }).id)
 					: undefined,
+				synopsis: (mangaInfo as { description?: string } | null)?.description,
+				genres: (mangaInfo as { genres?: string[] } | null)?.genres,
 				cover: (mangaInfo as { cover?: string } | null)?.cover || '',
 				onProgress: (p) => {
 					if (p.phase === 'pages') {
@@ -506,32 +599,34 @@ $effect(() => {
 						downloadPercent = 5;
 					} else if (p.phase === 'images') {
 						downloadText = p.message || `Downloading ${p.current}/${p.total}`;
-						downloadCount = `${p.current}/${p.total}`;
 						downloadPercent =
 							p.total > 0 ? Math.round((p.current / p.total) * 90) : 10;
 					} else if (p.phase === 'zip' || p.phase === 'disk') {
 						downloadText = p.message || 'Saving…';
 						downloadPercent = 95;
 					} else if (p.phase === 'done') {
-						downloadText = p.message || 'Saved to Offline Library';
+						downloadText = p.message || 'Saved for offline reading';
 						downloadPercent = 100;
 					} else if (p.phase === 'error') {
 						downloadText = p.message || 'Failed';
 					}
 				}
 			});
-			await refreshOfflineStatus();
+			offlineChapterIds = new Set([...offlineChapterIds, targetChapterId]);
+			if (chapterIdMatches(normChapterId(targetChapterId), normChapterId(chapterId))) {
+				await refreshOfflineStatus();
+			}
 			downloadPercent = 100;
 			if (!downloadText || downloadText.startsWith('Downloading')) {
-				downloadText = isOfflineChapter ? 'Saved to Offline Library' : 'Done!';
+				downloadText = isOfflineChapter ? 'Saved for offline reading' : 'Done!';
 			}
 		} catch (err: any) {
 			downloadText = 'Failed: ' + (err?.message || 'unknown');
 		}
 
 		setTimeout(() => {
-			downloadBannerActive = false;
 			isDownloading = false;
+			downloadingChapterId = '';
 		}, 1500);
 	}
 
@@ -551,9 +646,9 @@ $effect(() => {
 			attributeFilter: ['class']
 		});
 
-		const savedMode = localStorage.getItem('readerMode');
-		if (savedMode === 'page' || savedMode === 'webtoon') currentMode = savedMode;
-		dataSaver = localStorage.getItem('dataSaver') === 'true';
+		const preferences = getPreferences();
+		currentMode = preferences.mangaReaderMode;
+		dataSaver = preferences.mangaDataSaver;
 		imageQuality = parseInt(localStorage.getItem('imageQuality') || '600', 10);
 
 		return () => obs.disconnect();
@@ -587,7 +682,7 @@ $effect(() => {
 		const _mode = currentMode;
 		const _idx = currentPageIndex;
 		const _len = pages?.length || 0;
-		if (_mode === 'page' && _len > 0) {
+		if (_mode !== 'webtoon' && _len > 0) {
 			onReadingProgress();
 		}
 	});
@@ -640,6 +735,8 @@ $effect(() => {
 			chapterTitle: chTitle,
 			mangaTitle: (mangaInfo as { title?: string } | null)?.title || 'Manga',
 			mangaId: (mangaInfo as { id?: string } | null)?.id || '',
+			synopsis: (mangaInfo as { description?: string } | null)?.description,
+			genres: (mangaInfo as { genres?: string[] } | null)?.genres,
 			cover: (mangaInfo as { cover?: string } | null)?.cover || '',
 			pageUrls: list.filter(Boolean)
 		}).then(() => refreshOfflineStatus());
@@ -647,7 +744,7 @@ $effect(() => {
 
 </script>
 
-<svelte:window onkeydown={handleKeydown} onscroll={handleScroll} />
+<svelte:window onkeydown={handleKeydown} onpointerdown={handlePointerDown} onscroll={handleScroll} />
 
 <svelte:head>
 	<title>{pageTitle}</title>
@@ -690,46 +787,8 @@ $effect(() => {
 		</p>
 	</div>
 
-	{#if downloadBannerActive}
-		<div class="sticky top-0 z-[90] mx-auto mb-1.5 w-full max-w-[900px] px-3">
-			<div
-				class="flex items-center gap-2.5 rounded-xl border px-3 py-2 backdrop-blur-md
-					{isDarkMode
-					? 'border-emerald-500/25 bg-black/50'
-					: 'border-emerald-500/40 bg-white/80'}"
-			>
-				<div class="text-emerald-500 {isDownloading ? 'animate-spin' : ''}">
-					<CloudDownload class="h-4 w-4" />
-				</div>
-				<div class="min-w-0 flex-1">
-					<p
-						class="mb-1 truncate text-[0.76rem] font-medium
-							{isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}"
-					>
-						{downloadText}
-					</p>
-					<div
-						class="h-1 w-full overflow-hidden rounded-full
-							{isDarkMode ? 'bg-white/10' : 'bg-zinc-200'}"
-					>
-						<div
-							class="h-full rounded-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all"
-							style="width: {downloadPercent}%"
-						></div>
-					</div>
-				</div>
-				<span
-					class="min-w-[40px] text-right text-[0.72rem] font-semibold
-						{isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}"
-				>
-					{downloadCount}
-				</span>
-			</div>
-		</div>
-	{/if}
-
 	<!-- Reader -->
-	<main id="reader" class="mx-auto w-full max-w-[900px] flex-1 pb-20">
+	<main id="reader" class="relative mx-auto w-full max-w-[900px] flex-1 pb-20">
 		{#if chapterLoading}
 			<div
 				class="flex min-h-[50vh] flex-col items-center justify-center gap-3 py-16 text-center
@@ -772,17 +831,21 @@ $effect(() => {
 				{/key}
 			</div>
 			<button
-				onclick={prevPage}
-				disabled={currentPageIndex === 0}
-				class="fixed top-1/2 left-2 z-[200] -translate-y-1/2 border-0 bg-transparent text-[34px] disabled:opacity-20
+				onclick={() => (currentMode === 'ltr' ? prevPage() : nextPage())}
+				disabled={currentMode === 'ltr'
+					? currentPageIndex === 0
+					: currentPageIndex >= pages.length - 1}
+				class="absolute top-1/2 left-2 z-[200] -translate-y-1/2 border-0 bg-transparent text-[34px] disabled:opacity-20
 					{isDarkMode ? 'text-white/80' : 'text-zinc-800/80'}"
 			>
 				‹
 			</button>
 			<button
-				onclick={nextPage}
-				disabled={currentPageIndex >= pages.length - 1}
-				class="fixed top-1/2 right-2 z-[200] -translate-y-1/2 border-0 bg-transparent text-[34px] disabled:opacity-20
+				onclick={() => (currentMode === 'ltr' ? nextPage() : prevPage())}
+				disabled={currentMode === 'ltr'
+					? currentPageIndex >= pages.length - 1
+					: currentPageIndex === 0}
+				class="absolute top-1/2 right-2 z-[200] -translate-y-1/2 border-0 bg-transparent text-[34px] disabled:opacity-20
 					{isDarkMode ? 'text-white/80' : 'text-zinc-800/80'}"
 			>
 				›
@@ -799,15 +862,15 @@ $effect(() => {
 	{/if}
 
 	<div
-		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-[18px] border-t px-5 py-3
-			{isDarkMode ? 'border-white/5' : 'border-zinc-300/60 bg-white/70 backdrop-blur-md'}"
+		class="fixed right-0 bottom-0 left-0 z-[100] flex justify-center gap-2 border-t px-2 py-3 sm:gap-[18px] sm:px-5
+			{isDarkMode ? 'border-white/5' : 'border-transparent'}"
 	>
 		<button
 			onclick={() => prevChapter && !chapterLoading && goToChapter(prevChapter)}
 			disabled={!prevChapter || chapterLoading}
 			aria-label="Previous chapter"
 			title="Previous chapter"
-			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
+			class="flex min-w-[64px] items-center justify-center gap-1 rounded-[15px] border px-2 py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[90px] sm:px-[15px]
 				{isDarkMode
 					? 'reader-nav-btn reader-nav-btn-dark'
 					: 'reader-nav-btn reader-nav-btn-light'}"
@@ -826,21 +889,142 @@ $effect(() => {
 			</svg>
 		</button>
 
-		{#if offlineMode}
-			<span
-				class="flex min-w-[72px] items-center justify-center self-center rounded-full bg-emerald-600/90 px-3 py-1.5 text-[10px] font-bold tracking-wide text-white shadow-sm"
-				title="Reading from offline storage"
+		<div class="relative pointer-events-auto" bind:this={chapterListContainer}>
+			<button
+				type="button"
+				class="flex min-w-[72px] max-w-[min(42vw,13rem)] items-center justify-center gap-1 rounded-[15px] border px-2 py-[7px] text-[0.82em] transition
+					{isDarkMode
+						? 'reader-nav-btn reader-nav-btn-dark'
+						: 'reader-nav-btn reader-nav-btn-light'}"
+				aria-label="Open chapter list"
+				aria-expanded={showChapterList}
+				aria-controls="manga-chapter-list"
+				onclick={() => {
+					showChapterList = !showChapterList;
+					isMenuOpen = false;
+				}}
 			>
-				OFFLINE
-			</span>
-		{/if}
+				<BookOpen class="h-4 w-4 shrink-0" />
+				<span class="min-w-0 truncate">
+					{currentChapter?.title || `Chapter ${currentChapter?.number ?? ''}`}
+				</span>
+				<ChevronDown class="h-3.5 w-3.5 shrink-0 transition {showChapterList ? 'rotate-180' : ''}" />
+			</button>
+			{#if showChapterList}
+				<div
+					id="manga-chapter-list"
+					bind:this={chapterListElement}
+					class="absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[120] max-h-[60vh] w-[min(22rem,calc(100vw-1rem))] -translate-x-1/2 overflow-y-auto rounded-xl border shadow-xl
+						{isDarkMode
+							? 'border-white/10 bg-zinc-900/95 text-zinc-100'
+							: 'border-zinc-200 bg-white/95 text-zinc-800'}"
+				>
+					<div
+						class="sticky top-0 border-b px-3 py-2 text-xs font-semibold backdrop-blur
+							{isDarkMode ? 'border-white/10 bg-zinc-900/95' : 'border-zinc-200 bg-white/95'}"
+					>
+						Chapter list
+					</div>
+					{#each [...(chapters || [])].reverse() as chapter, i (`${chapter.id ?? chapter.title ?? i}`)}
+						<div
+							class="relative flex items-center overflow-hidden border-b px-2 last:border-b-0 transition
+								{isDarkMode
+									? isReadChapter(chapter)
+										? 'border-white/5 bg-white/[0.035] text-zinc-500'
+										: 'border-white/5'
+									: isReadChapter(chapter)
+										? 'border-zinc-100 bg-zinc-50 text-zinc-400'
+										: 'border-zinc-100'}"
+						>
+							{#if isDownloading && downloadingChapterId === String(chapter.id ?? '')}
+								<div class="absolute inset-x-0 top-0 z-10 h-1 overflow-hidden bg-zinc-800/80">
+									<div
+										class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+										style="width: {downloadPercent}%"
+									></div>
+								</div>
+							{/if}
+							<button
+								type="button"
+								class="min-w-0 flex-1 truncate py-2.5 pr-2 text-left text-sm transition
+									{isReadChapter(chapter)
+										? 'opacity-60'
+										: isDarkMode
+											? 'hover:bg-white/10'
+											: 'hover:bg-zinc-100'}
+									{chapterIdMatches(normChapterId(chapter.id), normChapterId(chapterId)) ||
+									chapterIdMatches(normChapterId(chapter.id), normChapterId(currentChapter?.id))
+										? 'reader-chapter-active font-medium'
+										: ''}"
+								data-chapter-id={normChapterId(chapter.id)}
+								aria-current={chapterIdMatches(normChapterId(chapter.id), normChapterId(chapterId))
+									? 'page'
+									: undefined}
+								onclick={() => goToChapter(chapter)}
+							>
+								{chapter.title}
+							</button>
+							{#if isChapterOffline(chapter.id)}
+								<span
+									class="flex h-8 w-8 shrink-0 items-center justify-center text-emerald-500"
+									role="status"
+									title="Chapter available offline"
+									aria-label="Chapter available offline"
+								>
+									<WifiOff class="h-4 w-4" />
+								</span>
+							{/if}
+							<button
+								type="button"
+								class="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition
+									{isChapterOffline(chapter.id)
+										? 'text-violet-500'
+										: isDarkMode
+											? 'text-zinc-400 hover:bg-white/10 hover:text-emerald-400'
+											: 'text-zinc-500 hover:bg-zinc-100 hover:text-emerald-600'}"
+								aria-label="{isChapterOffline(chapter.id) ? 'Chapter sudah diunduh offline' : 'Unduh chapter'}: {chapter.title || 'Chapter'}"
+								title={downloadingChapterId === String(chapter.id ?? '')
+									? downloadText
+									: isChapterOffline(chapter.id)
+										? 'Sudah offline'
+										: 'Unduh chapter'}
+								disabled={isDownloading || isChapterOffline(chapter.id) || !chapter.id}
+								onclick={() => handleDownload(chapter)}
+							>
+								{#if downloadingChapterId === String(chapter.id ?? '')}
+									<span class="text-[9px] font-semibold tabular-nums">{downloadPercent}%</span>
+								{:else if isChapterOffline(chapter.id)}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-4 w-4"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2.5"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M20 6 9 17l-5-5" />
+									</svg>
+								{:else}
+									<Download class="h-4 w-4" />
+								{/if}
+							</button>
+						</div>
+					{:else}
+						<p class="px-3 py-4 text-center text-xs opacity-60">No chapters available</p>
+					{/each}
+				</div>
+			{/if}
+		</div>
 
 		<button
 			onclick={() => nextChapter && !chapterLoading && goToChapter(nextChapter)}
 			disabled={!nextChapter || chapterLoading}
 			aria-label="Next chapter"
 			title="Next chapter"
-			class="flex min-w-[90px] items-center justify-center gap-1 rounded-[15px] border px-[15px] py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30
+			class="flex min-w-[64px] items-center justify-center gap-1 rounded-[15px] border px-2 py-[5px] text-[0.92em] backdrop-blur-md transition disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[90px] sm:px-[15px]
 				{isDarkMode
 					? 'reader-nav-btn reader-nav-btn-dark'
 					: 'reader-nav-btn reader-nav-btn-light'}"
@@ -869,24 +1053,6 @@ $effect(() => {
 		<ChevronsUp class="h-5 w-5" />
 	</button>
 
-	<button
-		onclick={handleDownload}
-		disabled={isDownloading || !pages?.length}
-		class="flex h-10 w-10 items-center justify-center rounded-full border-0 backdrop-blur-md transition hover:scale-108 disabled:opacity-50
-			{isOfflineChapter
-				? 'bg-[rgba(139,92,246,0.25)] text-[#c4b5fd] hover:bg-[rgba(139,92,246,0.35)]'
-				: 'bg-[rgba(0,200,120,0.15)] text-[#35d98a] hover:bg-[rgba(0,200,120,0.25)]'}"
-		title={isOfflineChapter ? 'Sudah di Offline Library (download ulang)' : 'Download ke Offline Library'}
-	>
-		{#if isOfflineChapter}
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-				<path d="M20 6 9 17l-5-5" />
-			</svg>
-		{:else}
-			<Download class="h-5 w-5" />
-		{/if}
-	</button>
-
 	<div class="relative z-[330]">
 		<button
 			onclick={() => {
@@ -910,7 +1076,11 @@ $effect(() => {
 					onclick={toggleMode}
 					class="reader-menu-btn w-full rounded-lg border-0 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition"
 				>
-					Mode: {currentMode === 'webtoon' ? 'Webtoon' : 'Page'}
+					Mode: {currentMode === 'webtoon'
+						? 'Webtoon'
+						: currentMode === 'ltr'
+							? 'LTR'
+							: 'Page (RTL)'}
 				</button>
 
 				<select
@@ -924,43 +1094,6 @@ $effect(() => {
 						</option>
 					{/each}
 				</select>
-
-				<button
-					onclick={() => (showChapterList = !showChapterList)}
-					class="reader-menu-btn w-full rounded-lg border-0 px-3 py-2.5 text-left text-[0.87em] font-medium text-white transition"
-				>
-					Chapter List
-				</button>
-
-				{#if showChapterList}
-	<div
-		class="max-h-[280px] overflow-y-auto rounded-lg py-1
-			{isDarkMode ? 'bg-[rgba(25,25,25,0.8)]' : 'bg-zinc-100'}"
-	>
-		{#each [...(chapters || [])].reverse() as chapter}
-			<button
-				onclick={() => goToChapter(chapter)}
-				class="w-full border-b px-3 py-2 text-left text-[0.84em] transition last:border-b-0
-					{isDarkMode
-						? 'border-zinc-600/80 text-white hover:bg-white/10'
-						: 'border-zinc-200 text-zinc-800 hover:bg-zinc-200/80'}
-					{chapter.id === chapterId || chapter.id === currentChapter?.id
-						? 'reader-chapter-active font-medium'
-						: ''}"
-			>
-				{chapter.title}
-			</button>
-		{/each}
-		{#if !chapters?.length}
-			<p
-				class="px-3 py-2 text-center text-[0.84em]
-					{isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}"
-			>
-				Empty
-			</p>
-		{/if}
-	</div>
-{/if}
 
 				<div
 					class="flex items-center justify-between px-0.5 py-1 text-[0.87em]

@@ -5,13 +5,13 @@
 		Download,
 		Upload,
 		HardDrive,
-		Info,
 		Check,
 		AlertTriangle,
 		Database,
 		SlidersHorizontal,
 		Trash2,
 		RefreshCw,
+		RotateCcw,
 		Palette,
 		EyeOff,
 		Shield,
@@ -42,6 +42,7 @@
 	import {
 		getPreferences,
 		setPreferences,
+		resetPreferences,
 		subscribePreferences,
 		applyThemeFromPreferences,
 		type AppPreferences,
@@ -107,6 +108,11 @@
 		}
 	}
 
+	function updateMangaReaderMode(value: string) {
+		const mode = value === 'page' || value === 'ltr' ? value : 'webtoon';
+		updatePref('mangaReaderMode', mode);
+	}
+
 	function currentDownloadMode(): DownloadMode {
 		return prefs.downloadMode === 'zip' ? 'zip' : 'disk';
 	}
@@ -116,14 +122,28 @@
 		msg =
 			mode === 'zip'
 				? 'Download mode: ZIP / file (browser download).'
-				: 'Download mode: Local folder (Rokuyomu/Library).';
+				: 'Download mode: Local folder (Rokuyomu/Download).';
 		err = '';
 	}
 
-	function updateBadge(key: 'status' | 'type' | 'source', value: boolean) {
+	function updateBadge(key: 'status' | 'type' | 'source' | 'chapter', value: boolean) {
 		prefs = setPreferences({
 			hideBadges: { ...prefs.hideBadges, [key]: value }
 		});
+	}
+
+	function resetAllSettings() {
+		if (
+			!confirm(
+				'Reset all settings to their defaults? This will not delete your library, history, or downloads.'
+			)
+		) {
+			return;
+		}
+		prefs = resetPreferences();
+		isDark = applyThemeFromPreferences(prefs.theme);
+		msg = 'All settings have been reset to their defaults.';
+		err = '';
 	}
 
 	function resetAgeGate() {
@@ -234,7 +254,7 @@
 	async function clearLibraryMeta() {
 		if (
 			!confirm(
-				'Clear offline library metadata in IndexedDB? Disk folder RokuyomuLibrary is NOT deleted. You can re-sync from bookmarks.'
+				'Clear downloaded-title metadata in IndexedDB? Files in Rokuyomu/Download are NOT deleted. You can re-sync from bookmarks.'
 			)
 		) {
 			return;
@@ -498,7 +518,8 @@
 				{#each [
 					{ key: 'status' as const, label: 'Status (Ongoing / Completed / …)' },
 					{ key: 'type' as const, label: 'Type (Manga / Manhwa / Doujin / …)' },
-					{ key: 'source' as const, label: 'Source name' }
+					{ key: 'source' as const, label: 'Source name' },
+					{ key: 'chapter' as const, label: 'Chapter badge' }
 				] as item}
 					<label
 						class="flex cursor-pointer items-center gap-3 text-sm text-zinc-800 dark:text-zinc-200"
@@ -581,7 +602,7 @@
 		<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Save destination</p>
 		<p class="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 			Default is <strong class="text-zinc-700 dark:text-zinc-300">Local folder</strong>
-			(Rokuyomu/Library/…). First download may ask you to pick a parent folder (Chrome / Edge).
+			(Rokuyomu/Download/…). First download may ask you to pick a parent folder (Chrome / Edge).
 		</p>
 
 		{#if !supportsFileSystemAccess()}
@@ -626,7 +647,7 @@
 						{/if}
 					</span>
 					<span class="text-[11px] text-zinc-500 dark:text-zinc-400"
-						>Save into Rokuyomu/Library (default)</span
+						>Save into Rokuyomu/Download (default)</span
 					>
 				</span>
 			</label>
@@ -755,7 +776,7 @@
 					const on = (e.currentTarget as HTMLInputElement).checked;
 					prefs = setPreferences({ autoDownloadOnRead: on });
 					storageMsg = on
-						? 'Auto-download on: chapters save to Offline Library while reading'
+						? 'Auto-download on: chapters save for offline reading'
 						: 'Auto-download off';
 					setTimeout(() => (storageMsg = ''), 2500);
 				}}
@@ -765,7 +786,7 @@
 					Auto-download while reading
 				</span>
 				<span class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-					Save chapters to Offline Library automatically when you open them in the reader (no Download
+					Save chapters automatically for offline reading when you open them in the reader (no Download
 					button needed). Manga uses image storage; novels keep text offline. Does not trigger ZIP /
 					PDF / EPUB browser downloads.
 				</span>
@@ -844,10 +865,10 @@
 			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Backup & restore</h2>
 		</div>
 		<p class="mb-4 text-xs leading-relaxed text-zinc-500">
-			Export bookmarks, reading history, library metadata, notifications, XP stats, and local
+			Export bookmarks, reading history, downloaded-title metadata, notifications, XP stats, and local
 			preferences (theme, preferred sources, novel reader settings) as a JSON file. Offline chapter
 			<strong>images/text blobs are not included</strong> — re-download chapters after import if
-			needed. Your disk folder <code class="text-[11px]">RokuyomuLibrary</code> is separate.
+			needed. Your disk folder <code class="text-[11px]">Rokuyomu/Download</code> is separate.
 		</p>
 
 		<div class="flex flex-wrap gap-2">
@@ -981,7 +1002,7 @@
 		</div>
 		<p class="mb-4 text-xs leading-relaxed text-zinc-500">
 			Browser storage estimate and IndexedDB counts. Disk folder
-			<code class="text-[11px]">RokuyomuLibrary</code> (File System Access) is separate and not cleared here.
+			<code class="text-[11px]">Rokuyomu/Download</code> (File System Access) is separate and not cleared here.
 		</p>
 
 		{#if storageInfo}
@@ -1044,7 +1065,7 @@
 				class="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
 			>
 				<Trash2 class="h-4 w-4" />
-				Clear library metadata
+				Clear download metadata
 			</button>
 			<button
 				type="button"
@@ -1076,14 +1097,62 @@
 	</section>
 
 	<section
-		class="mb-6 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/50 p-5 dark:border-zinc-700 dark:bg-zinc-900/20"
+		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
 	>
-		<div class="mb-2 flex items-center gap-2">
-			<Info class="h-4 w-4 text-zinc-400" />
-			<h2 class="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Reader defaults</h2>
+		<div class="mb-4 flex items-center gap-2">
+			<Settings class="h-4 w-4 text-violet-600 dark:text-violet-400" />
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reader defaults</h2>
 		</div>
-		<p class="text-xs text-zinc-500">
-			Coming soon: default manga reader mode (webtoon/page), data saver defaults.
-		</p>
+		<div class="space-y-4">
+			<label class="block">
+				<span class="mb-1.5 block text-sm font-medium text-zinc-800 dark:text-zinc-200">
+					Default manga reader mode
+				</span>
+				<select
+					class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-violet-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+					value={prefs.mangaReaderMode}
+					onchange={(e) => updateMangaReaderMode((e.currentTarget as HTMLSelectElement).value)}
+				>
+					<option value="webtoon">Webtoon (vertical scroll)</option>
+					<option value="page">Page (right-to-left)</option>
+					<option value="ltr">LTR (left-to-right)</option>
+				</select>
+			</label>
+			<label class="flex cursor-pointer items-start gap-3 text-sm text-zinc-800 dark:text-zinc-200">
+				<input
+					type="checkbox"
+					class="mt-0.5 h-4 w-4 rounded border-zinc-400 text-violet-600 focus:ring-violet-500"
+					checked={prefs.mangaDataSaver}
+					onchange={(e) =>
+						updatePref('mangaDataSaver', (e.currentTarget as HTMLInputElement).checked)}
+				/>
+				<span class="flex flex-col gap-0.5">
+					<span class="font-medium">Start with Data Saver enabled</span>
+					<span class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+						Use reduced image quality by default when opening manga chapters.
+					</span>
+				</span>
+			</label>
+		</div>
+	</section>
+
+	<section
+		class="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40"
+	>
+		<div class="mb-3">
+			<h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reset settings</h2>
+			<p class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+				Restore appearance, reader, privacy, and other preferences to their defaults. Your library,
+				history, and downloaded chapters will not be deleted.
+			</p>
+		</div>
+		<button
+			type="button"
+			onclick={resetAllSettings}
+			class="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50 dark:border-red-900/70 dark:bg-zinc-900 dark:text-red-300 dark:hover:bg-red-950/40"
+		>
+			<RotateCcw class="h-3.5 w-3.5" />
+			Reset all settings
+		</button>
 	</section>
 </div>

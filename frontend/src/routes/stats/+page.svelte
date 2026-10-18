@@ -757,7 +757,7 @@
 				<div class="divide-y {divide}">
 					{#each recent as item}
 						<a
-							href="/manga/{item.sourceId}{item.mangaId}"
+							href="/series/{item.sourceId}{item.mangaId}"
 							class="flex items-center gap-3 py-2.5 transition {hoverRow}"
 						>
 							<div class="min-w-0 flex-1">

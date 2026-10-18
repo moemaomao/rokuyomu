@@ -12,11 +12,10 @@
 		getOfflineChapterIds,
 		upsertLibraryEntry,
 		type LibraryEntry
-	} from '$lib/stores/library.svelte';
-	import { downloadChapter } from '$lib/utils/downloadChapter';
-	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovelPdf';
+	} from '$lib/stores/download.svelte';
+	import { downloadChapter } from '$lib/utils/downloadManga';
+	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovel';
 	import {
-		Library,
 		FolderOpen,
 		RefreshCw,
 		Trash2,
@@ -28,8 +27,14 @@
 	import { isNovelSource, chapterHref } from '$lib/utils/novelSources';
 	import { proxyImage } from '$lib/utils/image';
 	import { getOfflineCoverObjectUrl } from '$lib/utils/cacheCover';
+	import {
+		getPreferences,
+		subscribePreferences,
+		type AppPreferences
+	} from '$lib/stores/preferences';
 
 	let items = $state<LibraryEntry[]>([]);
+	let prefs = $state<AppPreferences>(getPreferences());
 	let busy = $state(false);
 	let msg = $state('');
 	let diskOk = $state(false);
@@ -240,7 +245,7 @@
 		if (busy || batch.active) return;
 		const list = items.slice();
 		if (!list.length) {
-			msg = 'Library is empty — nothing to sync.';
+			msg = 'Download list is empty — nothing to sync.';
 			return;
 		}
 		busy = true;
@@ -324,7 +329,7 @@
 	}
 
 	async function handleClear() {
-		if (!confirm('Clear all library metadata? (Files on disk are not deleted.)')) return;
+		if (!confirm('Clear all download list metadata? (Files on disk are not deleted.)')) return;
 		await clearLibrary();
 		await load();
 	}
@@ -398,7 +403,7 @@
 
 	function href(e: LibraryEntry) {
 		const id = e.mangaId.startsWith('/') ? e.mangaId : `/${e.mangaId}`;
-		return `/manga/${e.sourceId}${id}`;
+		return `/series/${e.sourceId}${id}`;
 	}
 
 	function onCoverError(ev: Event) {
@@ -429,7 +434,7 @@
 				limit: String(limit),
 				sort: 'oldest'
 			});
-			const res = await fetch(`/api/chapters?${params}`);
+			const res = await fetch(`/api/manga-chapter?${params}`);
 			if (!res.ok) throw new Error(`Failed to load chapters (${res.status})`);
 			const j = (await res.json()) as {
 				chapters?: any[];
@@ -504,7 +509,7 @@
 					if (c.lang) lang = String(c.lang);
 				}
 				if (latest || lang) {
-					const { upsertLibraryEntry } = await import('$lib/stores/library.svelte');
+					const { upsertLibraryEntry } = await import('$lib/stores/download.svelte');
 					await upsertLibraryEntry({
 						mangaId: e.mangaId,
 						mangaTitle: e.mangaTitle,
@@ -625,12 +630,16 @@
 
 	onMount(() => {
 		void load();
+		const unsubPrefs = subscribePreferences((p) => {
+			prefs = p;
+		});
 		const onLib = () => {
 			void load();
 		};
 		window.addEventListener('library-changed', onLib);
 		const t = setTimeout(() => void load(), 300);
 		return () => {
+			unsubPrefs();
 			window.removeEventListener('library-changed', onLib);
 			clearTimeout(t);
 		};
@@ -638,7 +647,7 @@
 </script>
 
 <svelte:head>
-	<title>Library | Rokuyomu</title>
+	<title>Download | Rokuyomu</title>
 	<style>
 		.badge-stick {
 			display: inline-flex;
@@ -727,8 +736,8 @@
 	>
 		<div>
 			<h1 class="flex items-center gap-2 text-xl font-bold text-zinc-900 md:text-2xl dark:text-zinc-100">
-				<Library class="h-6 w-6 text-violet-500" />
-				Offline Library
+				<Download class="h-6 w-6 text-violet-500" />
+				Download
 			</h1>
 			<p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 				{items.length} title(s) · offline mirror of bookmarks · files on your disk
@@ -741,7 +750,7 @@
 					onclick={handlePickFolder}
 					disabled={busy || batch.active}
 					class="flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-zinc-800"
-					title="Choose / change library folder on disk"
+					title="Choose / change the folder used for downloads"
 				>
 					<FolderOpen class="h-4 w-4" />
 					Folder
@@ -839,7 +848,7 @@
 					Chrome/Edge: pick a parent folder once — the app creates
 					<code
 						class="rounded bg-zinc-200/80 px-1 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
-						>Rokuyomu/Library/Manga|Novel/…</code
+						>Rokuyomu/Download/Manga|Novel/…</code
 					>
 					and
 					<code
@@ -848,7 +857,7 @@
 					>
 					(JSON + covers) automatically.
 				</li>
-				<li>Manga chapters save as image folders; novels save PDF/EPUB (+ .txt for offline restore). Deleting a library card only removes metadata — disk files stay. Pick folder again to re-import.</li>
+				<li>Manga chapters save as image folders; novels save PDF/EPUB (+ .txt for offline restore). Removing a title from this list only removes metadata — disk files stay. Pick the folder again to re-import.</li>
 				<li>
 					<strong>Download</strong> batch-downloads remaining chapters;
 					<strong>Sync</strong> (per card or Sync Updates) refreshes latest chapter and sorts by
@@ -864,7 +873,7 @@
 			class="flex flex-col items-center justify-center py-16 text-center text-zinc-500 dark:text-zinc-500"
 		>
 			<BookOpen class="mb-3 h-12 w-12 opacity-40" />
-			<p class="text-base font-medium text-zinc-700 dark:text-zinc-400">Library is empty.</p>
+			<p class="text-base font-medium text-zinc-700 dark:text-zinc-400">No downloads yet.</p>
 			<p class="mt-1 max-w-sm text-xs text-zinc-500 opacity-80">
 				Click <strong>Sync Bookmarks</strong> or download a chapter from a title page — entries
 				will show up here.
@@ -900,7 +909,7 @@
 							{e.sourceId}
 						</span>
 
-						{#if latestChapterLabel(e)}
+						{#if !prefs.hideBadges.chapter && latestChapterLabel(e)}
 							<span
 								class="badge-stick badge-stick-ch badge-chapter absolute top-[12px] left-0 z-20 flex max-w-[55%] items-center gap-0.5 sm:top-[17px] sm:max-w-[60%]"
 							>
@@ -979,7 +988,7 @@
 								onclick={() => handleRemove(e)}
 								disabled={batch.active || busy}
 								class="flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/40 bg-red-50 text-red-600 transition hover:bg-red-500 hover:text-white disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
-								title="Remove from library"
+								title="Remove from downloads"
 								aria-label="Remove"
 							>
 								<Trash2 class="h-4 w-4" />
@@ -1028,7 +1037,7 @@
 				<div class="space-y-3 px-5 py-4 text-sm text-zinc-600 dark:text-zinc-300">
 					<p>
 						This will download <strong class="text-zinc-900 dark:text-zinc-100">all chapters</strong>
-						for this title into your library folder. Chapters already offline will be skipped.
+						for this title. Chapters already offline will be skipped.
 					</p>
 					<ul class="space-y-2 rounded-xl border border-amber-200/80 bg-amber-50/80 p-3 text-xs text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/40 dark:text-amber-100">
 						<li class="flex gap-2">

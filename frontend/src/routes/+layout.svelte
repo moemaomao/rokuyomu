@@ -50,7 +50,7 @@
 		Sun,
 		Moon,
 		Bookmark,
-		Library,
+		Download,
 		History,
 		MessageSquare,
 		MessagesSquare,
@@ -100,7 +100,7 @@
 	let { data, children } = $props();
 
 	let isReaderPage = $derived(
-		$page.url.pathname.startsWith('/reader/') ||
+		$page.url.pathname.startsWith('/manga-reader/') ||
 			$page.url.pathname.startsWith('/novel-reader/')
 	);
 
@@ -123,7 +123,7 @@
 	// ── Helpers ──────────────────────────────────────────────────────────────
 	function formatMangaHref(sourceId: string, mangaId: string): string {
 		const clean = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
-		return `/manga/${sourceId}${clean}`;
+		return `/series/${sourceId}${clean}`;
 	}
 
 	function navClass(): string {
@@ -605,11 +605,11 @@
 				Deep Search
 			</a>
 			<a
-				href="/library"
-				onclick={(e) => handleNavigate(e, '/library')}
+				href="/download"
+				onclick={(e) => handleNavigate(e, '/download')}
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 transition {navClass()}"
 			>
-				<Library class="h-5 w-5 shrink-0" /> Offline Library
+				<Download class="h-5 w-5 shrink-0" /> Download
 			</a>
 			<a
 				href="/bookmark"

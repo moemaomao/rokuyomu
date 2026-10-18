@@ -96,7 +96,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		throw error(400, 'Chapter id required');
 	}
 	if (!isNovelSource(source)) {
-		throw error(400, 'Not a novel source — use /reader/');
+		throw error(400, 'Not a novel source — use /manga-reader/');
 	}
 
 	try {
@@ -126,11 +126,13 @@ export const load: PageServerLoad = async ({ params }) => {
 		const needTitle = !novelInfo.title || looksLikeChapterTitle(novelInfo.title);
 		const needCover = !novelInfo.cover;
 		const needIdConfirm = true;
+		let chapters = data.chapters ?? [];
 
 		if ((needTitle || needCover || needIdConfirm) && novelPath && novelPath !== '/') {
 			try {
 				const details = await remoteMangaDetails(source, novelPath);
 				if (details) {
+					chapters = data.chapters?.length ? data.chapters : details.chapters || [];
 					novelInfo = {
 						id: details.id || novelInfo.id || novelPath,
 						title:
@@ -166,7 +168,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			source,
 			chapterId,
 			novelInfo,
-			chapters: data.chapters ?? [],
+			chapters,
 			currentChapter: data.currentChapter ?? null,
 			prevChapter: data.prevChapterId
 				? { id: data.prevChapterId }

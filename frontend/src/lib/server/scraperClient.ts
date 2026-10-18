@@ -83,7 +83,7 @@ export async function remoteMangaDetails(
 
 	const id = mangaId.replace(/^\/+/, '');
 	return scraperFetch(
-		`/${encodeURIComponent(sourceId)}/manga/${id}?lang=${encodeURIComponent(lang)}`
+		`/${encodeURIComponent(sourceId)}/series/${id}?lang=${encodeURIComponent(lang)}`
 	);
 }
 

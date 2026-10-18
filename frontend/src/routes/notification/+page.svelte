@@ -21,7 +21,7 @@
 
 	function formatMangaHref(sourceId: string, mangaId: string): string {
 		const clean = mangaId.startsWith('/') ? mangaId : `/${mangaId}`;
-		return `/manga/${sourceId}${clean}`;
+		return `/series/${sourceId}${clean}`;
 	}
 
 	function proxyCover(url: string, sourceId: string): string {

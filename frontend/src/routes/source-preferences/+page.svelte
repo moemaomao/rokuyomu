@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Check, Settings, AlertTriangle, BookMarked, BookOpen, LayoutGrid, Rows3 } from 'lucide-svelte';
+	import {
+		Check,
+		SlidersHorizontal,
+		AlertTriangle,
+		BookMarked,
+		BookOpen,
+		LayoutGrid,
+		Rows3
+	} from 'lucide-svelte';
 	import {
 		getPreferredSources,
 		setPreferredSources,
@@ -161,7 +169,7 @@
 <div class="relative mx-auto max-w-3xl px-4 py-6 sm:px-6">
 	<div class="mb-6 flex items-center gap-3">
 		<div class="rounded-xl bg-red-600/20 p-2.5">
-			<Settings class="h-6 w-6 text-red-500" />
+			<SlidersHorizontal class="h-6 w-6 text-red-500" />
 		</div>
 		<div>
 			<h1 class="text-xl font-bold sm:text-2xl">Source Preferences</h1>

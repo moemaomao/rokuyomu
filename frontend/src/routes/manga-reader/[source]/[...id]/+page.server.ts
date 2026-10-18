@@ -127,7 +127,7 @@ async function resolveMangaId(
 	if (rootParsed?.slug) {
 		const prefix = ROOT_CHAPTER_PREFIX[source];
 		if (prefix) return `${prefix}/${rootParsed.slug}`;
-		return `/manga/${rootParsed.slug}`;
+		return `/series/${rootParsed.slug}`;
 	}
 
 	return hierarchical.length > 1 ? hierarchical : chapterId;
@@ -257,6 +257,8 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 						id: mangaDetails.id,
 						title: mangaDetails.title,
 						cover: mangaDetails.cover,
+						description: mangaDetails.description,
+						genres: mangaDetails.genres,
 						slug: mangaSlug
 					}
 				: {

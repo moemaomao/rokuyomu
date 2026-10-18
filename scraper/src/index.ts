@@ -1,4 +1,5 @@
 import express from 'express';
+import type { Request, Response } from 'express';
 import cors from 'cors';
 import { getSource, getSourceList } from './sources/index.js';
 import { isByparrEnabled } from './lib/byparr';
@@ -54,21 +55,24 @@ app.get('/:sourceId/latest', async (req, res) => {
   }
 });
 
-app.get('/:sourceId/manga/*', async (req, res) => {
+const getSeriesDetails = async (req: Request, res: Response) => {
   try {
     const sourceId = req.params.sourceId;
     const raw = (req.params as any)[0] || '';
-    const mangaId = '/' + String(raw).replace(/^\/+/, '');
+    const seriesId = '/' + String(raw).replace(/^\/+/, '');
     const lang = String(req.query.lang || 'all');
-    if (!mangaId || mangaId === '/') return res.status(400).json({ error: 'Invalid mangaId' });
+    if (!seriesId || seriesId === '/') return res.status(400).json({ error: 'Invalid seriesId' });
     const adapter = getSource(sourceId);
-    const data = await adapter.getMangaDetails(mangaId, { lang });
+    const data = await adapter.getMangaDetails(seriesId, { lang });
     res.json(data);
   } catch (e: any) {
-    console.error('[manga]', req.params.sourceId, e);
+    console.error('[series]', req.params.sourceId, e);
     res.status(500).json({ error: e?.message || 'scraping failed' });
   }
-});
+};
+
+app.get('/:sourceId/series/*', getSeriesDetails);
+app.get('/:sourceId/manga/*', getSeriesDetails);
 
 app.get('/:sourceId/chapter/*', async (req, res) => {
   try {

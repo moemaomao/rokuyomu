@@ -499,7 +499,7 @@ export async function checkForNewChapters(options?: {
 					limit: '5',
 					sort: 'newest'
 				});
-				const res = await fetch(`/api/chapters?${params}`);
+				const res = await fetch(`/api/manga-chapter?${params}`);
 				if (!res.ok) {
 					updates.push({ ...n, lastChecked: now });
 					continue;

@@ -880,7 +880,7 @@
 						>
 							{#each section.mangas as manga, i (`${manga.sourceId ?? 'x'}:${manga.id}:${i}`)}
 								<a
-									href="/manga/{manga.sourceId}{manga.id}{selectedLang !== 'all'
+									href="/series/{manga.sourceId}{manga.id}{selectedLang !== 'all'
 										? `?lang=${selectedLang}`
 										: ''}"
 									class="group block"
@@ -920,7 +920,7 @@
 											</span>
 											{/if}
 
-											{#if manga.latestChapter || (manga as any).chapter}
+											{#if !shouldHideBadge('chapter', prefs) && (manga.latestChapter || (manga as any).chapter)}
 												<span class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]">
 													{#if listChapterFlag(manga.lang)}
 														<span
@@ -979,7 +979,7 @@
 										disabled={loading}
 										class="h-8 min-w-[32px] rounded-lg px-2 text-xs font-semibold transition active:scale-95
 											{secPage === item
-											? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+											? 'pagination-active bg-violet-600 text-white shadow-md shadow-violet-600/30'
 											: isDarkMode
 												? 'border border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800'
 												: 'border border-zinc-200 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50'}"
@@ -1017,7 +1017,7 @@
 											[section.sourceId]: (e.currentTarget as HTMLInputElement).value
 										};
 									}}
-									class="h-8 w-12 rounded-lg border px-1.5 text-center text-[11px] font-semibold transition-all focus:outline-none focus:ring-1 focus:ring-red-500
+									class="h-8 w-12 rounded-lg border px-1.5 text-center text-[11px] font-semibold transition-all focus:outline-none focus:ring-1 focus:ring-violet-500
 										[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none
 										{isDarkMode
 										? 'border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-600'
@@ -1027,7 +1027,7 @@
 									type="submit"
 									disabled={loading}
 									aria-label="Go to page"
-									class="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white transition hover:bg-red-500 active:scale-95 disabled:opacity-40"
+									class="pagination-active flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white transition hover:bg-violet-500 active:scale-95 disabled:opacity-40"
 								>
 									<ArrowRight class="h-3.5 w-3.5" />
 								</button>
@@ -1103,7 +1103,7 @@
 				>
 					{#each mangas as manga, i (`${manga.sourceId ?? 'x'}:${manga.id}:${i}`)}
 						<a
-							href="/manga/{manga.sourceId}{manga.id}{selectedLang !== 'all'
+							href="/series/{manga.sourceId}{manga.id}{selectedLang !== 'all'
 								? `?lang=${selectedLang}`
 								: ''}"
 							class="group block"
@@ -1143,7 +1143,7 @@
 									</span>
 									{/if}
 
-									{#if manga.latestChapter || (manga as any).chapter}
+									{#if !shouldHideBadge('chapter', prefs) && (manga.latestChapter || (manga as any).chapter)}
 										<span class="badge-stick badge-stick-ch badge-chapter absolute top-[14px] left-0 z-20 sm:top-[17px]">
 											{#if listChapterFlag(manga.lang)}
 												<span
@@ -1214,7 +1214,7 @@
 									disabled={loading}
 									class="h-9 min-w-[36px] rounded-xl px-2.5 text-xs font-semibold transition active:scale-95
 										{currentPage === item
-										? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+										? 'pagination-active bg-violet-600 text-white shadow-md shadow-violet-600/30'
 										: isDarkMode
 											? 'border border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800'
 											: 'border border-zinc-200 bg-white text-zinc-700 shadow-sm hover:bg-zinc-50'}"
@@ -1248,7 +1248,7 @@
 							min="1"
 							placeholder={String(currentPage)}
 							bind:value={jumpPageInput}
-							class="h-9 w-14 rounded-xl border px-2 text-center text-xs font-semibold transition-all focus:outline-none focus:ring-1 focus:ring-red-500
+							class="h-9 w-14 rounded-xl border px-2 text-center text-xs font-semibold transition-all focus:outline-none focus:ring-1 focus:ring-violet-500
 								[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none
 								{isDarkMode
 								? 'border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-600'
@@ -1258,7 +1258,7 @@
 							type="submit"
 							disabled={loading || !jumpPageInput}
 							aria-label="Go to page"
-							class="flex h-9 w-9 items-center justify-center rounded-xl bg-red-600 text-white transition hover:bg-red-500 active:scale-95 disabled:opacity-40"
+							class="pagination-active flex h-9 w-9 items-center justify-center rounded-xl bg-violet-600 text-white transition hover:bg-violet-500 active:scale-95 disabled:opacity-40"
 						>
 							<ArrowRight class="h-4 w-4" />
 						</button>

@@ -17,12 +17,16 @@ Monorepo: [moemaomao/rokuyomu](https://github.com/moemaomao/rokuyomu) · this pa
 | CF bypass | `fetchWithCf` → Byparr + per-domain cookie jar |
 | Deploy | Vercel serverless (or Render / Koyeb / Fly / bare Node) |
 
+Download storage is managed by the frontend (`/download`), which saves files under
+`Rokuyomu/Download` when local-folder downloads are enabled. The scraper only provides source data;
+it does not store downloaded chapters.
+
 The frontend does **not** import scraper adapters at runtime for normal sources. It calls:
 
 ```http
 GET /:sourceId/latest
 GET /:sourceId/search?q=
-GET /:sourceId/manga/*
+GET /:sourceId/series/*
 GET /:sourceId/chapter/*
 GET /:sourceId/novel-chapter/*
 GET /:sourceId/manga-from-chapter?chapter=
@@ -42,7 +46,7 @@ Adapter scale (approximate, changes often): **~100+ manga**, **~80+ novel** Type
 | `GET` | `/health` | Liveness + Byparr / cookie-jar stats |
 | `GET` | `/:sourceId/latest` | Latest updates (pagination via query as implemented) |
 | `GET` | `/:sourceId/search` | Search titles |
-| `GET` | `/:sourceId/manga/*` | Title details + chapters |
+| `GET` | `/:sourceId/series/*` | Series details (including description and genres) + chapters |
 | `GET` | `/:sourceId/chapter/*` | Page image URL list |
 | `GET` | `/:sourceId/novel-chapter/*` | Novel chapter content |
 | `GET` | `/:sourceId/manga-from-chapter` | Resolve title from a chapter URL/id |

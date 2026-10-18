@@ -114,7 +114,7 @@ export async function buildBackup(): Promise<RokuyomuBackup> {
 			localStorage: collectLocalStorage()
 		},
 		notes:
-			'Offline chapter images/text blobs are NOT included. Re-download chapters after import if needed. Disk folder RokuyomuLibrary is separate.'
+			'Offline chapter images/text blobs are NOT included. Re-download chapters after import if needed. Disk folder Rokuyomu/Download is separate.'
 	};
 }
 

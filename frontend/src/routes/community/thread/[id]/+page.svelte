@@ -98,7 +98,7 @@
 
 	function mangaHref(ref: NonNullable<ForumThread['mangaRef']>) {
 		const clean = ref.mangaId.startsWith('/') ? ref.mangaId : `/${ref.mangaId}`;
-		return `/manga/${ref.sourceId}${clean}`;
+		return `/series/${ref.sourceId}${clean}`;
 	}
 
 	const fieldClass =
