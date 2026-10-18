@@ -180,6 +180,35 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 		throw redirect(302, `/novel-reader/${source}${path}`);
 	}
 
+	if (chapterId.startsWith('/disk/')) {
+		const title = url.searchParams.get('title')?.trim() || 'Offline title';
+		const mangaId = url.searchParams.get('manga')?.trim() || '';
+		const chapterTitle =
+			url.searchParams.get('chapterTitle')?.trim() ||
+			decodeURIComponent(chapterId.split('/').filter(Boolean).pop() || 'Chapter');
+		return {
+			pages: [] as string[],
+			source,
+			chapterId,
+			mangaInfo: {
+				id: mangaId,
+				title,
+				cover: '',
+				description: '',
+				genres: [],
+				author: '',
+				artist: '',
+				type: '',
+				slug: mangaId.replace(/^\/+/, '')
+			},
+			chapters: [],
+			currentChapter: { id: chapterId, title: chapterTitle, number: 0 },
+			prevChapter: null,
+			nextChapter: null,
+			allowOfflineClient: true
+		};
+	}
+
 	try {
 		const explicitManga = url.searchParams.get('manga');
 		const mangaId = await resolveMangaId(source, chapterId, explicitManga);

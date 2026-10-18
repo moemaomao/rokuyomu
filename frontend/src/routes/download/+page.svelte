@@ -76,14 +76,24 @@
 		}
 	}
 
+	function offlineHref(e: LibraryEntry, chapterId: string, chapterTitle?: string): string {
+		try {
+			const href = chapterHref(e.sourceId, chapterId);
+			const params = new URLSearchParams({
+				manga: e.mangaId,
+				title: e.mangaTitle,
+				chapterTitle: chapterTitle || chapterId.split('/').filter(Boolean).pop() || 'Chapter'
+			});
+			return `${href}?${params}`;
+		} catch {
+			return '#';
+		}
+	}
+
 	function offlineReadHref(e: LibraryEntry): string | null {
 		const ch = e.chapters?.[0];
 		if (!ch?.chapterId) return null;
-		try {
-			return chapterHref(e.sourceId, String(ch.chapterId));
-		} catch {
-			return null;
-		}
+		return offlineHref(e, String(ch.chapterId), ch.chapterTitle);
 	}
 
 	async function load() {
@@ -139,6 +149,12 @@
 					const preferNovel = entryIsNovel(e);
 					let href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, preferNovel);
 					if (!href) href = await getFirstOfflineChapterHref(e.sourceId, e.mangaId, !preferNovel);
+					if (href) {
+						const routePrefix = `${chapterHref(e.sourceId, '').replace(/\/$/, '')}/`;
+						const chapterId = decodeURIComponent(href.slice(routePrefix.length));
+						const chapter = e.chapters?.find((item) => item.chapterId === chapterId);
+						href = offlineHref(e, chapterId, chapter?.chapterTitle);
+					}
 					return [e.key, href || offlineReadHref(e) || ''] as const;
 				} catch {
 					return [e.key, offlineReadHref(e) || ''] as const;

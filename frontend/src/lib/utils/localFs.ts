@@ -581,11 +581,16 @@ export async function readCoverFromDisk(opts: {
 	return null;
 }
 
+function wantDiskChapterHint(chapterId: string): boolean {
+	return /^\/?disk\//i.test(String(chapterId || '').trim());
+}
+
 export async function readMangaChapterFromDisk(opts: {
 	root?: FileSystemDirectoryHandle | null;
 	sourceId: string;
 	chapterId: string;
 	mangaTitle?: string;
+	mangaId?: string;
 	chapterTitle?: string;
 	maxPages?: number;
 	librarySubdirName?: string;
@@ -599,7 +604,8 @@ export async function readMangaChapterFromDisk(opts: {
 } | null> {
 	const titleHint = sanitizePathSegment(opts.mangaTitle || '');
 	const chTitleHint = sanitizePathSegment(opts.chapterTitle || '');
-	if (!titleHint && !chTitleHint) return null;
+	const diskChapterHint = wantDiskChapterHint(opts.chapterId);
+	if (!titleHint && !chTitleHint && !diskChapterHint) return null;
 
 	const root = opts.root ?? (await getLibraryRoot());
 	if (!root) return null;
@@ -629,6 +635,9 @@ export async function readMangaChapterFromDisk(opts: {
 	const wantCh = String(opts.chapterId || '').trim();
 	const wantChNorm = wantCh.replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
 	const wantChSeg = wantChNorm.split('/').filter(Boolean).pop() || wantChNorm;
+	const diskFolderName = diskChapterHint
+		? sanitizePathSegment(wantChNorm.slice('disk/'.length)).toLowerCase()
+		: '';
 	const maxPages = Math.max(1, Math.min(opts.maxPages ?? 200, 400));
 
 	function yieldMain(): Promise<void> {
@@ -723,13 +732,21 @@ export async function readMangaChapterFromDisk(opts: {
 		}
 	}
 
-	if (!titleDirs.length && chTitleHint && !titleHint) {
-		return null;
+	if (diskChapterHint) {
+		const knownTitles = new Set(titleDirs.map((titleDir) => titleDir.name));
+		for await (const [name, handle] of (mangaRoot as DirectoryHandleWithEntries).entries()) {
+			if (handle.kind !== 'directory' || knownTitles.has(name)) continue;
+			titleDirs.push({ name, handle: handle as FileSystemDirectoryHandle });
+		}
 	}
 
 	for (const td of titleDirs) {
 		const titleMeta = await readMeta(td.handle);
 		const folderSrc = String(titleMeta?.source || titleMeta?.sourceId || '').trim();
+		if (folderSrc && folderSrc !== opts.sourceId) continue;
+		const storedMangaId = String(titleMeta?.mangaId || titleMeta?.id || '').replace(/^\/+|\/+$/g, '');
+		const wantedMangaId = String(opts.mangaId || '').replace(/^\/+|\/+$/g, '');
+		if (wantedMangaId && storedMangaId && storedMangaId !== wantedMangaId) continue;
 		const mangaTitle = String(
 			titleMeta?.mangaTitle || titleMeta?.title || td.name || 'Manga'
 		).slice(0, 160);
@@ -770,6 +787,7 @@ export async function readMangaChapterFromDisk(opts: {
 			const metaId = String(chMeta?.chapterId || chMeta?.id || '').trim();
 			const matched =
 				(metaId && idMatch(metaId, wantChNorm, wantChSeg)) ||
+				(diskFolderName && sanitizePathSegment(chName).toLowerCase() === diskFolderName) ||
 				(chTitleHint &&
 					(sanitizePathSegment(chName).toLowerCase() === chTitleHint.toLowerCase() ||
 						sanitizePathSegment(chName).toLowerCase().includes(chTitleHint.toLowerCase())));

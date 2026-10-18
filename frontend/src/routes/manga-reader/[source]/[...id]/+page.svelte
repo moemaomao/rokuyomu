@@ -115,6 +115,7 @@ $effect(() => {
 			if (src && cid) {
 				const row = await getOfflineMangaChapter(src, cid, {
 					mangaTitle: String(mangaInfo?.title || ''),
+					mangaId: String(mangaInfo?.id || ''),
 					chapterTitle: String(currentChapter?.title || ''),
 					allowDisk: true
 				});
@@ -442,6 +443,7 @@ $effect(() => {
 			);
 			const row = await getOfflineMangaChapter(String(source), cleanId, {
 				mangaTitle: String(mangaInfo?.title || ''),
+				mangaId: String(mangaInfo?.id || ''),
 				chapterTitle: String(targetChapter?.title || ''),
 				allowDisk: true
 			});

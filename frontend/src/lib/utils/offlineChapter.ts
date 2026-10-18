@@ -138,7 +138,7 @@ export async function saveOfflineMangaChapter(opts: {
 export async function getOfflineMangaChapter(
 	sourceId: string,
 	chapterId: string,
-	opts?: { mangaTitle?: string; chapterTitle?: string; allowDisk?: boolean }
+	opts?: { mangaTitle?: string; mangaId?: string; chapterTitle?: string; allowDisk?: boolean }
 ): Promise<OfflineMangaChapter | null> {
 	const raw = String(chapterId || '').trim();
 	if (!raw) return null;
@@ -150,13 +150,14 @@ export async function getOfflineMangaChapter(
 		if (!opts?.allowDisk) return null;
 	}
 
-	if (opts?.allowDisk && opts.mangaTitle && opts.chapterTitle) {
+	if (opts?.allowDisk) {
 		try {
 			const { readMangaChapterFromDisk } = await import('$lib/utils/localFs');
 			const disk = await readMangaChapterFromDisk({
 				sourceId,
 				chapterId: raw,
 				mangaTitle: opts.mangaTitle,
+				mangaId: opts.mangaId,
 				chapterTitle: opts.chapterTitle
 			});
 			if (disk?.pages.length) {
