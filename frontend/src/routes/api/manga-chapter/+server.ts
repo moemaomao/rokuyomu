@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { remoteMangaDetails } from '$lib/server/scraperClient';
+import { getSeriesMetadata, remoteMangaDetails } from '$lib/server/scraperClient';
 import { getCached } from '$lib/server/cache';
 import type { Chapter, MangaDetails } from '$lib/server/sources/types';
 
@@ -16,6 +16,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	const rawId = url.searchParams.get('id')?.trim();
 	const lang = (url.searchParams.get('lang') || 'all').toLowerCase();
 	const sort = (url.searchParams.get('sort') || 'newest').toLowerCase();
+	const refresh = url.searchParams.get('refresh') === '1';
 	const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
 	const limit = Math.min(
 		MAX_LIMIT,
@@ -31,17 +32,22 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	const newestFirst = sort !== 'oldest';
 
 	try {
-		const full = await getCached<MangaDetails>(
-			cacheKey,
-			() => remoteMangaDetails(source, mangaId, lang),
-			DETAIL_CACHE_TTL,
-			locals.kv
-		);
+		const full = refresh
+			? await remoteMangaDetails(source, mangaId, lang)
+			: await getCached<MangaDetails>(
+					cacheKey,
+					() => remoteMangaDetails(source, mangaId, lang),
+					DETAIL_CACHE_TTL,
+					locals.kv
+				);
 
 		const all = Array.isArray(full?.chapters) ? full.chapters : [];
 		const sorted = sortChapters(all, newestFirst);
 		const slice = sorted.slice(offset, offset + limit);
 		const total = sorted.length;
+		const seriesMeta = refresh
+			? getSeriesMetadata(full.description, full.authors, full.type)
+			: null;
 
 		return json({
 			chapters: slice,
@@ -49,7 +55,20 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 			offset,
 			limit,
 			hasMore: offset + slice.length < total,
-			sort: newestFirst ? 'newest' : 'oldest'
+			sort: newestFirst ? 'newest' : 'oldest',
+			series: refresh
+				? {
+						id: full.id,
+						title: full.title,
+						cover: full.cover,
+						description: full.description,
+						authors: full.authors,
+						type: full.type,
+						author: seriesMeta?.author,
+						artist: seriesMeta?.artist,
+						genres: full.genres
+					}
+				: undefined
 		});
 	} catch (e: any) {
 		console.error('[api/chapters]', source, mangaId, e);

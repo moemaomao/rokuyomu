@@ -1269,6 +1269,132 @@ export async function scanLibraryFromDisk(
 	return out;
 }
 
+export async function rebuildLibraryTitleMetadata(opts: {
+	sourceId: string;
+	mangaId: string;
+	directoryMangaId?: string;
+	mangaTitle: string;
+	directoryTitle?: string;
+	isNovel: boolean;
+	cover?: string;
+	description?: string;
+	authors?: string[];
+	author?: string;
+	artist?: string;
+	type?: string;
+	genres?: string[];
+}): Promise<number> {
+	const root = await getLibraryRoot();
+	if (!root) return 0;
+
+	const kind = opts.isNovel ? 'Novel' : 'Manga';
+	const wantedId = String(opts.directoryMangaId || opts.mangaId)
+		.replace(/^\/+|\/+$/g, '')
+		.toLowerCase();
+	const wantedTitle = sanitizePathSegment(opts.directoryTitle || opts.mangaTitle).toLowerCase();
+	const metadataLines =
+		/^\s*(alttitle|alt title|alternative(?: title)?|type|language|artists?|groups?|pages|author|publication|published|serialization|demographic|latest(?: update)?|updated|rating|volume|vol)\s*:/i;
+	const synopsis = String(opts.description || '')
+		.split(/\n+/)
+		.filter((line) => !metadataLines.test(line))
+		.join('\n')
+		.trim();
+	const seriesMeta: Record<string, unknown> = {
+		source: opts.sourceId,
+		sourceId: opts.sourceId,
+		mangaId: opts.mangaId,
+		mangaTitle: opts.mangaTitle,
+		...(opts.isNovel ? { novelTitle: opts.mangaTitle, isNovel: true } : {}),
+		...(opts.cover ? { cover: opts.cover } : {}),
+		...(synopsis ? { synopsis } : {}),
+		...(opts.author ? { author: opts.author } : {}),
+		...(opts.artist ? { artist: opts.artist } : {}),
+		...(opts.type ? { type: opts.type } : {}),
+		...(opts.genres?.length ? { genres: opts.genres } : {}),
+		...(opts.authors?.length ? { authors: opts.authors } : {})
+	};
+
+	const matches = (value: unknown) =>
+		String(value || '')
+			.replace(/^\/+|\/+$/g, '')
+			.toLowerCase() === wantedId;
+
+	let updated = 0;
+	for (const { handle: library } of await getExistingLibraryDirs(root)) {
+		let kindRoot: FileSystemDirectoryHandle;
+		try {
+			kindRoot = await library.getDirectoryHandle(kind);
+		} catch {
+			continue;
+		}
+
+		let selected: FileSystemDirectoryHandle | null = null;
+		let titleFallback: FileSystemDirectoryHandle | null = null;
+		for await (const [name, handle] of (kindRoot as DirectoryHandleWithEntries).entries()) {
+			if (handle.kind !== 'directory') continue;
+			const dir = handle as FileSystemDirectoryHandle;
+			const meta = await readMetaJson(dir);
+			if (
+				matches(meta?.mangaId || meta?.id) &&
+				String(meta?.source || meta?.sourceId || opts.sourceId) === opts.sourceId
+			) {
+				selected = dir;
+				break;
+			}
+			if (
+				name.toLowerCase() === wantedTitle &&
+				(!meta?.source && !meta?.sourceId && !meta?.mangaId && !meta?.id)
+			) {
+				titleFallback = dir;
+			}
+		}
+		selected ||= titleFallback;
+		if (!selected) continue;
+
+		const titleMeta = await readMetaJson(selected);
+		const mergedTitleMeta = { ...titleMeta, ...seriesMeta, updatedAt: Date.now() };
+		if (opts.isNovel && Array.isArray(titleMeta?.chapters)) {
+			mergedTitleMeta.chapters = titleMeta.chapters.map((chapter) =>
+				chapter && typeof chapter === 'object'
+					? { ...(chapter as Record<string, unknown>), ...seriesMeta }
+					: chapter
+			);
+		}
+		await writeTextFile(selected, 'meta.json', JSON.stringify(mergedTitleMeta, null, 2));
+		updated++;
+
+		for await (const [name, handle] of (selected as DirectoryHandleWithEntries).entries()) {
+			if (opts.isNovel) {
+				if (handle.kind !== 'file' || !name.toLowerCase().endsWith('.meta.json')) continue;
+				const fileHandle = handle as FileSystemFileHandle;
+				const raw = await (await fileHandle.getFile()).text();
+				const chapterMeta = JSON.parse(raw) as Record<string, unknown>;
+				await writeTextFile(selected, name, JSON.stringify({ ...chapterMeta, ...seriesMeta }, null, 2));
+				updated++;
+				continue;
+			}
+
+			if (handle.kind !== 'directory') continue;
+			const chapterDir = handle as FileSystemDirectoryHandle;
+			try {
+				const metaHandle = await chapterDir.getFileHandle('meta.json');
+				const raw = await (await metaHandle.getFile()).text();
+				const chapterMeta = JSON.parse(raw) as Record<string, unknown>;
+				await writeTextFile(
+					chapterDir,
+					'meta.json',
+					JSON.stringify({ ...chapterMeta, ...seriesMeta }, null, 2)
+				);
+				updated++;
+			} catch (error) {
+				if (error instanceof DOMException && error.name === 'NotFoundError') continue;
+				throw error;
+			}
+		}
+	}
+	return updated;
+}
+
 export async function hydrateOfflineFromDisk(
 	root?: FileSystemDirectoryHandle | null
 ): Promise<{ titles: number; chapters: number; covers: number }> {

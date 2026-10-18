@@ -27,6 +27,7 @@
 	import { isNovelSource, chapterHref } from '$lib/utils/novelSources';
 	import { proxyImage } from '$lib/utils/image';
 	import { getOfflineCoverObjectUrl } from '$lib/utils/cacheCover';
+	import { rebuildLibraryTitleMetadata } from '$lib/utils/localFs';
 	import {
 		getPreferences,
 		subscribePreferences,
@@ -36,6 +37,8 @@
 	let items = $state<LibraryEntry[]>([]);
 	let prefs = $state<AppPreferences>(getPreferences());
 	let busy = $state(false);
+	let syncingKey = $state('');
+	let syncingBookmarks = $state(false);
 	let msg = $state('');
 	let diskOk = $state(false);
 	let offlineHrefs = $state<Record<string, string>>({});
@@ -158,6 +161,7 @@
 
 	async function handleSync() {
 		busy = true;
+		syncingBookmarks = true;
 		msg = '';
 		try {
 			const n = await syncLibraryFromBookmarks();
@@ -169,6 +173,7 @@
 		} catch (e: any) {
 			msg = e?.message || 'Sync failed';
 		} finally {
+			syncingBookmarks = false;
 			busy = false;
 		}
 	}
@@ -178,7 +183,35 @@
 		total: number;
 		newCount: number;
 		lang: string;
+		rebuilt: number;
 	}> {
+		const detailParams = new URLSearchParams({
+			source: e.sourceId,
+			id: e.mangaId.replace(/^\/+/, ''),
+			offset: '0',
+			limit: '1',
+			refresh: '1'
+		});
+		const detailResponse = await fetch(`/api/manga-chapter?${detailParams}`);
+		if (!detailResponse.ok) {
+			throw new Error(`Failed to refresh series metadata (${detailResponse.status})`);
+		}
+		const detailResult = (await detailResponse.json()) as {
+			series?: {
+				id?: string;
+				title?: string;
+				cover?: string;
+				description?: string;
+				authors?: string[];
+				author?: string;
+				artist?: string;
+				type?: string;
+				genres?: string[];
+			};
+		};
+		const series = detailResult.series;
+		if (!series) throw new Error('Series metadata was not returned by the source');
+
 		const chapters = await fetchAllChapters(e.sourceId, e.mangaId);
 		const offline = getOfflineChapterIds(e.sourceId, e.mangaId);
 		let latest = e.latestChapter || '';
@@ -197,46 +230,70 @@
 			const alt = id.startsWith('/') ? id.slice(1) : `/${id}`;
 			if (!offline.has(id) && !offline.has(alt)) newCount++;
 		}
+		const mangaTitle = series.title?.trim() || e.mangaTitle;
+		const cover = series.cover?.trim() || e.cover || '';
+		const description = series.description || '';
+		const author = series.author || series.authors?.[0] || '';
+		const artist = series.artist || series.authors?.join(', ') || '';
+		const rebuilt = await rebuildLibraryTitleMetadata({
+			sourceId: e.sourceId,
+			mangaId: series.id || e.mangaId,
+			directoryMangaId: e.mangaId,
+			mangaTitle,
+			directoryTitle: e.mangaTitle,
+			isNovel: entryIsNovel(e),
+			cover,
+			description,
+			authors: series.authors,
+			author,
+			artist,
+			type: series.type,
+			genres: series.genres
+		});
 		await upsertLibraryEntry({
 			mangaId: e.mangaId,
-			mangaTitle: e.mangaTitle,
-			cover: e.cover || '',
+			mangaTitle,
+			cover,
 			sourceId: e.sourceId,
 			isNovel: entryIsNovel(e),
 			latestChapter: latest || undefined,
 			lang: lang || undefined
 		});
 	
-		if (e.cover) {
+		if (cover) {
 			try {
 				const { cacheLibraryCover } = await import('$lib/utils/cacheCover');
 				void cacheLibraryCover({
 					mangaId: e.mangaId,
 					sourceId: e.sourceId,
-					coverUrl: e.cover,
-					title: e.mangaTitle,
+					coverUrl: cover,
+					title: mangaTitle,
 					isNovel: entryIsNovel(e)
 				});
-			} catch {
+			} catch (error) {
+				console.warn('[download] refresh cover cache', e.key, error);
 			}
 		}
-		return { latest, total: chapters.length, newCount, lang };
+		return { latest, total: chapters.length, newCount, lang, rebuilt };
 	}
 
 	async function handleSyncOne(e: LibraryEntry) {
 		if (busy || batch.active) return;
 		busy = true;
+		syncingKey = e.key;
 		msg = '';
 		try {
 			const r = await syncTitleMeta(e);
 			await load();
 			msg =
-				r.newCount > 0
-					? `"${e.mangaTitle}": latest Ch. ${r.latest} · ${r.newCount} chapter(s) not offline yet.`
-					: `"${e.mangaTitle}": up to date (Ch. ${r.latest}, ${r.total} total).`;
+				`"${e.mangaTitle}": metadata rebuilt in ${r.rebuilt} file(s) · latest Ch. ${r.latest || '-'} · ` +
+				(r.newCount > 0
+					? `${r.newCount} chapter(s) not offline yet.`
+					: `up to date (${r.total} chapter(s)).`);
 		} catch (err: any) {
 			msg = err?.message || 'Sync failed';
 		} finally {
+			syncingKey = '';
 			busy = false;
 		}
 	}
@@ -763,7 +820,7 @@
 				class="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-sm text-sky-700 transition hover:bg-sky-500/20 disabled:opacity-50 dark:border-sky-600/50 dark:bg-sky-600/15 dark:text-sky-200 dark:hover:bg-sky-600/30"
 				title="Check all titles for newer chapters and sort by latest update"
 			>
-				<RefreshCw class="h-4 w-4 {busy && batch.phase === 'sync' ? 'animate-spin' : ''}" />
+				<RefreshCw class="h-4 w-4 {batch.active && batch.phase === 'sync' ? 'animate-spin' : ''}" />
 				Sync Updates
 			</button>
 			<button
@@ -773,7 +830,7 @@
 				class="flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-sm text-violet-700 transition hover:bg-violet-500/20 disabled:opacity-50 dark:border-violet-600/50 dark:bg-violet-600/15 dark:text-violet-200 dark:hover:bg-violet-600/30"
 				title="Import bookmark titles into library (metadata only)"
 			>
-				<RefreshCw class="h-4 w-4 {busy && !batch.active ? 'animate-spin' : ''}" />
+				<RefreshCw class="h-4 w-4 {syncingBookmarks ? 'animate-spin' : ''}" />
 				Sync Bookmarks
 			</button>
 			{#if items.length}
@@ -978,10 +1035,10 @@
 								onclick={() => handleSyncOne(e)}
 								disabled={batch.active || busy}
 								class="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 transition hover:bg-sky-500 hover:text-white disabled:opacity-50 dark:text-sky-400"
-								title="Check for new chapters (this title only)"
-								aria-label="Sync updates"
+								title="Check for new chapters and rebuild metadata (this title only)"
+								aria-label="Check for new chapters and rebuild metadata"
 							>
-								<RefreshCw class="h-4 w-4" />
+								<RefreshCw class="h-4 w-4 {syncingKey === e.key ? 'animate-spin' : ''}" />
 							</button>
 							<button
 								type="button"
