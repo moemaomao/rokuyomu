@@ -129,7 +129,17 @@ export type NovelChapterPayload = {
 	prevChapterId?: string | null;
 	nextChapterId?: string | null;
 	novelId?: string | null;
-	novelInfo?: { title?: string; id?: string } | null;
+	novelInfo?: {
+		title?: string;
+		id?: string;
+		cover?: string;
+		author?: string;
+		artist?: string;
+		type?: string;
+		description?: string;
+		genres?: string[];
+		authors?: string[];
+	} | null;
 	chapters?: { id: string; title: string; number?: number }[];
 	currentChapter?: { id: string; title?: string } | null;
 	prevChapter?: { id: string } | null;

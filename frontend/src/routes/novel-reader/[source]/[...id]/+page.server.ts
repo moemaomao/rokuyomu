@@ -3,6 +3,7 @@ import { error } from '@sveltejs/kit';
 import { remoteNovelChapter, remoteMangaDetails } from '$lib/server/scraperClient';
 import { isValidSource } from '$lib/server/sources';
 import { isNovelSource } from '$lib/utils/novelSources';
+import { getSeriesMetadata } from '$lib/utils/seriesMetadata';
 
 function novelIdFromChapter(chapterId: string): string {
 	let path = chapterId.replace(/\/+$/, '');
@@ -116,7 +117,17 @@ export const load: PageServerLoad = async ({ params }) => {
 				: `/${fromScraper}`
 			: novelIdFromChapter(chapterId);
 
-		let novelInfo: { title?: string; id?: string; cover?: string } = {
+		let novelInfo: {
+			title?: string;
+			id?: string;
+			cover?: string;
+			author?: string;
+			artist?: string;
+			type?: string;
+			description?: string;
+			genres?: string[];
+			authors?: string[];
+		} = {
 			...(data.novelInfo ?? {}),
 			id: novelPath,
 			title: data.novelInfo?.title
@@ -141,13 +152,24 @@ export const load: PageServerLoad = async ({ params }) => {
 								: novelInfo.title && !looksLikeChapterTitle(novelInfo.title)
 									? novelInfo.title
 									: details.title) || novelInfo.title,
-						cover: normalizeCover(details.cover, source) || novelInfo.cover
+						cover: normalizeCover(details.cover, source) || novelInfo.cover,
+						description: details.description,
+						genres: details.genres,
+						...getSeriesMetadata(details.description, details.authors, details.type)
 					};
 				}
 			} catch (e) {
 				console.warn('[novel-reader] cover/title fetch failed', source, novelPath, e);
 			}
 		}
+		const metadata = getSeriesMetadata(
+			novelInfo.description,
+			novelInfo.authors,
+			novelInfo.type
+		);
+		novelInfo.author = novelInfo.author || metadata.author;
+		novelInfo.artist = novelInfo.artist || metadata.artist;
+		novelInfo.type = metadata.type;
 
 		if (!novelInfo.title || looksLikeChapterTitle(novelInfo.title)) {
 			const slug = novelPath

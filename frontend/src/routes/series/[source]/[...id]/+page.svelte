@@ -127,6 +127,11 @@
 					chapterTitle: chapter.title || `Chapter ${chapter.number}`,
 					novelTitle: manga?.title,
 					mangaId: manga?.id,
+					author,
+					artist: artists,
+					type,
+					synopsis,
+					genres: manga?.genres,
 					cover: manga?.cover || '',
 					onProgress: (p) => {
 						dlState = {
@@ -144,6 +149,9 @@
 					mangaId: manga?.id,
 					synopsis,
 					genres: manga?.genres,
+					author,
+					artist: artists,
+					type,
 					cover: manga?.cover || '',
 					onProgress: (p) => {
 						dlState = { ...dlState, [id]: p };

@@ -8,6 +8,7 @@ import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import debug from '$lib/utils/debug';
 import { isNovelSource } from '$lib/utils/novelSources';
+import { getSeriesMetadata } from '$lib/utils/seriesMetadata';
 
 const ROOT_CHAPTER_PREFIX: Record<string, string> = {
 	komiku: '/manga',
@@ -199,6 +200,11 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 		const chapters = [...(mangaDetails?.chapters || [])].sort(
 			(a, b) => (a.number ?? 0) - (b.number ?? 0)
 		);
+		const metadata = getSeriesMetadata(
+			mangaDetails?.description,
+			mangaDetails?.authors,
+			mangaDetails?.type
+		);
 
 		let currentChapterIndex = findChapterIndex(chapters, chapterId);
 		let currentChapter =
@@ -259,12 +265,20 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 						cover: mangaDetails.cover,
 						description: mangaDetails.description,
 						genres: mangaDetails.genres,
+						author: metadata.author,
+						artist: metadata.artist,
+						type: metadata.type,
 						slug: mangaSlug
 					}
 				: {
 						id: mangaId,
 						title: mangaSlug.replace(/-/g, ' '),
 						cover: '',
+						description: '',
+						genres: [],
+						author: '',
+						artist: '',
+						type: '',
 						slug: mangaSlug
 					},
 			chapters,

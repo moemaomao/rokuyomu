@@ -440,6 +440,11 @@ export async function downloadNovelChapterPdf(opts: {
 	chapterTitle?: string;
 	novelTitle?: string;
 	mangaId?: string;
+	author?: string;
+	artist?: string;
+	type?: string;
+	synopsis?: string;
+	genres?: string[];
 	cover?: string;
 	batchMode?: boolean;
 	onProgress?: ProgressCb;
@@ -527,6 +532,11 @@ ${offlineHtml}
 							chapterTitle: title,
 							savedAt: Date.now(),
 							isNovel: true,
+							author: opts.author?.trim() || undefined,
+							artist: opts.artist?.trim() || undefined,
+							type: opts.type?.trim() || undefined,
+							synopsis: opts.synopsis?.trim() || undefined,
+							genres: opts.genres?.length ? opts.genres : undefined,
 							format: 'html'
 						}
 					});
@@ -627,6 +637,11 @@ ${offlineHtml}
 						chapterTitle: title,
 						savedAt: Date.now(),
 						isNovel: true,
+						author: opts.author?.trim() || undefined,
+						artist: opts.artist?.trim() || undefined,
+						type: opts.type?.trim() || undefined,
+						synopsis: opts.synopsis?.trim() || undefined,
+						genres: opts.genres?.length ? opts.genres : undefined,
 						format
 					},
 					contentHtml: offlineHtml

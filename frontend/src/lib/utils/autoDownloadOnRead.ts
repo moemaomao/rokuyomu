@@ -76,6 +76,9 @@ export async function autoDownloadMangaChapter(opts: {
 	mangaId?: string;
 	synopsis?: string;
 	genres?: string[];
+	author?: string;
+	artist?: string;
+	type?: string;
 	cover?: string;
 	pageUrls?: string[];
 }): Promise<void> {
@@ -97,6 +100,9 @@ export async function autoDownloadMangaChapter(opts: {
 			mangaId: opts.mangaId,
 			synopsis: opts.synopsis,
 			genres: opts.genres,
+			author: opts.author,
+			artist: opts.artist,
+			type: opts.type,
 			cover: opts.cover,
 			pageUrls: opts.pageUrls,
 			offlineOnly: true,
@@ -115,6 +121,11 @@ export async function autoDownloadNovelChapter(opts: {
 	chapterTitle?: string;
 	novelTitle?: string;
 	mangaId?: string;
+	author?: string;
+	artist?: string;
+	type?: string;
+	synopsis?: string;
+	genres?: string[];
 	cover?: string;
 	content: string;
 }): Promise<void> {
@@ -188,6 +199,11 @@ export async function autoDownloadNovelChapter(opts: {
 					chapterTitle,
 					savedAt: Date.now(),
 					isNovel: true,
+					author: opts.author,
+					artist: opts.artist,
+					type: opts.type,
+					synopsis: opts.synopsis,
+					genres: opts.genres,
 					format,
 					auto: true
 				}

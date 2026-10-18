@@ -663,6 +663,11 @@ Nội dung:
 				chapterTitle: chTitle,
 				novelTitle,
 				mangaId: mangaId ? String(mangaId) : undefined,
+				author: (novelInfo as { author?: string } | null)?.author,
+				artist: (novelInfo as { artist?: string } | null)?.artist,
+				type: (novelInfo as { type?: string } | null)?.type,
+				synopsis: (novelInfo as { description?: string } | null)?.description,
+				genres: (novelInfo as { genres?: string[] } | null)?.genres,
 				cover: cover || undefined,
 				onProgress: (p) => {
 					if (p.phase === 'fetch') {
@@ -1018,6 +1023,11 @@ onMount(() => {
 			chapterTitle: String(title || 'Chapter'),
 			novelTitle: (novelInfo as { title?: string } | null)?.title || '',
 			mangaId: (novelInfo as { id?: string } | null)?.id || '',
+			author: (novelInfo as { author?: string } | null)?.author,
+			artist: (novelInfo as { artist?: string } | null)?.artist,
+			type: (novelInfo as { type?: string } | null)?.type,
+			synopsis: (novelInfo as { description?: string } | null)?.description,
+			genres: (novelInfo as { genres?: string[] } | null)?.genres,
 			cover: (novelInfo as { cover?: string } | null)?.cover || '',
 			content: html
 		}).then(() => refreshOfflineStatus());

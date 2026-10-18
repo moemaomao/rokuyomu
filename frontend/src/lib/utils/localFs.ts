@@ -433,7 +433,10 @@ export async function saveMangaChapterToDisk(opts: {
 			genres:
 				Array.isArray(opts.meta.genres) && opts.meta.genres.length
 					? opts.meta.genres
-					: previousMeta.genres
+					: previousMeta.genres,
+			author: opts.meta.author || previousMeta.author,
+			artist: opts.meta.artist || previousMeta.artist,
+			type: opts.meta.type || previousMeta.type
 		};
 		delete (titleMeta as any).chapterId;
 		delete (titleMeta as any).chapterTitle;
@@ -478,6 +481,14 @@ export async function saveNovelPdfToDisk(opts: {
 			source: opts.meta.source || prev.source,
 			novelTitle: opts.meta.novelTitle || prev.novelTitle || opts.novelTitle,
 			mangaId: opts.meta.mangaId || prev.mangaId,
+			author: opts.meta.author || prev.author,
+			artist: opts.meta.artist || prev.artist,
+			type: opts.meta.type || prev.type,
+			synopsis: opts.meta.synopsis || prev.synopsis,
+			genres:
+				Array.isArray(opts.meta.genres) && opts.meta.genres.length
+					? opts.meta.genres
+					: prev.genres,
 			isNovel: true,
 			updatedAt: Date.now()
 		};

@@ -603,6 +603,9 @@ $effect(() => {
 					: undefined,
 				synopsis: (mangaInfo as { description?: string } | null)?.description,
 				genres: (mangaInfo as { genres?: string[] } | null)?.genres,
+				author: (mangaInfo as { author?: string } | null)?.author,
+				artist: (mangaInfo as { artist?: string } | null)?.artist,
+				type: (mangaInfo as { type?: string } | null)?.type,
 				cover: (mangaInfo as { cover?: string } | null)?.cover || '',
 				onProgress: (p) => {
 					if (p.phase === 'pages') {
@@ -748,6 +751,9 @@ $effect(() => {
 			mangaId: (mangaInfo as { id?: string } | null)?.id || '',
 			synopsis: (mangaInfo as { description?: string } | null)?.description,
 			genres: (mangaInfo as { genres?: string[] } | null)?.genres,
+			author: (mangaInfo as { author?: string } | null)?.author,
+			artist: (mangaInfo as { artist?: string } | null)?.artist,
+			type: (mangaInfo as { type?: string } | null)?.type,
 			cover: (mangaInfo as { cover?: string } | null)?.cover || '',
 			pageUrls: list.filter(Boolean)
 		}).then(() => refreshOfflineStatus());

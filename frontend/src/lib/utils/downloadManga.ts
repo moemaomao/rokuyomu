@@ -260,6 +260,9 @@ export async function downloadChapter(opts: {
 	mangaId?: string;
 	synopsis?: string;
 	genres?: string[];
+	author?: string;
+	artist?: string;
+	type?: string;
 	cover?: string;
 	pageUrls?: string[];
 	pageBlobs?: (PageBlob | null)[];
@@ -276,6 +279,9 @@ export async function downloadChapter(opts: {
 		mangaId,
 		synopsis,
 		genres,
+		author,
+		artist,
+		type,
 		cover,
 		pageUrls,
 		forceZip = false,
@@ -504,6 +510,9 @@ export async function downloadChapter(opts: {
 					genres: Array.isArray(genres)
 						? genres.map((genre) => String(genre).trim()).filter(Boolean)
 						: [],
+					author: author?.trim() || undefined,
+					artist: artist?.trim() || undefined,
+					type: type?.trim() || undefined,
 					chapterId,
 					chapterTitle,
 					savedAt: Date.now(),
