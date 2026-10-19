@@ -112,7 +112,6 @@
 		const pending = list.filter((e) => !coverUrls[e.key]);
 		if (!pending.length) return;
 
-		// Parallel workers — update coverUrls as each finishes so covers appear ASAP.
 		const concurrency = Math.min(16, Math.max(4, pending.length));
 		let cursor = 0;
 		async function worker() {
@@ -936,7 +935,10 @@
 					<strong>Sync</strong> (per card or Sync Updates) refreshes latest chapter and sorts by
 					newest update.
 				</li>
-				<li>Firefox/Safari: metadata only; downloads fall back to ZIP / single file.</li>
+				<li>
+					Browsers without folder access cannot save directly into a device folder: manga downloads
+					fall back to ZIP / single files. Auto-downloads remain in the app's offline browser storage.
+				</li>
 			</ul>
 		</div>
 	</div>

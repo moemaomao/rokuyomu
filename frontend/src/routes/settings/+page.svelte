@@ -609,8 +609,9 @@
 			<p
 				class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
 			>
-				This browser does not support the File System Access API. Downloads will use browser file
-				save even if Local folder is selected.
+				This browser does not support folder access. Selecting Local folder cannot save directly
+				into a device folder here: manual manga downloads fall back to ZIP, while auto-downloads
+				stay in the app's offline browser storage.
 			</p>
 		{/if}
 
@@ -786,9 +787,10 @@
 					Auto-download while reading
 				</span>
 				<span class="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-					Save chapters automatically for offline reading when you open them in the reader (no Download
-					button needed). Manga uses image storage; novels keep text offline. Does not trigger ZIP /
-					PDF / EPUB browser downloads.
+					Save chapters to the app's offline browser storage when you open them in the reader (no
+					Download button needed). A device-folder copy is only possible when this browser supports
+					folder access and its permission remains active. Does not trigger ZIP / PDF / EPUB browser
+					downloads.
 				</span>
 			</span>
 		</label>
