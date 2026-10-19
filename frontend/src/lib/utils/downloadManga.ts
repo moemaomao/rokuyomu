@@ -299,7 +299,6 @@ export async function downloadChapter(opts: {
 
 	report({ phase: 'pages', current: 0, total: 1, message: 'Loading pages…' });
 
-	// Already offline (IDB) — mark library + done, do not re-fetch network
 	try {
 		const existing = await getOfflineMangaChapter(source, String(chapterId));
 		if (existing?.pages?.length) {
@@ -334,7 +333,6 @@ export async function downloadChapter(opts: {
 		console.warn('[download] offline check', e);
 	}
 
-	// Already on disk — hydrate IDB + library, skip network
 	if (supportsFileSystemAccess() && (mangaTitle || chapterTitle)) {
 		try {
 			const root = await getLibraryRoot();
@@ -497,65 +495,72 @@ export async function downloadChapter(opts: {
 				total: pages.length,
 				message: 'Saving to local folder…'
 			});
-			const path = await saveMangaChapterToDisk({
-				root,
-				mangaTitle: mangaSafe,
-				chapterTitle: chapterSafe,
-				pages,
-				meta: {
-					source,
-					mangaId: mangaId || '',
-					mangaTitle: mangaTitle || mangaSafe,
-					synopsis: mangaSynopsis(synopsis),
-					genres: Array.isArray(genres)
-						? genres.map((genre) => String(genre).trim()).filter(Boolean)
-						: [],
-					author: author?.trim() || undefined,
-					artist: artist?.trim() || undefined,
-					type: type?.trim() || undefined,
-					chapterId,
-					chapterTitle,
-					savedAt: Date.now(),
-					pageCount: pages.length
-				}
-			});
-
-			void cacheLibraryCover({
-				mangaId: mangaId || chapterId,
-				sourceId: source,
-				coverUrl: cover || '',
-				title: mangaTitle || mangaSafe,
-				isNovel: false
-			});
-
 			try {
-				await upsertLibraryEntry({
-					mangaId: mangaId || chapterId,
-					mangaTitle: mangaTitle || mangaSafe,
-					cover: cover || '',
-					sourceId: source,
-					isNovel: false,
-					localPath: path,
-					chapters: [
-						{
-							chapterId: String(chapterId),
-							chapterTitle,
-							savedAt: Date.now(),
-							pageCount: pages.length
-						}
-					]
+				const path = await saveMangaChapterToDisk({
+					root,
+					mangaTitle: mangaSafe,
+					chapterTitle: chapterSafe,
+					pages,
+					meta: {
+						source,
+						mangaId: mangaId || '',
+						mangaTitle: mangaTitle || mangaSafe,
+						synopsis: mangaSynopsis(synopsis),
+						genres: Array.isArray(genres)
+							? genres.map((genre) => String(genre).trim()).filter(Boolean)
+							: [],
+						author: author?.trim() || undefined,
+						artist: artist?.trim() || undefined,
+						type: type?.trim() || undefined,
+						chapterId,
+						chapterTitle,
+						savedAt: Date.now(),
+						pageCount: pages.length
+					}
 				});
-			} catch (e) {
-				console.warn('[library] upsert failed', e);
-			}
 
-			report({
-				phase: 'done',
-				current: pages.length,
-				total: pages.length,
-				message: path
-			});
-			return;
+				void cacheLibraryCover({
+					mangaId: mangaId || chapterId,
+					sourceId: source,
+					coverUrl: cover || '',
+					title: mangaTitle || mangaSafe,
+					isNovel: false
+				});
+
+				try {
+					await upsertLibraryEntry({
+						mangaId: mangaId || chapterId,
+						mangaTitle: mangaTitle || mangaSafe,
+						cover: cover || '',
+						sourceId: source,
+						isNovel: false,
+						localPath: path,
+						chapters: [
+							{
+								chapterId: String(chapterId),
+								chapterTitle,
+								savedAt: Date.now(),
+								pageCount: pages.length
+							}
+						]
+					});
+				} catch (e) {
+					console.warn('[library] upsert failed', e);
+				}
+
+				report({
+					phase: 'done',
+					current: pages.length,
+					total: pages.length,
+					message: path
+				});
+				return;
+			} catch (e) {
+				console.warn('[download] disk save failed, falling back to offline/zip', e);
+				if (offlineOnly) {
+				} else {
+				}
+			}
 		}
 	}
 

@@ -62,8 +62,11 @@ function shortChapterFilename(chapterTitle: string, chapterId?: string): string 
 async function getSilentLibraryRoot() {
 	if (!prefersDiskDownload() || !supportsFileSystemAccess()) return null;
 	try {
-		return await ensureLibraryRoot();
-	} catch {
+		const root = await ensureLibraryRoot();
+		if (root) return root;
+		return null;
+	} catch (e) {
+		console.warn('[auto-download] silent library root', e);
 		return null;
 	}
 }

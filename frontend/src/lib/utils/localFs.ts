@@ -23,6 +23,21 @@ type DirectoryHandleWithEntries = FileSystemDirectoryHandle & {
 export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
 
 let memoryRoot: FileSystemDirectoryHandle | null = null;
+let sessionFsGranted = false;
+
+export function markFsSessionGranted(): void {
+	sessionFsGranted = true;
+}
+
+export function clearFsSession(): void {
+	memoryRoot = null;
+	sessionFsGranted = false;
+}
+
+function isFsPermissionError(e: unknown): boolean {
+	const name = (e as any)?.name || '';
+	return name === 'NotAllowedError' || name === 'SecurityError';
+}
 
 export function supportsFileSystemAccess(): boolean {
 	return (
@@ -219,6 +234,7 @@ export async function pickLibraryRoot(): Promise<FileSystemDirectoryHandle | nul
 		await ensureSubdirs(root);
 
 		memoryRoot = root;
+		sessionFsGranted = true;
 		await idbPutHandle(root);
 		return root;
 	} catch (e: any) {
@@ -230,10 +246,25 @@ export async function pickLibraryRoot(): Promise<FileSystemDirectoryHandle | nul
 
 export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null> {
 	if (!supportsFileSystemAccess()) return null;
+	if (memoryRoot && sessionFsGranted) {
+		if (!(memoryRoot as any).__rokuyomuSubdirs) {
+			await ensureSubdirs(memoryRoot).catch(() => {});
+			(memoryRoot as any).__rokuyomuSubdirs = true;
+		}
+		return memoryRoot;
+	}
 
 	if (memoryRoot) {
 		const ok = await ensurePermission(memoryRoot, { request: false });
 		if (ok) {
+			sessionFsGranted = true;
+			if (!(memoryRoot as any).__rokuyomuSubdirs) {
+				await ensureSubdirs(memoryRoot).catch(() => {});
+				(memoryRoot as any).__rokuyomuSubdirs = true;
+			}
+			return memoryRoot;
+		}
+		if (isMobileLikeFs()) {
 			if (!(memoryRoot as any).__rokuyomuSubdirs) {
 				await ensureSubdirs(memoryRoot).catch(() => {});
 				(memoryRoot as any).__rokuyomuSubdirs = true;
@@ -247,9 +278,20 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	if (!stored) return null;
 
 	const ok = await ensurePermission(stored, { request: false });
-	if (!ok) return null;
+	if (!ok) {
+		if (isMobileLikeFs()) {
+			memoryRoot = stored;
+			if (!(stored as any).__rokuyomuSubdirs) {
+				await ensureSubdirs(stored).catch(() => {});
+				(stored as any).__rokuyomuSubdirs = true;
+			}
+			return stored;
+		}
+		return null;
+	}
 
 	memoryRoot = stored;
+	sessionFsGranted = true;
 	if (!(stored as any).__rokuyomuSubdirs) {
 		await ensureSubdirs(stored).catch(() => {});
 		(stored as any).__rokuyomuSubdirs = true;
@@ -266,16 +308,18 @@ export async function requestStoredLibraryRoot(): Promise<FileSystemDirectoryHan
 	if (memoryRoot) {
 		const ok = await ensurePermission(memoryRoot, { request: true });
 		if (ok) {
+			sessionFsGranted = true;
 			await ensureSubdirs(memoryRoot).catch(() => {});
 			return memoryRoot;
 		}
-		memoryRoot = null;
+		if (!isMobileLikeFs()) memoryRoot = null;
 	}
 	const stored = await idbGetHandle();
 	if (!stored) return null;
 	const ok = await ensurePermission(stored, { request: true });
 	if (!ok) return null;
 	memoryRoot = stored;
+	sessionFsGranted = true;
 	await ensureSubdirs(stored).catch(() => {});
 	return stored;
 }
@@ -428,6 +472,7 @@ export async function saveMangaChapterToDisk(opts: {
 	pages: { blob: Blob; ext: string }[];
 	meta?: Record<string, unknown>;
 }): Promise<string> {
+	try {
 	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const mangaRoot = await getOrCreateDir(library, 'Manga');
 	const titleDir = await getOrCreateDir(mangaRoot, opts.mangaTitle);
@@ -467,7 +512,14 @@ export async function saveMangaChapterToDisk(opts: {
 		const name = `${String(i + 1).padStart(3, '0')}.${ext}`;
 		await writeBlobFile(chDir, name, blob);
 	}
+	sessionFsGranted = true;
 	return libraryRelPath('Manga', opts.mangaTitle, opts.chapterTitle);
+	} catch (e) {
+		if (isFsPermissionError(e)) {
+			clearFsSession();
+		}
+		throw e;
+	}
 }
 
 export async function saveNovelPdfToDisk(opts: {
@@ -480,6 +532,7 @@ export async function saveNovelPdfToDisk(opts: {
 	contentText?: string;
 	contentHtml?: string;
 }): Promise<string> {
+	try {
 	const library = await opts.root.getDirectoryHandle(getLibrarySubdirName(), { create: true });
 	const novelRoot = await getOrCreateDir(library, 'Novel');
 	const titleDir = await getOrCreateDir(novelRoot, opts.novelTitle);
@@ -543,7 +596,14 @@ export async function saveNovelPdfToDisk(opts: {
 			new Blob([opts.contentHtml], { type: 'text/html;charset=utf-8' })
 		);
 	}
+	sessionFsGranted = true;
 	return libraryRelPath('Novel', opts.novelTitle, fname);
+	} catch (e) {
+		if (isFsPermissionError(e)) {
+			clearFsSession();
+		}
+		throw e;
+	}
 }
 
 export async function saveNovelFileToDisk(
@@ -1386,9 +1446,13 @@ export async function rebuildLibraryTitleMetadata(opts: {
 		if (!selected) continue;
 
 		const titleMeta = await readMetaJson(selected);
-		const mergedTitleMeta = { ...titleMeta, ...seriesMeta, updatedAt: Date.now() };
+		const mergedTitleMeta: Record<string, unknown> = {
+			...(titleMeta || {}),
+			...seriesMeta,
+			updatedAt: Date.now()
+		};
 		if (opts.isNovel && Array.isArray(titleMeta?.chapters)) {
-			mergedTitleMeta.chapters = titleMeta.chapters.map((chapter) =>
+			mergedTitleMeta.chapters = (titleMeta.chapters as unknown[]).map((chapter) =>
 				chapter && typeof chapter === 'object'
 					? { ...(chapter as Record<string, unknown>), ...seriesMeta }
 					: chapter
