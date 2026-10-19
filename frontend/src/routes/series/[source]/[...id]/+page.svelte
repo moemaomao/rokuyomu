@@ -179,6 +179,8 @@
 	let chapterLanguages = $state<string[]>([]);
 	let chapterLangFilter = $state('all');
 	let chapterRequestId = 0;
+	let languageFilterOpen = $state(false);
+	let languageFilterContainer: HTMLDivElement | null = $state(null);
 
 	let mangaIdPath = $derived((data as any).mangaId as string || manga?.id || '');
 	let selectedLang = $derived(((data as any).selectedLang as string) || 'all');
@@ -189,6 +191,7 @@
 		if (!mangaIdPath || seriesKey === lastChapterFilterSeries) return;
 		lastChapterFilterSeries = seriesKey;
 		chapterLangFilter = 'all';
+		languageFilterOpen = false;
 		chapterRequestId++;
 	});
 
@@ -726,6 +729,21 @@
 		}
 	}
 
+	function handleLanguageFilterPointerDown(event: PointerEvent) {
+		if (
+			languageFilterOpen &&
+			languageFilterContainer &&
+			event.target instanceof Node &&
+			!languageFilterContainer.contains(event.target)
+		) {
+			languageFilterOpen = false;
+		}
+	}
+
+	function handleLanguageFilterKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') languageFilterOpen = false;
+	}
+
 	function chapterCover(chapter: any): string {
 		return chapter?.cover || manga?.cover || '';
 	}
@@ -810,12 +828,16 @@
 		window.addEventListener('history-changed', onChange);
 		window.addEventListener('read-chapters-changed', onChange);
 		window.addEventListener('library-changed', onLibrary);
+		document.addEventListener('pointerdown', handleLanguageFilterPointerDown);
+		document.addEventListener('keydown', handleLanguageFilterKeydown);
 		return () => {
 			window.removeEventListener('bookmarks-changed', onChange);
 			window.removeEventListener('notifications-changed', onChange);
 			window.removeEventListener('history-changed', onChange);
 			window.removeEventListener('read-chapters-changed', onChange);
 			window.removeEventListener('library-changed', onLibrary);
+			document.removeEventListener('pointerdown', handleLanguageFilterPointerDown);
+			document.removeEventListener('keydown', handleLanguageFilterKeydown);
 		};
 	});
 
@@ -1228,19 +1250,88 @@
 				<div class="mt-6 flex flex-wrap items-center justify-between gap-2">
 					<div class="flex min-w-0 items-center gap-2">
 						{#if chapterLanguages.length > 1}
-							<select
-								class="chapter-language-select h-[38px] w-[min(8.5rem,31vw)] rounded-[10px] border px-2 text-xs"
-								aria-label="Filter chapters by language"
-								title="Filter chapters by language"
-								value={chapterLangFilter}
-								onchange={(event) =>
-									setChapterLanguage((event.currentTarget as HTMLSelectElement).value)}
-							>
-								<option value="all">All languages</option>
-								{#each chapterLanguages as language}
-									<option value={language}>{chapterLanguageLabel(language)}</option>
-								{/each}
-							</select>
+							<div class="relative" bind:this={languageFilterContainer}>
+								<button
+									type="button"
+									class="chapter-language-trigger flex h-[38px] max-w-[min(11rem,42vw)] items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition"
+									aria-label="Filter chapters by language"
+									aria-expanded={languageFilterOpen}
+									aria-controls="chapter-language-options"
+									onclick={() => (languageFilterOpen = !languageFilterOpen)}
+								>
+									<svg
+										class="h-4 w-4 shrink-0 text-[var(--accent)]"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.8"
+										aria-hidden="true"
+									>
+										<circle cx="12" cy="12" r="9" />
+										<path d="M3 12h18M12 3a15 15 0 0 1 0 18m0-18a15 15 0 0 0 0 18" />
+									</svg>
+									<span class="truncate">
+										{chapterLangFilter === 'all'
+											? 'All languages'
+											: chapterLanguageLabel(chapterLangFilter)}
+									</span>
+									<svg
+										class="h-3.5 w-3.5 shrink-0 opacity-60 transition {languageFilterOpen
+											? 'rotate-180'
+											: ''}"
+										viewBox="0 0 20 20"
+										fill="currentColor"
+										aria-hidden="true"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M5.22 7.47a.75.75 0 0 1 1.06 0L10 11.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.53a.75.75 0 0 1 0-1.06Z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</button>
+								{#if languageFilterOpen}
+									<div
+										id="chapter-language-options"
+										class="chapter-language-menu absolute top-[calc(100%+0.5rem)] left-0 z-30 w-[min(15rem,80vw)] overflow-hidden rounded-xl border p-1.5 shadow-2xl"
+										role="group"
+										aria-label="Chapter languages"
+									>
+										{#each ['all', ...chapterLanguages] as language (language)}
+											<button
+												type="button"
+												class="chapter-language-option flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-xs transition"
+												class:chapter-language-option-active={chapterLangFilter === language}
+												aria-pressed={chapterLangFilter === language}
+												onclick={() => {
+													setChapterLanguage(language);
+													languageFilterOpen = false;
+												}}
+											>
+												<span class="truncate">
+													{language === 'all'
+														? 'All languages'
+														: chapterLanguageLabel(language)}
+												</span>
+												{#if chapterLangFilter === language}
+													<svg
+														class="h-4 w-4 shrink-0 text-[var(--accent)]"
+														viewBox="0 0 20 20"
+														fill="currentColor"
+														aria-hidden="true"
+													>
+														<path
+															fill-rule="evenodd"
+															d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.2 7.26a1 1 0 0 1-1.42 0l-3.8-3.83a1 1 0 1 1 1.42-1.41l3.09 3.11 6.49-6.54a1 1 0 0 1 1.414-.004Z"
+															clip-rule="evenodd"
+														/>
+													</svg>
+												{/if}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
 						{/if}
 					</div>
 
@@ -1736,23 +1827,32 @@
 		background: rgba(255, 255, 255, 0.05);
 		color: #d4d4d8;
 	}
-	.chapter-language-select {
+	.chapter-language-trigger {
 		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 		background-color: color-mix(in srgb, var(--accent) 14%, #18181b);
 		color: #f4f4f5;
-		accent-color: var(--accent);
-		color-scheme: dark;
 	}
-	.chapter-language-select:focus-visible {
+	.chapter-language-trigger:hover,
+	.chapter-language-trigger[aria-expanded='true'] {
+		border-color: color-mix(in srgb, var(--accent) 80%, white 10%);
+		background-color: color-mix(in srgb, var(--accent) 20%, #18181b);
+	}
+	.chapter-language-trigger:focus-visible,
+	.chapter-language-option:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
-	.chapter-language-select option {
+	.chapter-language-menu {
+		border-color: color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.12));
 		background-color: #18181b;
 		color: #f4f4f5;
+		box-shadow:
+			0 18px 42px rgba(0, 0, 0, 0.42),
+			0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
 	}
-	.chapter-language-select option:checked {
-		background-color: color-mix(in srgb, var(--accent) 35%, #18181b);
+	.chapter-language-option:hover,
+	.chapter-language-option-active {
+		background-color: color-mix(in srgb, var(--accent) 18%, #18181b);
 	}
 	.bookmark-group {
 		background: rgba(255, 255, 255, 0.06);
@@ -1860,18 +1960,27 @@
 		background: rgba(0, 0, 0, 0.04);
 		color: #3f3f46;
 	}
-	:global(html.light) .chapter-language-select {
+	:global(html.light) .chapter-language-trigger {
 		border-color: color-mix(in srgb, var(--accent) 48%, rgba(0, 0, 0, 0.18));
 		background-color: color-mix(in srgb, var(--accent) 10%, white);
 		color: #27272a;
-		color-scheme: light;
 	}
-	:global(html.light) .chapter-language-select option {
+	:global(html.light) .chapter-language-trigger:hover,
+	:global(html.light) .chapter-language-trigger[aria-expanded='true'] {
+		border-color: color-mix(in srgb, var(--accent) 70%, rgba(0, 0, 0, 0.2));
+		background-color: color-mix(in srgb, var(--accent) 18%, white);
+	}
+	:global(html.light) .chapter-language-menu {
+		border-color: color-mix(in srgb, var(--accent) 30%, rgba(0, 0, 0, 0.14));
 		background-color: white;
 		color: #27272a;
+		box-shadow:
+			0 18px 42px rgba(0, 0, 0, 0.16),
+			0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
 	}
-	:global(html.light) .chapter-language-select option:checked {
-		background-color: color-mix(in srgb, var(--accent) 28%, white);
+	:global(html.light) .chapter-language-option:hover,
+	:global(html.light) .chapter-language-option-active {
+		background-color: color-mix(in srgb, var(--accent) 16%, white);
 	}
 	:global(html.light) .bookmark-group {
 		background: rgba(0, 0, 0, 0.04);
