@@ -86,6 +86,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'littlepandatranslations',
 	'mznovels',
 	'zirusmusings',
+	'literaturecity',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {
