@@ -108,9 +108,10 @@ function stripHtml(html: string): string {
 function pathFromLink(link?: string, fallbackSlug?: string): string {
 	if (link) {
 		try {
-			const u = new URL(link);
-			const p = u.pathname.replace(/\/$/, '') || '/';
-			return p.startsWith('/') ? p : `/${p}`;
+			const u = new URL(link, 'https://literaturecity.com');
+			let p = u.pathname.replace(/\/+$/, '') || '/';
+			if (!p.startsWith('/')) p = `/${p}`;
+			return p;
 		} catch {
 			/* fall through */
 		}
@@ -532,7 +533,6 @@ export class LiteratureCitySource extends BaseSource {
 							if (idx.title) item.title = idx.title;
 							if (idx.cover) item.cover = idx.cover;
 						} catch {
-							/* keep HTML values */
 						}
 					})
 				);
@@ -749,7 +749,6 @@ export class LiteratureCitySource extends BaseSource {
 				}
 			}
 		} catch {
-			/* optional */
 		}
 
 		return {
@@ -898,6 +897,7 @@ export class LiteratureCitySource extends BaseSource {
 		const num = parseChapterNumber(rawTitle, p.slug);
 		const title = cleanChapterTitle(rawTitle, num);
 		const raw = p.content?.rendered || '';
+		const currentId = pathFromLink(p.link, p.slug);
 
 		if (looksLocked(raw)) {
 			throw new Error('Chapter is locked / premium on Literature City (Bluecoin)');
@@ -917,14 +917,19 @@ export class LiteratureCitySource extends BaseSource {
 			if (catId) {
 				const cat = await this.resolveCategory(catId);
 				const seriesSlug = cat?.slug || '';
-				const chs = await this.fetchChapters(catId, seriesSlug);
-				const currentId = pathFromLink(p.link, p.slug);
+				let chs = seriesSlug ? await this.fetchChaptersFromHtml(seriesSlug) : [];
+				if (!chs.length) {
+					chs = await this.fetchChapters(catId, seriesSlug);
+				}
 				const idx = chs.findIndex(
-					(c) => c.id === currentId || c.id.endsWith(`/${slug}`)
+					(c) =>
+						pathFromLink(c.id) === currentId ||
+						c.id.endsWith(`/${slug}`) ||
+						pathFromLink(c.id).endsWith(`/${slug}`)
 				);
 				if (idx >= 0) {
-					prevChapterId = chs[idx + 1]?.id ?? null;
-					nextChapterId = chs[idx - 1]?.id ?? null;
+					prevChapterId = chs[idx + 1] ? pathFromLink(chs[idx + 1].id) : null;
+					nextChapterId = chs[idx - 1] ? pathFromLink(chs[idx - 1].id) : null;
 				}
 			}
 		} catch {

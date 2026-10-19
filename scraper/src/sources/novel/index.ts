@@ -87,8 +87,10 @@ import LittlePandaTranslationsSource from '../impl/novel/LittlePandaTranslations
 import MzNovelsSource from '../impl/novel/MzNovels';
 import ZirusMusingsSource from '../impl/novel/ZirusMusings';
 import { LiteratureCitySource } from '../impl/novel/LiteratureCity';
+import { SecondLifeTranslationsSource } from '../impl/novel/SecondLifeTranslations';
 
 const novelSources: Record<string, IMangaSource> = {
+	secondlifetranslations: new SecondLifeTranslationsSource(),
 	literaturecity: new LiteratureCitySource(),
 	zirusmusings: new ZirusMusingsSource(),
 	mznovels: new MzNovelsSource(),

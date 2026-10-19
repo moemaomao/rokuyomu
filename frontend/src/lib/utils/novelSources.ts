@@ -87,6 +87,7 @@ export const NOVEL_SOURCE_IDS = new Set<string>([
 	'mznovels',
 	'zirusmusings',
 	'literaturecity',
+	'secondlifetranslations',
 ]);
 
 export function isNovelSource(sourceId: string | null | undefined): boolean {

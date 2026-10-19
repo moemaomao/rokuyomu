@@ -216,6 +216,7 @@ export const SOURCE_META: Record<string, SourceMeta> = {
 	kitsunedawn: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-orange-600' },
 	lunatoons: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-fuchsia-600' },
 	literaturecity: { flag: 'gb', lang: 'EN', isR18: false, color: 'bg-sky-600' },
+	secondlifetranslations: { flag: 'gb', lang: 'EN', isR18: true, color: 'bg-emerald-600' },
 };
 
 export const DEFAULT_META: SourceMeta = {
