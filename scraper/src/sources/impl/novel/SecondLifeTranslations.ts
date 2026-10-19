@@ -26,12 +26,25 @@ const PAGE_SIZE = 24;
 const CLEAR = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const CRYPT = 'rhbndjzvqkiexcwsfpogytumalVUQXWSAZKBJNTLEDGIRHCPFOMY';
 const DECRYPT: Record<string, string> = {};
+const LNC_TABLE: Record<string, string> = {};
 for (let i = 0; i < CLEAR.length; i++) {
 	DECRYPT[CRYPT[i]] = CLEAR[i];
+	LNC_TABLE[CLEAR[i]] = CRYPT[i];
 }
 
 function decryptJmbl(s: string): string {
-	return Array.from(s, (c) => DECRYPT[c] ?? c).join('');
+	const a = Array.from(s, (c) => DECRYPT[c] ?? c).join('');
+	const b = Array.from(s, (c) => LNC_TABLE[c] ?? c).join('');
+	const score = (t: string) => {
+		const low = t.toLowerCase();
+		let s = 0;
+		for (const w of ['the', 'and', 'you', 'that', 'was', 'for', 'with', 'his', 'her', 'please', 'host']) {
+			if (low.includes(w)) s += 3;
+		}
+		if (/[bcdfghjklmnpqrstvwxyz]{5,}/i.test(t)) s -= 2;
+		return s;
+	};
+	return score(a) >= score(b) ? a : b;
 }
 
 function decodeEntities(s: string): string {
@@ -84,7 +97,7 @@ function parseChapterNumber(title: string, slug = ''): number {
 		if (m[2]) return parseFloat(`${m[1]}.${m[2]}`);
 		return parseInt(m[1], 10);
 	}
-	
+
 	const dotted = title.match(/^(\d+)\.(\d+)\b/);
 	if (dotted) return parseFloat(`${dotted[1]}.${dotted[2]}`);
 	const plain = title.match(/^(\d+)\b/);
@@ -156,10 +169,22 @@ function metaContent(html: string, prop: string): string {
 function decryptChapterHtml(raw: string): string {
 	let html = raw || '';
 	html = html.replace(
-		/<span[^>]*class=["'][^"']*jmbl[^"']*["'][^>]*>([\s\S]*?)<\/span>/gi,
-		(_, inner: string) => decryptJmbl(stripHtml(inner) || inner.replace(/<[^>]+>/g, ''))
+		/<[^>]+style=["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|position\s*:\s*absolute[^"']*(?:-999|left\s*:\s*-))[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi,
+		''
 	);
-	html = html.replace(/<[^>]*class=["'][^"']*jmbl-disclaimer[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi, '');
+	html = html.replace(
+		/<span[^>]*class=["'][^"']*jmbl[^"']*["'][^>]*>([\s\S]*?)<\/span>/gi,
+		(_, inner: string) => {
+			const text = stripHtml(inner) || inner.replace(/<[^>]+>/g, '');
+			return decryptJmbl(text);
+		}
+	);
+	
+	html = html.replace(/class=["'][^"']*jmbl[^"']*["']/gi, '');
+	html = html.replace(
+		/<[^>]*class=["'][^"']*jmbl-disclaimer[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi,
+		''
+	);
 	return html.trim();
 }
 
@@ -224,26 +249,49 @@ export class SecondLifeTranslationsSource extends BaseSource {
 	private parseListing(html: string): Manga[] {
 		const out: Manga[] = [];
 		const seen = new Set<string>();
+
 		const novelRe =
-			/<a[^>]+href=["'](https?:\/\/(?:www\.)?secondlifetranslations\.com\/novel\/([a-z0-9][a-z0-9-]*)\/?|\/novel\/([a-z0-9][a-z0-9-]*)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
+			/<a[^>]+href=["'](?:https?:\/\/(?:www\.)?secondlifetranslations\.com)?\/novel\/([a-z0-9][a-z0-9-]*)\/?["'][^>]*>([\s\S]*?)<\/a>/gi;
 		let m: RegExpExecArray | null;
 		while ((m = novelRe.exec(html)) !== null) {
-			const slug = (m[2] || m[3] || '').toLowerCase();
+			const slug = (m[1] || '').toLowerCase();
 			if (!slug || SKIP_PATHS.has(slug)) continue;
 			const id = `/novel/${slug}`;
 			if (seen.has(id)) continue;
 			seen.add(id);
 
-			const inner = m[4] || '';
+			const inner = m[2] || '';
 			const img =
-				inner.match(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["']/i)?.[1] ||
-				'';
-			const titleText =
-				cleanTitle(stripHtml(inner).split('\n')[0] || '') ||
-				slug
+				inner.match(
+					/<img[^>]+(?:src|data-src|data-lazy-src|data-safe-src)=["']([^"']+)["']/i
+				)?.[1] || '';
+			const alt = inner.match(/<img[^>]+alt=["']([^"']+)["']/i)?.[1] || '';
+			let titleText = cleanTitle(alt);
+			if (!titleText || titleText.length < 4) {
+				titleText = cleanTitle(stripHtml(inner).split('\n')[0] || '');
+			}
+	
+			if (
+				!titleText ||
+				titleText.length < 4 ||
+				(/^\[?[A-Za-z0-9]{1,12}\]?$/.test(titleText) && !/\s/.test(titleText))
+			) {
+				titleText = slug
 					.split('-')
 					.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
 					.join(' ');
+			}
+
+			let latestChapter: number | undefined;
+			const around = html.slice(
+				Math.max(0, m.index - 100),
+				Math.min(html.length, m.index + (m[0]?.length || 0) + 600)
+			);
+			const chM =
+				around.match(/Chapter\s*(\d+(?:\.\d+)?)/i) ||
+				around.match(/\b(\d+\.\d+)\s*:/) ||
+				around.match(/\bCh\.?\s*(\d+)/i);
+			if (chM) latestChapter = parseFloat(chM[1]);
 
 			out.push({
 				id,
@@ -252,30 +300,19 @@ export class SecondLifeTranslationsSource extends BaseSource {
 				sourceId: this.id,
 				type: 'novel',
 				lang: 'en',
-				status: 'Ongoing'
-			});
-		}
-
-		const hRe =
-			/<a[^>]+href=["'](https?:\/\/(?:www\.)?secondlifetranslations\.com\/novel\/([a-z0-9-]+)\/?)["'][^>]*>\s*([^<]{3,120})\s*<\/a>/gi;
-		while ((m = hRe.exec(html)) !== null) {
-			const slug = (m[2] || '').toLowerCase();
-			if (!slug || SKIP_PATHS.has(slug)) continue;
-			const id = `/novel/${slug}`;
-			if (seen.has(id)) continue;
-			seen.add(id);
-			out.push({
-				id,
-				title: cleanTitle(m[3]),
-				cover: '',
-				sourceId: this.id,
-				type: 'novel',
-				lang: 'en',
-				status: 'Ongoing'
+				status: 'Ongoing',
+				...(latestChapter != null ? { latestChapter } : {})
 			});
 		}
 
 		return out;
+	}
+
+	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+		const path = normalizeChapterId(chapterId);
+		const slug = this.seriesSlugFromChapterPath(path);
+		if (!slug) return null;
+		return `/novel/${slug}`;
 	}
 
 	async getLatestManga(page = 1): Promise<Manga[]> {
@@ -302,25 +339,42 @@ export class SecondLifeTranslationsSource extends BaseSource {
 			}
 		}
 
-		const need = out.filter((m) => !m.cover).slice(0, 12);
+		const slice = out.slice(0, PAGE_SIZE);
 		await Promise.all(
-			need.map(async (item) => {
+			slice.map(async (item) => {
+				const weakTitle =
+					!item.title ||
+					item.title.length < 5 ||
+					(/^\[?[A-Za-z0-9]{1,16}\]?$/.test(item.title) && !/\s/.test(item.title));
+				if (!weakTitle && item.cover && item.latestChapter != null) return;
 				try {
-					const html = await this.fetchPage(item.id + '/');
-					const ogImg = metaContent(html, 'og:image');
-					const ogTitle = metaContent(html, 'og:title');
+					const pageHtml = await this.fetchPage(item.id + '/');
+					const ogImg = metaContent(pageHtml, 'og:image');
+					const ogTitle = metaContent(pageHtml, 'og:title');
 					if (ogImg) item.cover = absUrl(ogImg);
 					if (ogTitle) item.title = cleanTitle(ogTitle);
-					if (/Completed/i.test(html)) item.status = 'Completed';
+					if (/Translation\s*Status\s*:\s*Completed/i.test(pageHtml)) {
+						item.status = 'Completed';
+					}
+					if (item.latestChapter == null) {
+						const total = pageHtml.match(/Total\s*Chapters?\s*:\s*(\d+)/i);
+						if (total) item.latestChapter = parseInt(total[1], 10);
+						else {
+							const lastCh = [
+								...pageHtml.matchAll(/Chapter\s*(\d+(?:\.\d+)?)/gi)
+							]
+								.map((x) => parseFloat(x[1]))
+								.filter((n) => n > 0);
+							if (lastCh.length) item.latestChapter = Math.max(...lastCh);
+						}
+					}
 				} catch {
 					/* ignore */
 				}
 			})
 		);
 
-		const start = (pageNum - 1) * PAGE_SIZE;
-		if (pageNum <= 1) return out.slice(0, PAGE_SIZE);
-		return out.slice(0, PAGE_SIZE).length ? out.slice(0, PAGE_SIZE) : out.slice(start, start + PAGE_SIZE);
+		return slice;
 	}
 
 	async searchManga(query: string, opts?: { page?: number }): Promise<Manga[]> {
@@ -435,7 +489,6 @@ export class SecondLifeTranslationsSource extends BaseSource {
 			if (name && name.length < 80) authors.push(name);
 		}
 
-		// Raw / alt title
 		const raw =
 			plain.match(/Raw\s*Title(?:\s*&\s*Source)?\s*:\s*([^\n]+)/i) ||
 			plain.match(/Other\s*Name[s]?\s*:\s*([^\n]+)/i) ||
@@ -595,7 +648,7 @@ export class SecondLifeTranslationsSource extends BaseSource {
 			if (a.number !== b.number) return a.number - b.number;
 			return a.id.localeCompare(b.id);
 		});
-	
+
 		let seq = 0;
 		for (const ch of list) {
 			if (!ch.number || ch.number <= 0) {
@@ -761,7 +814,7 @@ export class SecondLifeTranslationsSource extends BaseSource {
 		html = html.replace(/<style[\s\S]*?<\/style>/gi, '');
 		html = html.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
 		html = html.replace(/<iframe[\s\S]*?<\/iframe>/gi, '');
-
+		// nested ad/share blocks (repeat for nesting)
 		for (let n = 0; n < 4; n++) {
 			html = html.replace(
 				/<div[^>]+class=["'][^"']*(?:adsbygoogle|code-block|sharedaddy|jp-relatedposts|ad-container|\bads\b|advertisement|wpcnt|sd-content)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
@@ -853,11 +906,22 @@ export class SecondLifeTranslationsSource extends BaseSource {
 			}
 		}
 
+		const novelId = seriesSlug ? `/novel/${seriesSlug}` : null;
+
 		return {
 			title,
 			content,
 			prevChapterId,
-			nextChapterId
+			nextChapterId,
+			novelId,
+			novelInfo: novelId ? { id: novelId } : null
+		} as {
+			title: string;
+			content: string;
+			prevChapterId?: string | null;
+			nextChapterId?: string | null;
+			novelId?: string | null;
+			novelInfo?: { id: string } | null;
 		};
 	}
 }
