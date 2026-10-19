@@ -14,6 +14,7 @@ import {
 	getLibraryRoot,
 	supportsFileSystemAccess,
 	pickLibraryRoot,
+	requestStoredLibraryRoot,
 	scanLibraryFromDisk
 } from '$lib/utils/localFs';
 import { isNovelSource } from '$lib/utils/novelSources';
@@ -251,23 +252,38 @@ export function librarySupportsDisk(): boolean {
 	return supportsFileSystemAccess();
 }
 
+async function syncLibraryFolder(): Promise<void> {
+	try {
+		const { exportBookmarksToDisk } = await import('$lib/stores/bookmark.svelte');
+		await exportBookmarksToDisk();
+	} catch (e) {
+		console.warn('[library] export bookmarks after folder access', e);
+	}
+	try {
+		await resyncLibraryFromDisk();
+	} catch (e) {
+		console.warn('[library] resync after folder access', e);
+	}
+}
+
+export async function requestLibraryFolderPermission(): Promise<boolean> {
+	try {
+		const root = await requestStoredLibraryRoot();
+		hasRoot = !!root;
+		if (!root) return false;
+		await syncLibraryFolder();
+		return true;
+	} catch (e) {
+		console.warn('[library] request folder permission', e);
+		return false;
+	}
+}
+
 export async function chooseLibraryFolder(): Promise<boolean> {
 	try {
 		const h = await pickLibraryRoot();
 		hasRoot = !!h;
-		if (h) {
-			try {
-				const { exportBookmarksToDisk } = await import('$lib/stores/bookmark.svelte');
-				await exportBookmarksToDisk();
-			} catch (e) {
-				console.warn('[library] export bookmarks after pick', e);
-			}
-			try {
-				await resyncLibraryFromDisk();
-			} catch (e) {
-				console.warn('[library] resync after pick', e);
-			}
-		}
+		if (h) await syncLibraryFolder();
 		return !!h;
 	} catch (e) {
 		console.warn('[library] chooseLibraryFolder', e);

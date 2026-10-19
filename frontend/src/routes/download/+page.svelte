@@ -6,6 +6,7 @@
 		removeLibraryEntry,
 		clearLibrary,
 		chooseLibraryFolder,
+		requestLibraryFolderPermission,
 		librarySupportsDisk,
 		ensureLibraryLoaded,
 		isLibraryReady,
@@ -386,6 +387,19 @@
 			msg = ok
 				? 'OK — folder linked. Metadata, covers, and offline chapters restored from disk when present.'
 				: 'Folder picker cancelled or not supported.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function handleGrantFolderAccess() {
+		busy = true;
+		msg = '';
+		try {
+			const ok = await requestLibraryFolderPermission();
+			msg = ok
+				? 'Folder access restored. Downloads can save to the linked folder again.'
+				: 'Could not restore access to the linked folder. Choose the folder again to reconnect it.';
 		} finally {
 			busy = false;
 		}
@@ -826,6 +840,16 @@
 				>
 					<FolderOpen class="h-4 w-4" />
 					Folder
+				</button>
+				<button
+					type="button"
+					onclick={handleGrantFolderAccess}
+					disabled={busy || batch.active}
+					class="flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-900/60"
+					title="Ask the browser to restore permission for the linked download folder"
+				>
+					<HardDrive class="h-4 w-4" />
+					Grant access
 				</button>
 			{/if}
 			<button

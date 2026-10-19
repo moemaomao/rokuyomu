@@ -23,7 +23,6 @@ type DirectoryHandleWithEntries = FileSystemDirectoryHandle & {
 export const LIBRARY_FOLDER_NAME = ROOT_FOLDER_NAME;
 
 let memoryRoot: FileSystemDirectoryHandle | null = null;
-let permissionGranted = false;
 
 export function supportsFileSystemAccess(): boolean {
 	return (
@@ -84,27 +83,25 @@ async function ensurePermission(
 	handle: FileSystemDirectoryHandle,
 	opts?: { request?: boolean }
 ): Promise<boolean> {
-	if (permissionGranted && memoryRoot === handle) return true;
 	try {
 		const h = handle as any;
 		if (typeof h.queryPermission === 'function') {
 			let state = await h.queryPermission({ mode: 'readwrite' });
 			if (state === 'granted') {
-				permissionGranted = true;
 				return true;
 			}
 			if (opts?.request && typeof h.requestPermission === 'function') {
 				state = await h.requestPermission({ mode: 'readwrite' });
-				const ok = state === 'granted';
-				permissionGranted = ok;
-				return ok;
+				return state === 'granted';
 			}
 			return false;
 		}
-		permissionGranted = true;
+		if (opts?.request && typeof h.requestPermission === 'function') {
+			const state = await h.requestPermission({ mode: 'readwrite' });
+			return state === 'granted';
+		}
 		return true;
 	} catch {
-		permissionGranted = false;
 		return false;
 	}
 }
@@ -223,7 +220,6 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 			return memoryRoot;
 		}
 		memoryRoot = null;
-		permissionGranted = false;
 	}
 
 	const stored = await idbGetHandle();
@@ -233,7 +229,6 @@ export async function getLibraryRoot(): Promise<FileSystemDirectoryHandle | null
 	if (!ok) return null;
 
 	memoryRoot = stored;
-	permissionGranted = true;
 	if (!(stored as any).__rokuyomuSubdirs) {
 		await ensureSubdirs(stored).catch(() => {});
 		(stored as any).__rokuyomuSubdirs = true;
