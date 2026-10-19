@@ -17,16 +17,10 @@
 	import { FolderOpen, HardDrive, X } from 'lucide-svelte';
 
 	let {
-		progress = 0,
-		nearEnd = false,
 		chapterKey = '',
-		threshold = 92,
 		onGranted = undefined as undefined | (() => void)
 	}: {
-		progress?: number;
-		nearEnd?: boolean;
 		chapterKey?: string;
-		threshold?: number;
 		onGranted?: () => void;
 	} = $props();
 
@@ -37,7 +31,6 @@
 	let dismissedKeys = $state(new Set<string>());
 	let lastCheckedKey = $state('');
 
-	const atEnd = $derived(Boolean(nearEnd) || Number(progress) >= threshold);
 	const wantsDisk = $derived(shouldAutoDownloadOnRead() || prefersDiskDownload());
 	const dismissKey = $derived(`disk-perm:${chapterKey || 'chapter'}`);
 
@@ -45,18 +38,17 @@
 		browser &&
 			supported &&
 			wantsDisk &&
-			atEnd &&
 			(folderStatus === 'permission-needed' || folderStatus === 'unlinked') &&
 			!dismissedKeys.has(dismissKey)
 	);
 
 	$effect(() => {
 		if (!browser) return;
-		supported = librarySupportsDisk();
-		if (!supported || !wantsDisk) return;
+		const diskSupported = librarySupportsDisk();
+		supported = diskSupported;
+		if (!diskSupported || !wantsDisk) return;
 		const key = dismissKey;
-		const end = atEnd;
-		if (!end && key === lastCheckedKey) return;
+		if (key === lastCheckedKey) return;
 		lastCheckedKey = key;
 		void (async () => {
 			try {
@@ -64,13 +56,6 @@
 			} catch {
 				folderStatus = 'permission-needed';
 			}
-		})();
-	});
-
-	$effect(() => {
-		if (!browser || !atEnd || !wantsDisk || !supported) return;
-		void (async () => {
-			folderStatus = await getLibraryFolderStatus();
 		})();
 	});
 

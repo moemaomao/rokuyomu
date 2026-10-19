@@ -1057,7 +1057,6 @@ onMount(() => {
 >
 	<DownloadFolderOnboarding />
 	<DiskPermissionOverlay
-		progress={scrollProgress}
 		chapterKey={String(chapterId ?? '')}
 		onGranted={() => {
 			if (!autoDownloadOnRead) return;
