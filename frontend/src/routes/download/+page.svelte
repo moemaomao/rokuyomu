@@ -7,12 +7,14 @@
 		clearLibrary,
 		chooseLibraryFolder,
 		requestLibraryFolderPermission,
+		getLibraryFolderStatus,
 		librarySupportsDisk,
 		ensureLibraryLoaded,
 		isLibraryReady,
 		getOfflineChapterIds,
 		upsertLibraryEntry,
-		type LibraryEntry
+		type LibraryEntry,
+		type LibraryFolderStatus
 	} from '$lib/stores/download.svelte';
 	import { downloadChapter } from '$lib/utils/downloadManga';
 	import { downloadNovelChapterPdf } from '$lib/utils/downloadNovel';
@@ -42,6 +44,7 @@
 	let syncingBookmarks = $state(false);
 	let msg = $state('');
 	let diskOk = $state(false);
+	let folderStatus = $state<LibraryFolderStatus>('unlinked');
 	let offlineHrefs = $state<Record<string, string>>({});
 	let coverUrls = $state<Record<string, string>>({});
 
@@ -98,8 +101,8 @@
 	}
 
 	async function load() {
-
 		diskOk = librarySupportsDisk();
+		folderStatus = await getLibraryFolderStatus();
 		if (!isLibraryReady()) {
 			items = sortedItems(await ensureLibraryLoaded());
 		} else {
@@ -387,6 +390,7 @@
 			msg = ok
 				? 'OK — folder linked. Metadata, covers, and offline chapters restored from disk when present.'
 				: 'Folder picker cancelled or not supported.';
+			folderStatus = await getLibraryFolderStatus();
 		} finally {
 			busy = false;
 		}
@@ -400,6 +404,7 @@
 			msg = ok
 				? 'Folder access restored. Downloads can save to the linked folder again.'
 				: 'Could not restore access to the linked folder. Choose the folder again to reconnect it.';
+			folderStatus = await getLibraryFolderStatus();
 		} finally {
 			busy = false;
 		}
@@ -830,7 +835,7 @@
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
-			{#if diskOk}
+			{#if diskOk && folderStatus !== 'unlinked'}
 				<button
 					type="button"
 					onclick={handlePickFolder}
@@ -839,17 +844,7 @@
 					title="Choose / change the folder used for downloads"
 				>
 					<FolderOpen class="h-4 w-4" />
-					Folder
-				</button>
-				<button
-					type="button"
-					onclick={handleGrantFolderAccess}
-					disabled={busy || batch.active}
-					class="flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-900/60"
-					title="Ask the browser to restore permission for the linked download folder"
-				>
-					<HardDrive class="h-4 w-4" />
-					Grant access
+					{folderStatus === 'connected' ? 'Change folder' : 'Choose folder'}
 				</button>
 			{/if}
 			<button
@@ -932,6 +927,42 @@
 			{msg}
 		</p>
 	{/if}
+
+	<div
+		class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900/40"
+	>
+		<p class="text-zinc-600 dark:text-zinc-400">
+			<strong class="text-zinc-800 dark:text-zinc-200">Device folder:</strong>
+			{#if folderStatus === 'connected'}
+				connected — offline chapters are also saved in the app.
+			{:else if folderStatus === 'permission-needed'}
+				permission needed — grant access to save files there.
+			{:else if folderStatus === 'unsupported'}
+				not supported by this browser — offline app storage is still available.
+			{:else}
+				not connected — chapters can still be saved for offline reading in the app.
+			{/if}
+		</p>
+		{#if folderStatus === 'unlinked'}
+			<button
+				type="button"
+				onclick={handlePickFolder}
+				disabled={busy || batch.active}
+				class="rounded-md px-2 py-1 font-semibold text-violet-700 hover:bg-violet-50 dark:text-violet-300 dark:hover:bg-violet-950/40"
+			>
+				Connect folder
+			</button>
+		{:else if folderStatus === 'permission-needed'}
+			<button
+				type="button"
+				onclick={handleGrantFolderAccess}
+				disabled={busy || batch.active}
+				class="rounded-md px-2 py-1 font-semibold text-violet-700 hover:bg-violet-50 dark:text-violet-300 dark:hover:bg-violet-950/40"
+			>
+				Grant access
+			</button>
+		{/if}
+	</div>
 
 	<div
 		class="mb-6 flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/30 dark:text-zinc-400"
@@ -1148,7 +1179,7 @@
 							<span>Keep this tab open until the progress bar finishes.</span>
 						</li>
 						<li class="flex gap-2">
-							<span class="mt-0.5 shrink-0">ℹ</span>
+							<span class="mt-0.5 shrink-0">⚠</span>
 							<span>Chrome / Edge recommended for saving folders on disk.</span>
 						</li>
 					</ul>

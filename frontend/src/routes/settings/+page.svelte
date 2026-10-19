@@ -51,6 +51,12 @@
 		type DownloadMode,
 		type NovelDownloadFormat
 	} from '$lib/stores/preferences';
+	import {
+		chooseLibraryFolder,
+		getLibraryFolderStatus,
+		requestLibraryFolderPermission,
+		type LibraryFolderStatus
+	} from '$lib/stores/download.svelte';
 	import { supportsFileSystemAccess } from '$lib/utils/localFs';
 	import { clearNsfwConfirmed, isNsfwConfirmed } from '$lib/utils/nsfw';
 	import { clearHistory } from '$lib/stores/history';
@@ -64,6 +70,8 @@
 
 	let prefs = $state<AppPreferences>(getPreferences());
 	let ageConfirmed = $state(false);
+	let folderStatus = $state<LibraryFolderStatus>('unlinked');
+	let folderBusy = $state(false);
 
 	let storageBusy = $state(false);
 	let sourceCacheStats = $state<{ count: number; sources: number } | null>(null);
@@ -90,6 +98,7 @@
 		});
 		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 		refreshStorage();
+		void refreshFolderStatus();
 
 		const unsub = subscribePreferences((p) => {
 			prefs = p;
@@ -100,6 +109,29 @@
 			unsub();
 		};
 	});
+
+	async function refreshFolderStatus() {
+		folderStatus = await getLibraryFolderStatus();
+	}
+
+	async function handleFolderAccess() {
+		folderBusy = true;
+		try {
+			const ok =
+				folderStatus === 'permission-needed'
+					? await requestLibraryFolderPermission()
+					: await chooseLibraryFolder();
+			await refreshFolderStatus();
+			storageMsg = ok
+				? 'Download folder is ready.'
+				: folderStatus === 'unlinked'
+					? 'Folder was not connected. You can try again whenever you want.'
+					: 'Could not restore folder access. Choose the folder again to reconnect it.';
+			storageErr = '';
+		} finally {
+			folderBusy = false;
+		}
+	}
 
 	function updatePref<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) {
 		prefs = setPreferences({ [key]: value });
@@ -602,7 +634,8 @@
 		<p class="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">Save destination</p>
 		<p class="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 			Default is <strong class="text-zinc-700 dark:text-zinc-300">Local folder</strong>
-			(Rokuyomu/Download/…). First download may ask you to pick a parent folder (Chrome / Edge).
+			(Rokuyomu/Download/…). Folder access is optional; connect or restore it below. If you skip it,
+			chapters remain available in the app's offline storage.
 		</p>
 
 		{#if !supportsFileSystemAccess()}
@@ -685,6 +718,42 @@
 					>
 				</span>
 			</label>
+		</div>
+
+		<div class="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<p class="text-xs font-semibold text-zinc-800 dark:text-zinc-200">Device folder</p>
+					<p class="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+						{#if folderStatus === 'connected'}
+							Folder connected. Offline chapters are also saved in the app.
+						{:else if folderStatus === 'permission-needed'}
+							Folder linked, but browser permission needs to be granted again.
+						{:else if folderStatus === 'unsupported'}
+							Not supported by this browser. Use app offline storage or browser downloads.
+						{:else}
+							No device folder connected. You can still read saved chapters offline in the app.
+						{/if}
+					</p>
+				</div>
+				{#if folderStatus !== 'unsupported'}
+					<button
+						type="button"
+						onclick={handleFolderAccess}
+						disabled={folderBusy}
+						class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-900/60"
+					>
+						<HardDrive class="h-3.5 w-3.5" />
+						{folderBusy
+							? 'Please wait…'
+							: folderStatus === 'permission-needed'
+								? 'Grant access'
+								: folderStatus === 'connected'
+									? 'Change folder'
+									: 'Connect folder'}
+					</button>
+				{/if}
+			</div>
 		</div>
 
 		<!-- 2) Novel format (separate from manga ZIP) -->
@@ -790,7 +859,7 @@
 					Save chapters to the app's offline browser storage when you open them in the reader (no
 					Download button needed). A device-folder copy is only possible when this browser supports
 					folder access and its permission remains active. Does not trigger ZIP / PDF / EPUB browser
-					downloads.
+					downloads. Connecting a device folder is optional; manage it above.
 				</span>
 			</span>
 		</label>

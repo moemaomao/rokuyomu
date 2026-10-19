@@ -15,11 +15,13 @@ import {
 	supportsFileSystemAccess,
 	pickLibraryRoot,
 	requestStoredLibraryRoot,
-	scanLibraryFromDisk
+	getLibraryFolderStatus as readLibraryFolderStatus,
+	scanLibraryFromDisk,
+	type LibraryFolderStatus
 } from '$lib/utils/localFs';
 import { isNovelSource } from '$lib/utils/novelSources';
 
-export type { LibraryEntry, LibraryChapterRef };
+export type { LibraryEntry, LibraryChapterRef, LibraryFolderStatus };
 
 let entries = $state<LibraryEntry[]>([]);
 let ready = $state(false);
@@ -250,6 +252,10 @@ export function getLibraryLoadError(): string | null {
 
 export function librarySupportsDisk(): boolean {
 	return supportsFileSystemAccess();
+}
+
+export async function getLibraryFolderStatus(): Promise<LibraryFolderStatus> {
+	return readLibraryFolderStatus();
 }
 
 async function syncLibraryFolder(): Promise<void> {

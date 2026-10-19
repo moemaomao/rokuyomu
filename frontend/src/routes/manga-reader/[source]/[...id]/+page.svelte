@@ -23,6 +23,7 @@
 	} from '$lib/utils/offlineChapter';
 	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/download.svelte';
 	import { getPreferences, setPreferences } from '$lib/stores/preferences';
+	import DownloadFolderOnboarding from '$lib/components/DownloadFolderOnboarding.svelte';
 
 	const { data }: { data: PageData } = $props();
 let {
@@ -791,6 +792,7 @@ $effect(() => {
 		{isDarkMode ? 'bg-black text-zinc-100' : 'bg-zinc-100 text-zinc-900'}"
 	onmousemove={handleMouseMove}
 >
+	<DownloadFolderOnboarding />
 	<!-- Title bar -->
 	<div class="relative z-10 px-4 py-3 text-center">
 		<p

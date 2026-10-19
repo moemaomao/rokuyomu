@@ -30,6 +30,7 @@
 		listOfflineNovelChapters
 	} from '$lib/utils/offlineChapter';
 import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
+	import DownloadFolderOnboarding from '$lib/components/DownloadFolderOnboarding.svelte';
 	import {
 		getOfflineChapterIds,
 		ensureLibraryLoaded
@@ -1044,6 +1045,7 @@ onMount(() => {
 		? 'bg-zinc-950 text-zinc-100'
 		: 'bg-slate-100 text-zinc-900'}"
 >
+	<DownloadFolderOnboarding />
 	<!-- CONTENT -->
 	<article
 		id="novel-content"

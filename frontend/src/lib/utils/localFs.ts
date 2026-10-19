@@ -31,6 +31,12 @@ export function supportsFileSystemAccess(): boolean {
 	);
 }
 
+export type LibraryFolderStatus =
+	| 'unsupported'
+	| 'unlinked'
+	| 'permission-needed'
+	| 'connected';
+
 function openFsDb(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
 		const req = indexedDB.open(FS_DB_NAME, 1);
@@ -76,6 +82,21 @@ async function idbGetHandle(): Promise<FileSystemDirectoryHandle | null> {
 		return handle;
 	} catch {
 		return null;
+	}
+}
+
+export async function getLibraryFolderStatus(): Promise<LibraryFolderStatus> {
+	if (!supportsFileSystemAccess()) return 'unsupported';
+	const handle = memoryRoot || (await idbGetHandle());
+	if (!handle) return 'unlinked';
+	try {
+		const queryPermission = (handle as any).queryPermission;
+		if (typeof queryPermission !== 'function') return 'connected';
+		return (await queryPermission.call(handle, { mode: 'readwrite' })) === 'granted'
+			? 'connected'
+			: 'permission-needed';
+	} catch {
+		return 'permission-needed';
 	}
 }
 
