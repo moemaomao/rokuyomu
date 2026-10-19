@@ -32,6 +32,7 @@
 	} from '$lib/utils/offlineChapter';
 import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 	import DownloadFolderOnboarding from '$lib/components/DownloadFolderOnboarding.svelte';
+	import DiskPermissionOverlay from '$lib/components/DiskPermissionOverlay.svelte';
 	import {
 		getOfflineChapterIds,
 		ensureLibraryLoaded
@@ -1055,6 +1056,10 @@ onMount(() => {
 		: 'bg-slate-100 text-zinc-900'}"
 >
 	<DownloadFolderOnboarding />
+	<DiskPermissionOverlay
+		progress={scrollProgress}
+		chapterKey={String(chapterId ?? '')}
+	/>
 	<!-- CONTENT -->
 	<article
 		id="novel-content"

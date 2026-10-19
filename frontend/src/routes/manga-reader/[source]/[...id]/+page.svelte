@@ -28,6 +28,7 @@
 		subscribePreferences
 	} from '$lib/stores/preferences';
 	import DownloadFolderOnboarding from '$lib/components/DownloadFolderOnboarding.svelte';
+	import DiskPermissionOverlay from '$lib/components/DiskPermissionOverlay.svelte';
 
 	const { data }: { data: PageData } = $props();
 let {
@@ -182,6 +183,10 @@ $effect(() => {
 	let currentMode = $state<'webtoon' | 'page' | 'ltr'>('webtoon');
 	let showControls = $state(true);
 	let scrollProgress = $state(0);
+	let chapterNearEnd = $derived(
+		(Boolean(pages?.length) && currentPageIndex >= Math.max(0, (pages?.length || 1) - 1)) ||
+			scrollProgress >= 92
+	);
 	let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let scrollTrackingArmed = false;
 	let lastScrollY = $state(0);
@@ -805,6 +810,11 @@ $effect(() => {
 	onmousemove={handleMouseMove}
 >
 	<DownloadFolderOnboarding />
+	<DiskPermissionOverlay
+		progress={scrollProgress}
+		nearEnd={chapterNearEnd}
+		chapterKey={String(chapterId ?? '')}
+	/>
 	<!-- Title bar -->
 	<div class="relative z-10 px-4 py-3 text-center">
 		<p
