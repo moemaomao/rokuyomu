@@ -22,7 +22,11 @@
 		mangaPagesToObjectUrls
 	} from '$lib/utils/offlineChapter';
 	import { getOfflineChapterIds, ensureLibraryLoaded } from '$lib/stores/download.svelte';
-	import { getPreferences, setPreferences } from '$lib/stores/preferences';
+	import {
+		getPreferences,
+		setPreferences,
+		subscribePreferences
+	} from '$lib/stores/preferences';
 	import DownloadFolderOnboarding from '$lib/components/DownloadFolderOnboarding.svelte';
 
 	const { data }: { data: PageData } = $props();
@@ -187,10 +191,17 @@ $effect(() => {
 	let chapterListContainer = $state<HTMLDivElement | null>(null);
 	let chapterListElement = $state<HTMLDivElement | null>(null);
 	let dataSaver = $state(false);
+	let autoDownloadOnRead = $state(getPreferences().autoDownloadOnRead);
 	let imageQuality = $state(600);
 	let imgEpoch = $state(0);
 	let chapterLoading = $state(true);
 	let pendingChapterId = $state<string | null>(null);
+
+	onMount(() =>
+		subscribePreferences((preferences) => {
+			autoDownloadOnRead = preferences.autoDownloadOnRead;
+		})
+	);
 
 	$effect(() => {
 		if (!showChapterList) return;
@@ -736,6 +747,7 @@ $effect(() => {
 
 	$effect(() => {
 		if (!browser || offlineMode) return;
+		if (!autoDownloadOnRead) return;
 		const src = String(source || '');
 		const cid = String(chapterId ?? '');
 		const list = pages;

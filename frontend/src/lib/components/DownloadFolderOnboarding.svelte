@@ -7,6 +7,7 @@
     requestLibraryFolderPermission,
     type LibraryFolderStatus,
   } from "$lib/stores/download.svelte";
+  import { setPreferences } from "$lib/stores/preferences";
   import { FolderOpen, HardDrive, X } from "lucide-svelte";
 
   const SEEN_KEY = "rokuyomu_download_folder_onboarding_seen";
@@ -41,6 +42,7 @@
           ? await requestLibraryFolderPermission()
           : await chooseLibraryFolder();
       if (connected) {
+        setPreferences({ autoDownloadOnRead: true });
         dismiss();
         return;
       }
@@ -68,8 +70,8 @@
       <p
         class="mt-1 text-xs leading-relaxed text-violet-800 dark:text-violet-200"
       >
-        Downloaded chapters are saved in this app for offline reading. You can
-        optionally connect a device folder to keep a separate copy.
+        Connect a device folder to automatically save chapters you open to disk
+        as well as keeping them available offline in this app.
       </p>
       {#if folderStatus === "permission-needed"}
         <p class="mt-2 text-xs text-violet-800 dark:text-violet-200">

@@ -6,6 +6,7 @@
 		markChapterRead
 	} from '$lib/utils/readChapters';
 	import { browser } from '$app/environment';
+	import { getPreferences, subscribePreferences } from '$lib/stores/preferences';
 	import { goto } from '$app/navigation';
 	import {
 		Settings,
@@ -60,6 +61,7 @@ import { autoDownloadNovelChapter } from '$lib/utils/autoDownloadOnRead';
 
 	let offlineNovelMode = $state(false);
 	let offlineContent = $state<string | null>(null);
+	let autoDownloadOnRead = $state(getPreferences().autoDownloadOnRead);
 
 	function formatNovelHtml(raw: string | null | undefined): string {
 		const s = String(raw || '').trim();
@@ -951,6 +953,12 @@ Nội dung:
 		};
 	});
 
+onMount(() =>
+	subscribePreferences((preferences) => {
+		autoDownloadOnRead = preferences.autoDownloadOnRead;
+	})
+);
+
 onMount(() => {
 		loadSettings();
 		settingsReady = true;
@@ -1012,6 +1020,7 @@ onMount(() => {
 	$effect(() => {
 		if (!browser) return;
 		if (offlineNovelMode) return;
+		if (!autoDownloadOnRead) return;
 		const src = String(source || '');
 		const cid = String(chapterId || '');
 		const html = String(content || '').trim();
