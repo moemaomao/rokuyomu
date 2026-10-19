@@ -1059,6 +1059,22 @@ onMount(() => {
 	<DiskPermissionOverlay
 		progress={scrollProgress}
 		chapterKey={String(chapterId ?? '')}
+		onGranted={() => {
+			if (!autoDownloadOnRead) return;
+			const src = String(source || '');
+			const cid = String(chapterId || '');
+			const html = String(content || '').trim();
+			if (!src || !cid || html.length < 40) return;
+			void autoDownloadNovelChapter({
+				source: src,
+				chapterId: cid,
+				chapterTitle: String(title || 'Chapter'),
+				novelTitle: (novelInfo as { title?: string } | null)?.title || '',
+				mangaId: (novelInfo as { id?: string } | null)?.id || '',
+				cover: (novelInfo as { cover?: string } | null)?.cover || '',
+				content: html
+			});
+		}}
 	/>
 	<!-- CONTENT -->
 	<article

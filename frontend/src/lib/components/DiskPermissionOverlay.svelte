@@ -1,10 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import {
-		chooseLibraryFolder,
 		getLibraryFolderStatus,
 		librarySupportsDisk,
-		requestLibraryFolderPermission,
 		type LibraryFolderStatus
 	} from '$lib/stores/download.svelte';
 	import {
@@ -12,18 +10,24 @@
 		shouldAutoDownloadOnRead,
 		setPreferences
 	} from '$lib/stores/preferences';
+	import {
+		requestStoredLibraryRoot,
+		pickLibraryRoot
+	} from '$lib/utils/localFs';
 	import { FolderOpen, HardDrive, X } from 'lucide-svelte';
 
 	let {
 		progress = 0,
 		nearEnd = false,
 		chapterKey = '',
-		threshold = 92
+		threshold = 92,
+		onGranted = undefined as undefined | (() => void)
 	}: {
 		progress?: number;
 		nearEnd?: boolean;
 		chapterKey?: string;
 		threshold?: number;
+		onGranted?: () => void;
 	} = $props();
 
 	let supported = $state(false);
@@ -73,38 +77,70 @@
 	function dismiss() {
 		dismissedKeys = new Set([...dismissedKeys, dismissKey]);
 		message = '';
+		busy = false;
+	}
+
+	function runBackgroundAfterGrant() {
+		void (async () => {
+			try {
+				const { resyncLibraryFromDisk } = await import('$lib/stores/download.svelte');
+				await resyncLibraryFromDisk().catch(() => 0);
+			} catch {
+				/* ignore */
+			}
+			try {
+				const { exportBookmarksToDisk } = await import('$lib/stores/bookmark.svelte');
+				await exportBookmarksToDisk();
+			} catch {
+				/* ignore */
+			}
+			try {
+				onGranted?.();
+			} catch (e) {
+				console.warn('[DiskPermissionOverlay] onGranted', e);
+			}
+
+			try {
+				window.dispatchEvent(new CustomEvent('library-folder-granted'));
+			} catch {
+				/* ignore */
+			}
+		})();
 	}
 
 	async function grant() {
+		if (busy) return;
 		busy = true;
 		message = '';
 		try {
-			const connected =
+			const root =
 				folderStatus === 'permission-needed'
-					? await requestLibraryFolderPermission()
-					: await chooseLibraryFolder();
-			if (connected) {
-				setPreferences({ autoDownloadOnRead: true });
-				folderStatus = 'connected';
-				dismiss();
+					? await requestStoredLibraryRoot()
+					: await pickLibraryRoot();
+
+			if (!root) {
+				folderStatus = await getLibraryFolderStatus();
+				message =
+					folderStatus === 'permission-needed'
+						? 'Permission not granted. Tap Grant access again.'
+						: 'Folder not connected. Try again.';
+				busy = false;
 				return;
 			}
-			folderStatus = await getLibraryFolderStatus();
-			message =
-				folderStatus === 'permission-needed'
-					? 'Permission not granted. Tap Grant access again.'
-					: 'Folder not connected. Try again.';
+
+			setPreferences({ autoDownloadOnRead: true });
+			folderStatus = 'connected';
+			dismiss();
+			runBackgroundAfterGrant();
 		} catch (e) {
 			console.warn('[DiskPermissionOverlay]', e);
 			message = 'Could not open folder permission. Try again.';
-		} finally {
 			busy = false;
 		}
 	}
 </script>
 
 {#if visible}
-	<!-- backdrop -->
 	<div
 		class="fixed inset-0 z-[900] flex items-end justify-center bg-black/55 p-4 sm:items-center"
 		role="dialog"
@@ -141,12 +177,8 @@
 						Save this chapter to disk?
 					</h2>
 					<p class="mt-1.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
-						Auto-download is on, but the browser needs folder permission again
-						{#if folderStatus === 'permission-needed'}
-							(common on mobile each visit).
-						{:else}
-							— choose a folder once for this session.
-						{/if}
+						Tap Grant access once. The overlay closes right away — saving continues in the
+						background while you keep reading.
 					</p>
 				</div>
 			</div>
@@ -171,7 +203,7 @@
 				>
 					<FolderOpen class="h-4 w-4" />
 					{busy
-						? 'Waiting…'
+						? 'Allow in browser…'
 						: folderStatus === 'permission-needed'
 							? 'Grant access'
 							: 'Choose folder'}

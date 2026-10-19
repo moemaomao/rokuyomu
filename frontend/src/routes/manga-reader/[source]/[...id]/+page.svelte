@@ -148,6 +148,17 @@ $effect(() => {
 							if (i === Math.min(BATCH, total) - 1) {
 								currentPageIndex = 0;
 								imgEpoch += 1;
+								requestAnimationFrame(() => {
+									try {
+										window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+									} catch {
+										try {
+											window.scrollTo(0, 0);
+										} catch {
+											/* ignore */
+										}
+									}
+								});
 							}
 						}
 						if (i < total - 1 && (i + 1) % BATCH === 0) {
@@ -171,6 +182,20 @@ $effect(() => {
 		pages = incoming;
 		chapterLoading = false;
 		pendingChapterId = null;
+		currentPageIndex = 0;
+		imgEpoch += 1;
+		// Scroll only after new chapter content is painted — not before navigation
+		requestAnimationFrame(() => {
+			try {
+				window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+			} catch {
+				try {
+					window.scrollTo(0, 0);
+				} catch {
+					/* ignore */
+				}
+			}
+		});
 	})();
 
 	return () => {
@@ -434,6 +459,19 @@ $effect(() => {
 		window.scrollTo({ top: 0, behavior: 'smooth' });
 	}
 
+	function jumpToTopInstant() {
+		try {
+			// Instant jump only AFTER the new chapter is on screen — never before navigate.
+			window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+		} catch {
+			try {
+				window.scrollTo(0, 0);
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+
 	async function goToChapter(target: unknown) {
 		flushMangaProgress();
 		showChapterList = false;
@@ -449,10 +487,10 @@ $effect(() => {
 		if (!cleanId) return;
 		if (chapterIdMatches(cleanId, normChapterId(chapterId)) && pages.length > 0) return;
 
+		// Mark pending — keep current pages visible until new chapter is ready
+		// (do NOT scrollTo top or pages=[] here; that causes the "scroll up then change" flash)
 		pendingChapterId = cleanId;
-		currentPageIndex = 0;
-		imgEpoch += 1;
-		try { window.scrollTo(0, 0); } catch {}
+		chapterLoading = true;
 
 		try {
 			const targetChapter = chapters.find(
@@ -480,6 +518,9 @@ $effect(() => {
 						pages = urls.slice();
 						offlineMode = true;
 						chapterLoading = false;
+						currentPageIndex = 0;
+						imgEpoch += 1;
+						jumpToTopInstant();
 					}
 					if (i < total - 1 && (i + 1) % BATCH === 0) {
 						await new Promise((r) => setTimeout(r, 32));
@@ -495,19 +536,20 @@ $effect(() => {
 					console.warn('[reader] offline goto', e);
 				}
 				pendingChapterId = null;
+				// Ensure top after route id updates
+				requestAnimationFrame(() => jumpToTopInstant());
 				return;
 			}
 		} catch (e) {
 			console.warn('[reader] offline prefetch', e);
 		}
 
-		chapterLoading = true;
-		pages = [];
-
+		// Online: navigate without scrolling the old chapter; $effect will swap pages
 		try {
 			await goto(`/manga-reader/${source}/${cleanId}`, {
 				replaceState: true,
-				invalidateAll: true
+				invalidateAll: true,
+				noScroll: true
 			});
 		} catch (e) {
 			console.error('[reader] goToChapter failed', e);
@@ -521,6 +563,8 @@ $effect(() => {
 				pendingChapterId = null;
 				chapterLoading = false;
 				pages = rawPages ?? [];
+				currentPageIndex = 0;
+				jumpToTopInstant();
 			}
 		}, 12000);
 	}
