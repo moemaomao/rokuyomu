@@ -85,7 +85,7 @@ function parseChapterNumber(title: string, slug = ''): number {
 		if (m[2]) return parseFloat(`${m[1]}.${m[2]}`);
 		return parseInt(m[1], 10);
 	}
-	
+
 	const dotted = title.match(/^(\d+)\.(\d+)\b/);
 	if (dotted) return parseFloat(`${dotted[1]}.${dotted[2]}`);
 	const plain = title.match(/^(\d+)\b/);
@@ -423,6 +423,7 @@ export class SecondLifeTranslationsSource extends BaseSource {
 				.filter((g) => g.length > 1 && g.length < 40);
 			genres.push(...bits);
 		}
+
 		for (const tm of html.matchAll(
 			/href=["'][^"']*\/tag\/[^"']+["'][^>]*>([^<]+)</gi
 		)) {
@@ -450,7 +451,7 @@ export class SecondLifeTranslationsSource extends BaseSource {
 			} catch {
 			}
 		}
-
+	
 		chapters = this.finalizeChapters(chapters);
 
 		const latestNum = chapters.length ? chapters[0].number : undefined;
@@ -473,10 +474,12 @@ export class SecondLifeTranslationsSource extends BaseSource {
 
 	private finalizeChapters(raw: Chapter[]): Chapter[] {
 		const list = [...raw];
+
 		list.sort((a, b) => {
 			if (a.number !== b.number) return a.number - b.number;
 			return a.id.localeCompare(b.id);
 		});
+
 		let seq = 0;
 		for (const ch of list) {
 			if (!ch.number || ch.number <= 0) {
@@ -588,6 +591,74 @@ export class SecondLifeTranslationsSource extends BaseSource {
 		return [];
 	}
 
+	private extractChapterBody(html: string): string {
+		const startRe =
+			/<div[^>]+class=["'][^"']*\bentry-content\b[^"']*["'][^>]*>/i;
+		const start = html.search(startRe);
+		if (start >= 0) {
+			const openTag = html.slice(start).match(startRe)![0];
+			let i = start + openTag.length;
+			let depth = 1;
+			while (i < html.length && depth > 0) {
+				const nextOpen = html.indexOf('<div', i);
+				const nextClose = html.indexOf('</div>', i);
+				if (nextClose < 0) break;
+				if (nextOpen >= 0 && nextOpen < nextClose) {
+					depth++;
+					i = nextOpen + 4;
+				} else {
+					depth--;
+					if (depth === 0) {
+						return html.slice(start + openTag.length, nextClose);
+					}
+					i = nextClose + 6;
+				}
+			}
+		}
+
+		const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+		const scope = articleMatch?.[1] || html;
+		const paras: string[] = [];
+		const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+		let pm: RegExpExecArray | null;
+		while ((pm = pRe.exec(scope)) !== null) {
+			const inner = pm[1] || '';
+			const text = stripHtml(inner);
+			if (text.length < 20) continue;
+			if (
+				/^(previous|next|share|advertisements?|related posts?|leave a reply|you may also)/i.test(
+					text
+				)
+			) {
+				continue;
+			}
+			paras.push(`<p>${inner}</p>`);
+		}
+		if (paras.length >= 3) return paras.join('\n');
+		return '';
+	}
+
+	private cleanChapterBody(raw: string): string {
+		let html = raw || '';
+		html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+		html = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+		html = html.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
+		html = html.replace(/<iframe[\s\S]*?<\/iframe>/gi, '');
+		for (let n = 0; n < 4; n++) {
+			html = html.replace(
+				/<div[^>]+class=["'][^"']*(?:adsbygoogle|code-block|sharedaddy|jp-relatedposts|ad-container|\bads\b|advertisement|wpcnt|sd-content)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+				''
+			);
+		}
+		html = html.replace(/<p[^>]*>\s*Advertisements?\s*<\/p>/gi, '');
+		html = html.replace(/<h[1-6][^>]*>\s*Advertisements?\s*<\/h[1-6]>/gi, '');
+		html = html.replace(
+			/(?:<hr[^>]*>\s*)?(?:<div[^>]+class=["'][^"']*(?:sharedaddy|jp-|support)[^"']*["'][\s\S]*)$/i,
+			''
+		);
+		return html.trim();
+	}
+
 	async getChapterContent(chapterId: string): Promise<{
 		title: string;
 		content: string;
@@ -604,25 +675,16 @@ export class SecondLifeTranslationsSource extends BaseSource {
 		const num = parseChapterNumber(rawTitle, path.split('/').pop() || '');
 		const title = cleanChapterTitle(rawTitle, num);
 
-		let body =
-			html.match(
-				/<div[^>]+class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
-			)?.[1] || '';
+		let body = this.extractChapterBody(html);
+		body = this.cleanChapterBody(body);
 
-		if (!body) {
-			body =
-				html.match(
-					/<div[^>]+class=["'][^"']*content-area[^"']*["'][^>]*>([\s\S]*?)<\/div>/i
-				)?.[1] || '';
-		}
-
-		if (!body.trim()) {
-			throw new Error('Chapter body is empty');
+		if (!body.trim() || stripHtml(body).length < 80) {
+			throw new Error('Chapter body is empty or truncated');
 		}
 
 		if (
 			/members?\s+only|login\s+to\s+read|premium|subscribe\s+to\s+unlock/i.test(body) &&
-			body.replace(/<[^>]+>/g, '').trim().length < 120
+			stripHtml(body).length < 200
 		) {
 			throw new Error('Chapter is locked / members-only on Second Life Translations');
 		}
