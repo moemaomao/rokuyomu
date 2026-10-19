@@ -993,13 +993,13 @@ $effect(() => {
 				<div
 					id="manga-chapter-list"
 					bind:this={chapterListElement}
-					class="absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[120] max-h-[45vh] w-[min(15rem,calc(100vw-7.5rem))] -translate-x-1/2 overflow-y-auto rounded-xl border shadow-xl sm:max-h-[60vh] sm:w-[min(22rem,calc(100vw-1rem))]
+					class="absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[120] max-h-[50vh] w-[min(17rem,calc(100vw-7rem))] -translate-x-1/2 overflow-y-auto rounded-xl border shadow-xl sm:max-h-[60vh] sm:w-[min(22rem,calc(100vw-1rem))]
 						{isDarkMode
 							? 'border-white/10 bg-zinc-900/95 text-zinc-100'
 							: 'border-zinc-200 bg-white/95 text-zinc-800'}"
 				>
 					<div
-						class="sticky top-0 border-b px-2 py-1.5 text-[11px] font-semibold backdrop-blur sm:px-3 sm:py-2 sm:text-xs
+						class="sticky top-0 border-b px-2 py-1.5 text-xs font-semibold backdrop-blur sm:px-3 sm:py-2
 							{isDarkMode ? 'border-white/10 bg-zinc-900/95' : 'border-zinc-200 bg-white/95'}"
 					>
 						Chapter list
@@ -1025,7 +1025,7 @@ $effect(() => {
 							{/if}
 							<button
 								type="button"
-								class="min-w-0 flex-1 truncate py-1.5 pr-2 text-left text-xs transition sm:py-2.5 sm:text-sm
+								class="min-w-0 flex-1 truncate py-2 pr-2 text-left text-sm transition sm:py-2.5
 									{isReadChapter(chapter)
 										? 'opacity-60'
 										: isDarkMode
