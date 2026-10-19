@@ -20,6 +20,10 @@ import {
 	type LibraryFolderStatus
 } from '$lib/utils/localFs';
 import { isNovelSource } from '$lib/utils/novelSources';
+import {
+	clearOfflineChapters,
+	deleteOfflineChaptersForManga
+} from '$lib/utils/offlineChapter';
 
 export type { LibraryEntry, LibraryChapterRef, LibraryFolderStatus };
 
@@ -342,6 +346,7 @@ export async function upsertLibraryEntry(partial: {
 export async function removeLibraryEntry(mangaId: string, sourceId: string) {
 	if (!browser) return;
 	const key = libKey(mangaId, sourceId);
+	await deleteOfflineChaptersForManga(sourceId, mangaId);
 	await idbDeleteLibraryEntry(key);
 	await reloadFromIdb();
 	window.dispatchEvent(new CustomEvent('library-changed'));
@@ -349,6 +354,7 @@ export async function removeLibraryEntry(mangaId: string, sourceId: string) {
 
 export async function clearLibrary() {
 	if (!browser) return;
+	await clearOfflineChapters();
 	await idbClearLibrary();
 	entries = [];
 	window.dispatchEvent(new CustomEvent('library-changed'));

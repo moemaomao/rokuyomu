@@ -411,18 +411,31 @@
 	}
 
 	async function handleRemove(e: LibraryEntry) {
-		items = items.filter((x) => x.key !== e.key);
+		msg = '';
 		try {
 			await removeLibraryEntry(e.mangaId, e.sourceId);
-		} catch {
 			await load();
+		} catch (error) {
+			console.error('[download] failed to remove offline title', e.key, error);
+			msg = `Could not delete offline data for "${e.mangaTitle}". Please try again.`;
 		}
 	}
 
 	async function handleClear() {
-		if (!confirm('Clear all download list metadata? (Files on disk are not deleted.)')) return;
-		await clearLibrary();
-		await load();
+		if (
+			!confirm(
+				'Delete all offline chapters and clear the download list? Files on disk are not deleted.'
+			)
+		)
+			return;
+		msg = '';
+		try {
+			await clearLibrary();
+			await load();
+		} catch (e) {
+			console.error('[download] failed to clear offline library', e);
+			msg = 'Could not delete all offline data. Please try again.';
+		}
 	}
 
 
@@ -984,7 +997,7 @@
 					>
 					(JSON + covers) automatically.
 				</li>
-				<li>Manga chapters save as image folders; novels save PDF/EPUB (+ .txt for offline restore). Removing a title from this list only removes metadata — disk files stay. Pick the folder again to re-import.</li>
+				<li>Manga chapters save as image folders; novels save PDF/EPUB (+ .txt for offline restore). Removing a title deletes its offline chapters from the app, but files on disk stay. Pick the folder again to re-import.</li>
 				<li>
 					<strong>Download</strong> batch-downloads remaining chapters;
 					<strong>Sync</strong> (per card or Sync Updates) refreshes latest chapter and sorts by

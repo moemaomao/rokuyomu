@@ -407,6 +407,39 @@ export async function deleteOfflineChapter(
 	}
 }
 
+export async function deleteOfflineChaptersForManga(
+	sourceId: string,
+	mangaId: string
+): Promise<void> {
+	const db = await getDB();
+	const tx = db.transaction(['mangaChapters', 'novelChapters'], 'readwrite');
+	const mangaStore = tx.objectStore('mangaChapters');
+	const novelStore = tx.objectStore('novelChapters');
+	const [mangaChapters, novelChapters] = await Promise.all([
+		mangaStore.getAll(),
+		novelStore.getAll()
+	]);
+	const matches = (chapter: { sourceId: string; mangaId: string }) =>
+		chapter.sourceId === sourceId && sameManga(chapter.mangaId, mangaId);
+	await Promise.all([
+		...mangaChapters.filter(matches).map((chapter) => mangaStore.delete(chapter.key)),
+		...novelChapters.filter(matches).map((chapter) => novelStore.delete(chapter.key))
+	]);
+	await tx.done;
+	clearOfflineChapterMemoryCache();
+}
+
+export async function clearOfflineChapters(): Promise<void> {
+	const db = await getDB();
+	const tx = db.transaction(['mangaChapters', 'novelChapters'], 'readwrite');
+	await Promise.all([
+		tx.objectStore('mangaChapters').clear(),
+		tx.objectStore('novelChapters').clear()
+	]);
+	await tx.done;
+	clearOfflineChapterMemoryCache();
+}
+
 export function mangaPagesToObjectUrls(chapter: OfflineMangaChapter): string[] {
 	return chapter.pages.map((p) => URL.createObjectURL(p.blob));
 }
