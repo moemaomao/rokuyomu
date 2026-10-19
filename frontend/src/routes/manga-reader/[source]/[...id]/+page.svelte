@@ -993,13 +993,13 @@ $effect(() => {
 				<div
 					id="manga-chapter-list"
 					bind:this={chapterListElement}
-					class="absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[120] max-h-[60vh] w-[min(22rem,calc(100vw-1rem))] -translate-x-1/2 overflow-y-auto rounded-xl border shadow-xl
+					class="absolute bottom-[calc(100%+0.75rem)] left-1/2 z-[120] max-h-[45vh] w-[min(15rem,calc(100vw-7.5rem))] -translate-x-1/2 overflow-y-auto rounded-xl border shadow-xl sm:max-h-[60vh] sm:w-[min(22rem,calc(100vw-1rem))]
 						{isDarkMode
 							? 'border-white/10 bg-zinc-900/95 text-zinc-100'
 							: 'border-zinc-200 bg-white/95 text-zinc-800'}"
 				>
 					<div
-						class="sticky top-0 border-b px-3 py-2 text-xs font-semibold backdrop-blur
+						class="sticky top-0 border-b px-2 py-1.5 text-[11px] font-semibold backdrop-blur sm:px-3 sm:py-2 sm:text-xs
 							{isDarkMode ? 'border-white/10 bg-zinc-900/95' : 'border-zinc-200 bg-white/95'}"
 					>
 						Chapter list
@@ -1025,7 +1025,7 @@ $effect(() => {
 							{/if}
 							<button
 								type="button"
-								class="min-w-0 flex-1 truncate py-2.5 pr-2 text-left text-sm transition
+								class="min-w-0 flex-1 truncate py-1.5 pr-2 text-left text-xs transition sm:py-2.5 sm:text-sm
 									{isReadChapter(chapter)
 										? 'opacity-60'
 										: isDarkMode
@@ -1045,7 +1045,7 @@ $effect(() => {
 							</button>
 							{#if isChapterOffline(chapter.id)}
 								<span
-									class="flex h-8 w-8 shrink-0 items-center justify-center text-emerald-500"
+									class="flex h-7 w-7 shrink-0 items-center justify-center text-emerald-500 sm:h-8 sm:w-8"
 									role="status"
 									title="Chapter available offline"
 									aria-label="Chapter available offline"
@@ -1055,7 +1055,7 @@ $effect(() => {
 							{/if}
 							<button
 								type="button"
-								class="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition
+								class="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition sm:h-8 sm:w-8
 									{isChapterOffline(chapter.id)
 										? 'text-violet-500'
 										: isDarkMode

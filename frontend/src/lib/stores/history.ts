@@ -189,14 +189,16 @@ function lightEntry(entry: ReadingEntry): ReadingEntry {
 }
 
 
-async function persistHistoryToDisk(list: ReadingEntry[]) {
-	if (!browser || !supportsFileSystemAccess() || !prefersHistoryDisk()) return;
+async function persistHistoryToDisk(list: ReadingEntry[]): Promise<boolean> {
+	if (!browser || !prefersHistoryDisk()) return true;
+	if (!supportsFileSystemAccess()) return false;
 	try {
 		const root = await getLibraryRoot();
-		if (!root) return;
-		await saveHistoryJsonToDisk(list, root);
+		if (!root) return false;
+		return Boolean(await saveHistoryJsonToDisk(list, root));
 	} catch (e) {
 		console.warn('[history] disk snapshot failed', e);
+		return false;
 	}
 }
 
@@ -227,11 +229,12 @@ async function hydrateFromDiskIfNeeded(): Promise<ReadingEntry[]> {
 			return idbGetHistory();
 		}
 		const local = await idbGetHistory();
+		const tombstones = readTombstones();
 		const map = new Map<string, ReadingEntry>();
 		for (const h of [...diskRaw, ...local] as ReadingEntry[]) {
 			const light = lightEntry(h);
 			const key = normalizeMangaId(light.mangaId);
-			if (!key) continue;
+			if (!key || tombstones.has(key)) continue;
 			const existing = map.get(key);
 			if (!existing || light.timestamp > existing.timestamp) {
 				map.set(key, { ...light, mangaId: key });
@@ -372,7 +375,7 @@ export async function removeFromHistory(mangaId: string) {
 	historyCache = next;
 	window.dispatchEvent(new CustomEvent('history-changed'));
 
-	void persistHistoryToDisk(next);
+	await persistHistoryToDisk(next);
 	for (const h of removed) {
 		void deleteHistoryCoverFromDisk({ sourceId: h.sourceId, mangaId: h.mangaId }).catch(() => {});
 	}
@@ -437,29 +440,27 @@ export async function clearHistory() {
 
 	const list = await idbGetHistory();
 	for (const h of list) addTombstone(h.mangaId);
+	const tombstones = readTombstones();
 
 	await idbClearHistory();
 	historyCache = [];
 	window.dispatchEvent(new CustomEvent('history-changed'));
 
-	void persistHistoryToDisk([]);
+	const diskSaved = await persistHistoryToDisk([]);
 	for (const h of list) {
 		void deleteHistoryCoverFromDisk({ sourceId: h.sourceId, mangaId: h.mangaId }).catch(() => {});
 	}
 
 	const user = getUser();
-	if (user && db && list.length) {
+	if (user && db && tombstones.size > 0) {
 		const ok = await deleteCloudHistoryDocs(
 			user.uid,
-			list.map((h) => h.mangaId)
+			[...tombstones]
 		);
-		
-		if (ok) {
+
+		if (ok && diskSaved) {
 			writeTombstones(new Set());
 		}
-	} else if (!user) {
-	
-		writeTombstones(new Set());
 	}
 }
 
@@ -499,7 +500,7 @@ export async function syncHistoryOnLogin() {
 		historyCache = merged;
 		window.dispatchEvent(new CustomEvent('history-changed'));
 
-		void persistHistoryToDisk(merged);
+		const diskSaved = await persistHistoryToDisk(merged);
 
 		const tombstoneList = [...tombstones];
 		if (tombstoneList.length > 0) {
@@ -515,7 +516,7 @@ export async function syncHistoryOnLogin() {
 		}
 		await batch.commit();
 
-		writeTombstones(new Set());
+		if (diskSaved) writeTombstones(new Set());
 	} catch (e) {
 		console.error('Failed to sync history on login', e);
 		
