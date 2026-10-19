@@ -411,19 +411,39 @@ export async function deleteOfflineChaptersForManga(
 	sourceId: string,
 	mangaId: string
 ): Promise<void> {
+	const normalizedMangaId = normalizeMangaId(mangaId);
+	if (!normalizedMangaId) return;
+
 	const db = await getDB();
 	const tx = db.transaction(['mangaChapters', 'novelChapters'], 'readwrite');
 	const mangaStore = tx.objectStore('mangaChapters');
 	const novelStore = tx.objectStore('novelChapters');
-	const [mangaChapters, novelChapters] = await Promise.all([
-		mangaStore.getAll(),
-		novelStore.getAll()
+	const rawMangaId = String(mangaId || '').trim();
+	const unprefixedMangaId = normalizedMangaId.replace(/^\/+/, '');
+	const mangaIds = new Set([
+		rawMangaId,
+		normalizedMangaId,
+		rawMangaId.replace(/^\/+/, '').replace(/\/+$/, ''),
+		unprefixedMangaId,
+		`${unprefixedMangaId}/`,
+		`/${unprefixedMangaId}/`
 	]);
-	const matches = (chapter: { sourceId: string; mangaId: string }) =>
-		chapter.sourceId === sourceId && sameManga(chapter.mangaId, mangaId);
+	mangaIds.delete('');
+	const keyPrefix = `${sourceId}::`;
+	const collectKeys = async (store: typeof mangaStore | typeof novelStore) => {
+		const index = store.index('by-manga');
+		const keys = await Promise.all(
+			Array.from(mangaIds, (id) => index.getAllKeys(IDBKeyRange.only(id)))
+		);
+		return [...new Set(keys.flat().filter((key) => String(key).startsWith(keyPrefix)))];
+	};
+	const [mangaKeys, novelKeys] = await Promise.all([
+		collectKeys(mangaStore),
+		collectKeys(novelStore)
+	]);
 	await Promise.all([
-		...mangaChapters.filter(matches).map((chapter) => mangaStore.delete(chapter.key)),
-		...novelChapters.filter(matches).map((chapter) => novelStore.delete(chapter.key))
+		...mangaKeys.map((key) => mangaStore.delete(key)),
+		...novelKeys.map((key) => novelStore.delete(key))
 	]);
 	await tx.done;
 	clearOfflineChapterMemoryCache();

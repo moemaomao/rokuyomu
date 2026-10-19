@@ -40,6 +40,7 @@
 	let items = $state<LibraryEntry[]>([]);
 	let prefs = $state<AppPreferences>(getPreferences());
 	let busy = $state(false);
+	let removingKeys = $state<Set<string>>(new Set());
 	let syncingKey = $state('');
 	let syncingBookmarks = $state(false);
 	let msg = $state('');
@@ -411,13 +412,20 @@
 	}
 
 	async function handleRemove(e: LibraryEntry) {
+		if (removingKeys.has(e.key)) return;
+		removingKeys = new Set(removingKeys).add(e.key);
 		msg = '';
+		items = items.filter((x) => x.key !== e.key);
 		try {
 			await removeLibraryEntry(e.mangaId, e.sourceId);
-			await load();
 		} catch (error) {
 			console.error('[download] failed to remove offline title', e.key, error);
 			msg = `Could not delete offline data for "${e.mangaTitle}". Please try again.`;
+			await load();
+		} finally {
+			const next = new Set(removingKeys);
+			next.delete(e.key);
+			removingKeys = next;
 		}
 	}
 
@@ -884,7 +892,7 @@
 				<button
 					type="button"
 					onclick={handleClear}
-					disabled={batch.active}
+					disabled={batch.active || removingKeys.size > 0}
 					class="flex items-center gap-1.5 rounded-lg border border-red-400/40 bg-red-50 px-3 py-1.5 text-sm text-red-600 transition hover:bg-red-100 disabled:opacity-50 dark:border-red-500/30 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-500/10"
 				>
 					<Trash2 class="h-4 w-4" />
@@ -1129,9 +1137,13 @@
 							<button
 								type="button"
 								onclick={() => handleRemove(e)}
-								disabled={batch.active || busy}
+								disabled={batch.active || busy || removingKeys.has(e.key)}
 								class="flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/40 bg-red-50 text-red-600 transition hover:bg-red-500 hover:text-white disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
-								title="Remove from downloads"
+								title={
+									removingKeys.has(e.key)
+										? 'Removing offline data…'
+										: 'Remove from downloads'
+								}
 								aria-label="Remove"
 							>
 								<Trash2 class="h-4 w-4" />
