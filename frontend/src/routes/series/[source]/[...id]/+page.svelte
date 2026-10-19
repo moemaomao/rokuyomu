@@ -176,24 +176,48 @@
 	let chapterTotal = $state(0);
 	let chapterOffset = $state(0);
 	let hasMoreChapters = $state(false);
+	let chapterLanguages = $state<string[]>([]);
+	let chapterLangFilter = $state('all');
+	let chapterRequestId = 0;
 
 	let mangaIdPath = $derived((data as any).mangaId as string || manga?.id || '');
 	let selectedLang = $derived(((data as any).selectedLang as string) || 'all');
+	let lastChapterFilterSeries = '';
 
-	let displayedChapters = $derived(loadedChapters);
-	let remainingChapters = $derived(Math.max(0, chapterTotal - loadedChapters.length));
+	$effect(() => {
+		const seriesKey = `${source}:${mangaIdPath}`;
+		if (!mangaIdPath || seriesKey === lastChapterFilterSeries) return;
+		lastChapterFilterSeries = seriesKey;
+		chapterLangFilter = 'all';
+		chapterRequestId++;
+	});
+
+	let displayedChapters = $derived(
+		chapterLangFilter === 'all'
+			? loadedChapters
+			: loadedChapters.filter(
+					(chapter) => String(chapter.lang || '').trim().toLowerCase() === chapterLangFilter
+				)
+	);
+	let remainingChapters = $derived(Math.max(0, chapterTotal - displayedChapters.length));
 
 	const CHAPTERS_CACHE_PREFIX = 'rokuyomu:ch-cache:';
 
-	function chaptersCacheKey(src: string, id: string, lang: string, newest: boolean) {
-		return `${CHAPTERS_CACHE_PREFIX}${src}:${id}:${lang}:${newest ? 'new' : 'old'}`;
+	function chaptersCacheKey(
+		src: string,
+		id: string,
+		lang: string,
+		newest: boolean,
+		chapterLanguage: string
+	) {
+		return `${CHAPTERS_CACHE_PREFIX}${src}:${id}:${lang}:${newest ? 'new' : 'old'}:${chapterLanguage}`;
 	}
 
 	function saveChaptersCache() {
 		if (!source || !mangaIdPath) return;
 		try {
 			sessionStorage.setItem(
-				chaptersCacheKey(source, mangaIdPath, selectedLang, sortNewest),
+				chaptersCacheKey(source, mangaIdPath, selectedLang, sortNewest, chapterLangFilter),
 				JSON.stringify({
 					chapters: loadedChapters,
 					total: chapterTotal,
@@ -211,7 +235,8 @@
 		src: string,
 		id: string,
 		lang: string,
-		newest: boolean
+		newest: boolean,
+		chapterLanguage: string
 	): {
 		chapters: any[];
 		total: number;
@@ -220,12 +245,14 @@
 		sortNewest: boolean;
 	} | null {
 		try {
-			const raw = sessionStorage.getItem(chaptersCacheKey(src, id, lang, newest));
+			const raw = sessionStorage.getItem(
+				chaptersCacheKey(src, id, lang, newest, chapterLanguage)
+			);
 			if (!raw) return null;
 			const parsed = JSON.parse(raw);
 			if (!Array.isArray(parsed?.chapters) || parsed.chapters.length === 0) return null;
 			if (typeof parsed.ts === 'number' && Date.now() - parsed.ts > 2 * 60 * 60 * 1000) {
-				sessionStorage.removeItem(chaptersCacheKey(src, id, lang, newest));
+				sessionStorage.removeItem(chaptersCacheKey(src, id, lang, newest, chapterLanguage));
 				return null;
 			}
 			return {
@@ -250,6 +277,14 @@
 		if (!m) return;
 
 		const initial = [...(m.chapters || [])];
+		const languages = (data as any).chapterLanguages;
+		chapterLanguages = Array.isArray(languages)
+			? languages
+					.map((language: unknown) => String(language || '').trim().toLowerCase())
+					.filter(Boolean)
+			: [...new Set(initial.map((chapter) => String(chapter.lang || '').trim().toLowerCase()))]
+					.filter(Boolean)
+					.sort();
 		const idPath = ((data as any).mangaId as string) || m.id || '';
 		const lang = ((data as any).selectedLang as string) || 'all';
 
@@ -262,7 +297,7 @@
 		} catch {
 		}
 
-		const cache = readChaptersCache(src, idPath, lang, preferredNewest);
+		const cache = readChaptersCache(src, idPath, lang, preferredNewest, 'all');
 		if (
 			cache &&
 			cache.chapters.length >= initial.length &&
@@ -283,6 +318,7 @@
 
 	type ChaptersApiResponse = {
 		chapters?: any[];
+		chapterLanguages?: string[];
 		total?: number;
 		offset?: number;
 		limit?: number;
@@ -292,12 +328,14 @@
 
 	async function fetchChapterPage(offset: number, limit: number, newest: boolean, replace = false) {
 		if (!source || !mangaIdPath) return;
+		const requestId = replace ? ++chapterRequestId : chapterRequestId;
 		loadingMore = true;
 		try {
 			const params = new URLSearchParams({
 				source,
 				id: mangaIdPath,
 				lang: selectedLang,
+				chapterLang: chapterLangFilter,
 				offset: String(offset),
 				limit: String(limit),
 				sort: newest ? 'newest' : 'oldest'
@@ -305,6 +343,10 @@
 			const res = await fetch(`/api/manga-chapter?${params}`);
 			if (!res.ok) throw new Error(await res.text());
 			const json = (await res.json()) as ChaptersApiResponse;
+			if (requestId !== chapterRequestId) return;
+			if (Array.isArray(json.chapterLanguages)) {
+				chapterLanguages = json.chapterLanguages;
+			}
 			const batch = Array.isArray(json.chapters) ? json.chapters : [];
 			if (replace) {
 				loadedChapters = batch;
@@ -318,7 +360,7 @@
 		} catch (e) {
 			console.error('[load more chapters]', e);
 		} finally {
-			loadingMore = false;
+			if (requestId === chapterRequestId) loadingMore = false;
 		}
 	}
 
@@ -329,6 +371,7 @@
 
 	async function showAllChapters() {
 		if (loadingMore || !hasMoreChapters) return;
+		const requestId = chapterRequestId;
 		loadingMore = true;
 		try {
 			while (hasMoreChapters) {
@@ -336,6 +379,7 @@
 					source,
 					id: mangaIdPath,
 					lang: selectedLang,
+					chapterLang: chapterLangFilter,
 					offset: String(chapterOffset),
 					limit: String(LOAD_MORE_STEP),
 					sort: sortNewest ? 'newest' : 'oldest'
@@ -343,6 +387,10 @@
 				const res = await fetch(`/api/manga-chapter?${params}`);
 				if (!res.ok) break;
 				const json = (await res.json()) as ChaptersApiResponse;
+				if (requestId !== chapterRequestId) break;
+				if (Array.isArray(json.chapterLanguages)) {
+					chapterLanguages = json.chapterLanguages;
+				}
 				const batch = Array.isArray(json.chapters) ? json.chapters : [];
 				if (!batch.length) break;
 				loadedChapters = [...loadedChapters, ...batch];
@@ -355,7 +403,7 @@
 		} catch (e) {
 			console.error('[show all chapters]', e);
 		} finally {
-			loadingMore = false;
+			if (requestId === chapterRequestId) loadingMore = false;
 		}
 	}
 
@@ -653,6 +701,29 @@
 		chapterOffset = 0;
 		hasMoreChapters = true;
 		fetchChapterPage(0, 20, sortNewest, true);
+	}
+
+	function setChapterLanguage(language: string) {
+		if (chapterLangFilter === language) return;
+		chapterLangFilter = language;
+		loadedChapters = chapterLangFilter === 'all'
+			? [...(manga?.chapters || [])]
+			: loadedChapters.filter(
+					(chapter) =>
+						String(chapter.lang || '').trim().toLowerCase() === chapterLangFilter
+				);
+		chapterOffset = 0;
+		chapterTotal = 0;
+		hasMoreChapters = false;
+		void fetchChapterPage(0, 20, sortNewest, true);
+	}
+
+	function chapterLanguageLabel(language: string): string {
+		try {
+			return new Intl.DisplayNames(['en'], { type: 'language' }).of(language) || language;
+		} catch {
+			return language.toUpperCase();
+		}
 	}
 
 	function chapterCover(chapter: any): string {
@@ -1154,8 +1225,23 @@
 
 
 				<!-- Controls -->
-				<div class="mt-6 flex items-center justify-between gap-2">
-					<div class="flex items-center gap-2">
+				<div class="mt-6 flex flex-wrap items-center justify-between gap-2">
+					<div class="flex min-w-0 items-center gap-2">
+						{#if chapterLanguages.length > 1}
+							<select
+								class="detail-view-btn h-[38px] w-[min(8.5rem,31vw)] rounded-[10px] border bg-transparent px-2 text-xs"
+								aria-label="Filter chapters by language"
+								title="Filter chapters by language"
+								value={chapterLangFilter}
+								onchange={(event) =>
+									setChapterLanguage((event.currentTarget as HTMLSelectElement).value)}
+							>
+								<option value="all">All languages</option>
+								{#each chapterLanguages as language}
+									<option value={language}>{chapterLanguageLabel(language)}</option>
+								{/each}
+							</select>
+						{/if}
 					</div>
 
 					<div class="flex items-center gap-2">
