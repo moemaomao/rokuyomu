@@ -1229,7 +1229,7 @@
 					<div class="flex min-w-0 items-center gap-2">
 						{#if chapterLanguages.length > 1}
 							<select
-								class="detail-view-btn h-[38px] w-[min(8.5rem,31vw)] rounded-[10px] border bg-transparent px-2 text-xs"
+								class="chapter-language-select h-[38px] w-[min(8.5rem,31vw)] rounded-[10px] border px-2 text-xs"
 								aria-label="Filter chapters by language"
 								title="Filter chapters by language"
 								value={chapterLangFilter}
@@ -1736,6 +1736,24 @@
 		background: rgba(255, 255, 255, 0.05);
 		color: #d4d4d8;
 	}
+	.chapter-language-select {
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		background-color: color-mix(in srgb, var(--accent) 14%, #18181b);
+		color: #f4f4f5;
+		accent-color: var(--accent);
+		color-scheme: dark;
+	}
+	.chapter-language-select:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.chapter-language-select option {
+		background-color: #18181b;
+		color: #f4f4f5;
+	}
+	.chapter-language-select option:checked {
+		background-color: color-mix(in srgb, var(--accent) 35%, #18181b);
+	}
 	.bookmark-group {
 		background: rgba(255, 255, 255, 0.06);
 		border-color: rgba(255, 255, 255, 0.18);
@@ -1841,6 +1859,19 @@
 		border-color: rgba(0, 0, 0, 0.12);
 		background: rgba(0, 0, 0, 0.04);
 		color: #3f3f46;
+	}
+	:global(html.light) .chapter-language-select {
+		border-color: color-mix(in srgb, var(--accent) 48%, rgba(0, 0, 0, 0.18));
+		background-color: color-mix(in srgb, var(--accent) 10%, white);
+		color: #27272a;
+		color-scheme: light;
+	}
+	:global(html.light) .chapter-language-select option {
+		background-color: white;
+		color: #27272a;
+	}
+	:global(html.light) .chapter-language-select option:checked {
+		background-color: color-mix(in srgb, var(--accent) 28%, white);
 	}
 	:global(html.light) .bookmark-group {
 		background: rgba(0, 0, 0, 0.04);
