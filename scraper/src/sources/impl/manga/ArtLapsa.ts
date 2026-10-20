@@ -458,6 +458,50 @@ export class ArtLapsaSource extends BaseSource {
 		return urls;
 	}
 
+	private resolvePageBase(
+		html: string,
+		seriesUuid: string,
+		chapterUuid: string
+	): { baseDir: string; ext: string } {
+		const cleaned = html.replace(/\\+\//g, '/').replace(/\\/g, '');
+
+		let m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'\\\s<>]+\/revisions\/[^"'/\\\s<>]+)\/0*1\.(jpg|jpeg|png|webp)/i
+		);
+		if (m) return { baseDir: m[1], ext: m[2].toLowerCase() };
+
+		m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'\\\s<>]+\/revisions\/[^"'/\\\s<>]+)\/thumbnail\.(jpg|jpeg|png|webp)/i
+		);
+		if (m) return { baseDir: m[1], ext: 'jpg' };
+
+		m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'\\\s<>]+\/revisions\/[^"'/\\\s<>]+)\//i
+		);
+		if (m) return { baseDir: m[1], ext: 'jpg' };
+
+		m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'/\\\s<>]+)\/0*1\.(jpg|jpeg|png|webp)/i
+		);
+		if (m) return { baseDir: m[1], ext: m[2].toLowerCase() };
+
+		let sUuid = seriesUuid;
+		if (!sUuid) {
+			sUuid =
+				(cleaned.match(
+					/cdn\.artlapsa\.com\/series\/(?:webtoon\/)?([0-9a-f-]{36})/i
+				) || [])[1] || '';
+		}
+		if (sUuid && chapterUuid) {
+			return {
+				baseDir: `https://cdn.artlapsa.com/series/webtoon/${sUuid}/chapters/${chapterUuid}`,
+				ext: 'jpg'
+			};
+		}
+
+		return { baseDir: '', ext: 'jpg' };
+	}
+
 	async getChapterPages(chapterId: string): Promise<string[]> {
 		const { seriesUuid, chapterUuid } = this.parseChapterParts(chapterId);
 		if (!chapterUuid) {
@@ -479,45 +523,15 @@ export class ArtLapsaSource extends BaseSource {
 			const pageCountMatch =
 				html.match(/pageCount&quot;:(\d+)/) ||
 				html.match(/"pageCount"\s*:\s*(\d+)/) ||
-				html.match(/(\d+)\s*pages/i);
-			let pageCount = pageCountMatch ? parseInt(pageCountMatch[1], 10) : 0;
+				html.match(/content="[^"]*?(\d+)\s*pages/i) ||
+				html.match(/\b(\d+)\s*pages\b/i);
+			const pageCount = pageCountMatch ? parseInt(pageCountMatch[1], 10) : 0;
 
-			const imgPatterns = [
-				/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s]+\/chapters\/[^"'\\\s]+\/revisions\/[^"'\\\s]+)\/0*1\.(jpg|jpeg|png|webp)/i,
-				/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s]+\/chapters\/[^"'\\\s]+)\/0*1\.(jpg|jpeg|png|webp)/i
-			];
-
-			let baseDir = '';
-			let ext = 'jpg';
-			for (const re of imgPatterns) {
-				const m = html.match(re);
-				if (m) {
-					baseDir = m[1].replace(/\\/g, '');
-					ext = (m[2] || 'jpg').toLowerCase();
-					break;
-				}
-			}
-
-			if (!baseDir) {
-				let sUuid = seriesUuid;
-				if (!sUuid) {
-					sUuid =
-						(html.match(
-							/cdn\.artlapsa\.com\/series\/(?:webtoon\/)?([0-9a-f-]{36})/i
-						) || [])[1] || '';
-				}
-				if (sUuid && chapterUuid) {
-					baseDir = `https://cdn.artlapsa.com/series/webtoon/${sUuid}/chapters/${chapterUuid}`;
-					ext = 'jpg';
-				}
-			}
-
-			if (!pageCount || pageCount < 1) {
-				const metaPages = html.match(
-					/(?:content=["'][^"']*?|)\b(\d+)\s*pages\b/i
-				);
-				if (metaPages) pageCount = parseInt(metaPages[1], 10);
-			}
+			const { baseDir, ext } = this.resolvePageBase(
+				html,
+				seriesUuid,
+				chapterUuid
+			);
 
 			if (baseDir && pageCount > 0) {
 				const urls = this.buildPageUrls(baseDir, pageCount, ext);
@@ -538,22 +552,22 @@ export class ArtLapsaSource extends BaseSource {
 					($(el).attr('srcset') || '').split(/\s/)[0] ||
 					'';
 				if (!src || !/\/chapters\//i.test(src)) return;
-				if (/thumbnail/i.test(src)) return;
+				if (/thumbnail|75x112/i.test(src)) return;
 				const abs = this.absUrl(src);
 				if (seen.has(abs)) return;
 				seen.add(abs);
 				found.push(abs);
 			});
 
-			if (found.length === 1 && pageCount > 1) {
+			if (found.length >= 1 && pageCount > found.length) {
 				const one = found[0];
 				const bm = one.match(
-					/^(https:\/\/cdn\.artlapsa\.com\/series\/.+\/chapters\/[^/]+(?:\/revisions\/[^/]+)?)\/0*\d+\.(jpg|jpeg|png|webp)$/i
+					/^(https:\/\/cdn\.artlapsa\.com\/series\/.+\/chapters\/.+?)\/(?:0*\d+|thumbnail)\.(jpg|jpeg|png|webp)$/i
 				);
 				if (bm) {
-					const urls = this.buildPageUrls(bm[1], pageCount, bm[2]);
+					const urls = this.buildPageUrls(bm[1], pageCount, bm[2] || 'jpg');
 					console.log(
-						`[artlapsa] expanded ${urls.length} from single preload → ${chapterUuid}`
+						`[artlapsa] expanded ${urls.length} from DOM → ${chapterUuid}`
 					);
 					return urls;
 				}
