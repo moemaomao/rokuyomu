@@ -6,18 +6,17 @@
  * Search    : GET /search?q=
  * Detail    : GET /series/{uuid}
  * Chapter   : GET /read/{uuid}
- * Pages     : CDN sequential 001.jpg … N.jpg under revisions/
- *             pageCount + first image URL parsed from reader HTML
+ * Pages     : CDN sequential
+ *   NEW: https://cdn.artlapsa.com/series/webtoon/{seriesUuid}/chapters/{chapterUuid}/001.jpg
+ *   OLD: .../chapters/.../revisions/{rev}/001.jpg  (still supported)
+ *   pageCount from Livewire wire:snapshot ("pageCount":N)
  *
- * Locked chapters: .chapter-lock-badge (coin price) → isLocked
+ * Locked chapters: needsToUnlock / .chapter-lock-badge → isLocked
  *
  * ID format:
  *   manga   : /series/{seriesUuid}
  *   chapter : /series/{seriesUuid}/read/{chapterUuid}
  *             (legacy /read/{chapterUuid} still accepted)
- *
- * Chapter next/prev in reader needs series uuid embedded so
- * resolveMangaId / manga details can load the chapter list.
  */
 
 import { BaseSource } from '../../BaseSource';
@@ -39,7 +38,9 @@ export class ArtLapsaSource extends BaseSource {
 		return fetchWithCf(url, {
 			headers: {
 				...this.headers,
-				Referer: this.baseUrl + '/'
+				Referer: this.baseUrl + '/',
+				'User-Agent':
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 			}
 		});
 	}
@@ -51,19 +52,6 @@ export class ArtLapsaSource extends BaseSource {
 		if (href.startsWith('http')) return href;
 		if (href.startsWith('//')) return `https:${href}`;
 		return `${this.baseUrl}${href.startsWith('/') ? '' : '/'}${href}`;
-	}
-
-	private cleanId(link: string): string {
-		let id = (link || '').trim();
-		if (id.startsWith('http')) {
-			try {
-				id = new URL(id).pathname;
-			} catch {
-				/* ignore */
-			}
-		}
-		if (!id.startsWith('/')) id = `/${id}`;
-		return id.replace(/\/+$/, '');
 	}
 
 	private extractUuid(path: string): string {
@@ -105,15 +93,13 @@ export class ArtLapsaSource extends BaseSource {
 		if (!chapterUuid) return null;
 		try {
 			const html = await this.fetchHtml(`/read/${chapterUuid}`);
-			const $ = cheerio.load(html);
-			const href =
-				$('a[href*="/series/"]').first().attr('href') ||
-				$('meta[property="og:url"]').attr('content') ||
-				'';
-			const seriesFromOg = (href.match(/\/series\/([0-9a-f-]{36})/i) ||
-				html.match(/\/series\/([0-9a-f-]{36})/i) ||
-				[])[1];
-			return seriesFromOg ? this.toMangaId(seriesFromOg) : null;
+			const seriesFromHtml =
+				(html.match(/\/series\/([0-9a-f-]{36})/i) ||
+					html.match(
+						/cdn\.artlapsa\.com\/series\/(?:webtoon\/)?([0-9a-f-]{36})/i
+					) ||
+					[])[1];
+			return seriesFromHtml ? this.toMangaId(seriesFromHtml) : null;
 		} catch {
 			return null;
 		}
@@ -136,7 +122,9 @@ export class ArtLapsaSource extends BaseSource {
 	}
 
 	private parseChapterNumber(text: string): number {
-		const m = text.match(/Chapter\s*(\d+(?:\.\d+)?)/i) || text.match(/\b(\d+(?:\.\d+)?)\b/);
+		const m =
+			text.match(/Chapter\s*(\d+(?:\.\d+)?)/i) ||
+			text.match(/\b(\d+(?:\.\d+)?)\b/);
 		return m ? parseFloat(m[1]) : NaN;
 	}
 
@@ -149,24 +137,24 @@ export class ArtLapsaSource extends BaseSource {
 			const d = new Date(abs[0]);
 			if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
 		}
-		const rel = t.match(/(\d+)\s*(m|min|mins|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks)\s*ago/i);
+		const rel = t.match(
+			/(\d+)\s*(m|min|mins|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks)\s*ago/i
+		);
 		if (rel) {
 			const n = parseInt(rel[1], 10);
 			const unit = rel[2].toLowerCase();
-			const ms =
-				unit.startsWith('m') && !unit.startsWith('mi') && unit !== 'm'
-					? 0
-					: unit.startsWith('m')
-						? n * 60_000
-						: unit.startsWith('h')
-							? n * 3_600_000
-							: unit.startsWith('d')
-								? n * 86_400_000
-								: n * 604_800_000;
-			if (unit === 'm' || unit.startsWith('min')) {
-				return new Date(Date.now() - n * 60_000).toISOString().slice(0, 10);
-			}
-			return new Date(Date.now() - ms).toISOString().slice(0, 10);
+			const ms = unit.startsWith('min')
+				? n * 60_000
+				: unit.startsWith('h')
+					? n * 3_600_000
+					: unit.startsWith('d')
+						? n * 86_400_000
+						: unit.startsWith('w')
+							? n * 604_800_000
+							: unit === 'm'
+								? n * 60_000
+								: 0;
+			if (ms > 0) return new Date(Date.now() - ms).toISOString().slice(0, 10);
 		}
 		return '';
 	}
@@ -183,7 +171,9 @@ export class ArtLapsaSource extends BaseSource {
 				return false;
 			}
 			const parentText = $el.parent().text().replace(/\s+/g, ' ').trim();
-			const m = parentText.match(new RegExp(`${label}\\s+(.+?)(?:\\s{2,}|$)`, 'i'));
+			const m = parentText.match(
+				new RegExp(`${label}\\s+(.+?)(?:\\s{2,}|$)`, 'i')
+			);
 			if (m) value = m[1].split(/\s{2,}/)[0].trim();
 		});
 		return value;
@@ -220,7 +210,12 @@ export class ArtLapsaSource extends BaseSource {
 			let title =
 				($root.attr('title') || '').trim() ||
 				(img.attr('alt') || '').replace(/\s*cover\s*$/i, '').trim() ||
-				$root.find('h2, h3, h4, p, span').first().text().replace(/\s+/g, ' ').trim() ||
+				$root
+					.find('h2, h3, h4, p, span')
+					.first()
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim() ||
 				$root.text().replace(/\s+/g, ' ').trim();
 
 			title = title
@@ -373,25 +368,6 @@ export class ArtLapsaSource extends BaseSource {
 			if (g && !genres.includes(g)) genres.push(g);
 		});
 
-		const altTitles: string[] = [];
-		$('h1')
-			.first()
-			.parent()
-			.find('p, span, h2')
-			.each((_, el) => {
-				const t = $(el).text().replace(/\s+/g, ' ').trim();
-				if (
-					t &&
-					t !== title &&
-					t.length < 120 &&
-					!/chapter|ongoing|complete|author|artist/i.test(t)
-				) {
-					if (/[\u3040-\u30ff\u4e00-\u9fff]/.test(t) || t !== title) {
-						if (!altTitles.includes(t)) altTitles.push(t);
-					}
-				}
-			});
-
 		const chapters: Chapter[] = [];
 		const seen = new Set<string>();
 
@@ -446,15 +422,7 @@ export class ArtLapsaSource extends BaseSource {
 
 		chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
 
-		const metaLines = [
-			altTitles.length && `Alternative: ${altTitles.join(' · ')}`,
-			authors[0] && `Author: ${authors[0]}`,
-			artist && artist !== authors[0] && `Artist: ${artist}`,
-			formatRaw && `Type: ${formatRaw}`,
-			`Language: English`
-		].filter(Boolean);
-
-		const description = [...metaLines, synopsis].filter(Boolean).join('\n');
+		const description = synopsis || '';
 
 		return {
 			id: path,
@@ -476,15 +444,28 @@ export class ArtLapsaSource extends BaseSource {
 
 	// ── Pages ────────────────────────────────────────────────────────────────
 
+	private buildPageUrls(
+		baseDir: string,
+		pageCount: number,
+		ext: string
+	): string[] {
+		const urls: string[] = [];
+		const e = (ext || 'jpg').replace(/^\./, '').toLowerCase();
+		for (let i = 1; i <= pageCount; i++) {
+			const num = String(i).padStart(3, '0');
+			urls.push(`${baseDir}/${num}.${e}`);
+		}
+		return urls;
+	}
+
 	async getChapterPages(chapterId: string): Promise<string[]> {
-		const { chapterUuid } = this.parseChapterParts(chapterId);
+		const { seriesUuid, chapterUuid } = this.parseChapterParts(chapterId);
 		if (!chapterUuid) {
 			console.error('[artlapsa] getChapterPages → bad id:', chapterId);
 			return [];
 		}
 
 		try {
-		
 			const html = await this.fetchHtml(`/read/${chapterUuid}`);
 
 			if (
@@ -497,38 +478,62 @@ export class ArtLapsaSource extends BaseSource {
 
 			const pageCountMatch =
 				html.match(/pageCount&quot;:(\d+)/) ||
-				html.match(/"pageCount"\s*:\s*(\d+)/);
-			const pageCount = pageCountMatch ? parseInt(pageCountMatch[1], 10) : 0;
+				html.match(/"pageCount"\s*:\s*(\d+)/) ||
+				html.match(/(\d+)\s*pages/i);
+			let pageCount = pageCountMatch ? parseInt(pageCountMatch[1], 10) : 0;
 
-			const baseMatch = html.match(
-				/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s]+\/chapters\/[^"'\\\s]+\/revisions\/[^"'\\\s]+)\/0*1\.(?:jpg|jpeg|png|webp)/i
-			);
+			const imgPatterns = [
+				/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s]+\/chapters\/[^"'\\\s]+\/revisions\/[^"'\\\s]+)\/0*1\.(jpg|jpeg|png|webp)/i,
+				/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s]+\/chapters\/[^"'\\\s]+)\/0*1\.(jpg|jpeg|png|webp)/i
+			];
 
-			if (baseMatch && pageCount > 0) {
-				const base = baseMatch[1].replace(/\\/g, '');
-				const extMatch = html.match(
-					new RegExp(
-						base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
-							'/0*1\\.(jpg|jpeg|png|webp)',
-						'i'
-					)
-				);
-				const ext = (extMatch?.[1] || 'jpg').toLowerCase();
-				const urls: string[] = [];
-				for (let i = 1; i <= pageCount; i++) {
-					const num = String(i).padStart(3, '0');
-					urls.push(`${base}/${num}.${ext}`);
+			let baseDir = '';
+			let ext = 'jpg';
+			for (const re of imgPatterns) {
+				const m = html.match(re);
+				if (m) {
+					baseDir = m[1].replace(/\\/g, '');
+					ext = (m[2] || 'jpg').toLowerCase();
+					break;
 				}
-				console.log(`[artlapsa] ${urls.length} pages → ${chapterUuid}`);
+			}
+
+			if (!baseDir) {
+				let sUuid = seriesUuid;
+				if (!sUuid) {
+					sUuid =
+						(html.match(
+							/cdn\.artlapsa\.com\/series\/(?:webtoon\/)?([0-9a-f-]{36})/i
+						) || [])[1] || '';
+				}
+				if (sUuid && chapterUuid) {
+					baseDir = `https://cdn.artlapsa.com/series/webtoon/${sUuid}/chapters/${chapterUuid}`;
+					ext = 'jpg';
+				}
+			}
+
+			if (!pageCount || pageCount < 1) {
+				const metaPages = html.match(
+					/(?:content=["'][^"']*?|)\b(\d+)\s*pages\b/i
+				);
+				if (metaPages) pageCount = parseInt(metaPages[1], 10);
+			}
+
+			if (baseDir && pageCount > 0) {
+				const urls = this.buildPageUrls(baseDir, pageCount, ext);
+				console.log(
+					`[artlapsa] ${urls.length} pages → ${chapterUuid} base=${baseDir}`
+				);
 				return urls;
 			}
 
 			const $ = cheerio.load(html);
 			const found: string[] = [];
 			const seen = new Set<string>();
-			$('img').each((_, el) => {
+			$('img, link[rel="preload"]').each((_, el) => {
 				const src =
 					$(el).attr('src') ||
+					$(el).attr('href') ||
 					$(el).attr('data-src') ||
 					($(el).attr('srcset') || '').split(/\s/)[0] ||
 					'';
@@ -539,7 +544,26 @@ export class ArtLapsaSource extends BaseSource {
 				seen.add(abs);
 				found.push(abs);
 			});
-			found.sort();
+
+			if (found.length === 1 && pageCount > 1) {
+				const one = found[0];
+				const bm = one.match(
+					/^(https:\/\/cdn\.artlapsa\.com\/series\/.+\/chapters\/[^/]+(?:\/revisions\/[^/]+)?)\/0*\d+\.(jpg|jpeg|png|webp)$/i
+				);
+				if (bm) {
+					const urls = this.buildPageUrls(bm[1], pageCount, bm[2]);
+					console.log(
+						`[artlapsa] expanded ${urls.length} from single preload → ${chapterUuid}`
+					);
+					return urls;
+				}
+			}
+
+			found.sort((a, b) => {
+				const na = parseInt((a.match(/\/(\d+)\.\w+$/) || [])[1] || '0', 10);
+				const nb = parseInt((b.match(/\/(\d+)\.\w+$/) || [])[1] || '0', 10);
+				return na - nb;
+			});
 			console.log(`[artlapsa] fallback ${found.length} pages → ${chapterUuid}`);
 			return found;
 		} catch (e) {
@@ -548,3 +572,5 @@ export class ArtLapsaSource extends BaseSource {
 		}
 	}
 }
+
+export default ArtLapsaSource;
