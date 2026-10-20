@@ -9,11 +9,14 @@
  *
  * Site ~20 item/halaman → merge page berikutnya sampai 24.
  *
+ * Cloudflare: all HTML via fetchWithCf (set BYPARR_URL on scraper).
+ *
  * ID: manga "/g/{id}" | chapter "/g/{id}/chapter/1"
  */
 
 import { BaseSource } from '../../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../../types-manga';
+import { fetchWithCf } from '../../../lib/fetchWithCf';
 import * as cheerio from 'cheerio';
 
 export class AsmHentaiSource extends BaseSource {
@@ -27,17 +30,34 @@ export class AsmHentaiSource extends BaseSource {
 		return {
 			...this.headers,
 			Accept:
-				'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+				'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
 			'Accept-Language': 'en-US,en;q=0.9',
-			Referer: `${this.baseUrl}/`
+			Referer: `${this.baseUrl}/`,
+			Origin: this.baseUrl,
+			'User-Agent':
+				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 		};
 	}
 
 	private async getHtml(path: string): Promise<string> {
 		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-		const res = await fetch(url, { headers: this.reqHeaders() });
-		if (!res.ok) throw new Error(`AsmHentai HTTP ${res.status} ${path}`);
-		return await res.text();
+		const html = await fetchWithCf(url, {
+			headers: this.reqHeaders()
+		});
+		const head = (html || '').slice(0, 2500);
+		if (
+			/just a moment|checking your browser|cf-browser-verification|enable javascript and cookies/i.test(
+				head
+			)
+		) {
+			throw new Error(
+				`AsmHentai still blocked by Cloudflare on ${path} — set BYPARR_URL and restart scraper`
+			);
+		}
+		if (!html || html.length < 200) {
+			throw new Error(`AsmHentai empty response ${path}`);
+		}
+		return html;
 	}
 
 	private normalizeLang(lang?: string): string | null {
@@ -139,7 +159,7 @@ export class AsmHentaiSource extends BaseSource {
 			cover = this.absUrl(cover);
 			if (/\/images\/(en|jp|cn)\.png/i.test(cover)) cover = '';
 			if (!cover) {
-				cover = `https://images.asmhentai.com/019/${idm[1]}/thumb.jpg`;
+				cover = `https://images.asmhentai.com/001/${idm[1]}/thumb.jpg`;
 			}
 
 			const type =
@@ -481,3 +501,5 @@ export class AsmHentaiSource extends BaseSource {
 		}
 	}
 }
+
+export default AsmHentaiSource;
