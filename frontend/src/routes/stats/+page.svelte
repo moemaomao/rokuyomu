@@ -216,7 +216,7 @@
 		};
 	});
 
-	let recent = $derived(history.slice(0, 12));
+	let recent = $derived(history.slice(0, 10));
 
 	function formatTime(ts: number): string {
 		const ms = ts < 1e12 ? ts * 1000 : ts;
@@ -413,7 +413,7 @@
 			></div>
 		</div>
 	{:else}
-	
+		<!-- Profile / Level card -->
 		<div
 			class="relative overflow-hidden rounded-xl border p-5
 				{isDark
@@ -870,21 +870,22 @@
 							class="group relative flex items-center gap-3.5 overflow-hidden px-4 py-3.5 transition-colors
 								{isDark ? 'bg-[#121415]' : 'bg-white'}"
 						>
+					
 							{#if coverSrc}
 								<img
 									src={coverSrc}
 									alt=""
 									aria-hidden="true"
-									class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover object-[center_25%]
-										opacity-[0.35] blur-[5px] saturate-125 brightness-90
-										transition-opacity duration-300 group-hover:opacity-[0.48]"
+									class="pointer-events-none absolute inset-0 h-full w-full object-cover object-[center_30%]
+										opacity-[0.42] saturate-125 brightness-95
+										transition-opacity duration-300 group-hover:opacity-[0.55]"
 									loading="lazy"
 									decoding="async"
 								/>
 								<div
 									class="pointer-events-none absolute inset-0 {isDark
-										? 'bg-gradient-to-r from-black/65 via-black/40 to-black/60'
-										: 'bg-gradient-to-r from-white/75 via-white/55 to-white/70'}"
+										? 'bg-gradient-to-r from-black/70 via-black/45 to-black/62'
+										: 'bg-gradient-to-r from-white/78 via-white/58 to-white/72'}"
 								></div>
 							{/if}
 
@@ -922,6 +923,7 @@
 								</p>
 							</div>
 
+							<!-- date badge -->
 							<span
 								class="relative z-10 shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider backdrop-blur-sm
 									{isDark
