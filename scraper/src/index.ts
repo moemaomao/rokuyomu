@@ -1,0 +1,162 @@
+import express from 'express';
+import type { Request, Response } from 'express';
+import cors from 'cors';
+import { getSource, getSourceList } from './sources/index.js';
+import { isByparrEnabled } from './lib/byparr';
+import { cfJarStats } from './lib/cfCookieJar';
+
+const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+const API_KEY = process.env.SCRAPER_API_KEY || '';
+
+app.use(cors({ origin: true }));
+app.use(express.json({ limit: '1mb' }));
+
+app.use((req, res, next) => {
+  if (!API_KEY) return next();
+  const key = req.headers['x-api-key'] || req.query.api_key;
+  if (key !== API_KEY) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+});
+
+app.get('/health', (_req, res) =>
+  res.json({
+    ok: true,
+    ts: Date.now(),
+    byparr: isByparrEnabled(),
+    byparrUrl: process.env.BYPARR_URL ? '(set)' : null,
+    cfJar: cfJarStats()
+  })
+);
+
+app.get('/sources', (_req, res) => {
+  try {
+    res.json(getSourceList());
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'failed' });
+  }
+});
+
+app.get('/:sourceId/latest', async (req, res) => {
+  try {
+    const { sourceId } = req.params;
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const lang = String(req.query.lang || 'all');
+    const type = String(req.query.type || 'all');
+    const q = String(req.query.q || '').trim();
+    const adapter = getSource(sourceId);
+    const data = q
+      ? await adapter.searchManga(q, { page, lang, type })
+      : await adapter.getLatestManga(page, { lang, type });
+    res.json(Array.isArray(data) ? data : []);
+  } catch (e: any) {
+    console.error('[latest]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'scraping failed' });
+  }
+});
+
+const getSeriesDetails = async (req: Request, res: Response) => {
+  try {
+    const sourceId = req.params.sourceId;
+    const raw = (req.params as any)[0] || '';
+    const seriesId = '/' + String(raw).replace(/^\/+/, '');
+    const lang = String(req.query.lang || 'all');
+    if (!seriesId || seriesId === '/') return res.status(400).json({ error: 'Invalid seriesId' });
+    const adapter = getSource(sourceId);
+    const data = await adapter.getMangaDetails(seriesId, { lang });
+    res.json(data);
+  } catch (e: any) {
+    console.error('[series]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'scraping failed' });
+  }
+};
+
+app.get('/:sourceId/series/*', getSeriesDetails);
+app.get('/:sourceId/manga/*', getSeriesDetails);
+
+app.get('/:sourceId/chapter/*', async (req, res) => {
+  try {
+    const sourceId = req.params.sourceId;
+    const raw = (req.params as any)[0] || '';
+    const chapterId = '/' + String(raw).replace(/^\/+/, '');
+    if (!chapterId || chapterId === '/') return res.status(400).json({ error: 'Invalid chapterId' });
+    const adapter = getSource(sourceId);
+    const pages = await adapter.getChapterPages(chapterId);
+    res.json(Array.isArray(pages) ? pages : []);
+  } catch (e: any) {
+    console.error('[chapter]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'scraping failed' });
+  }
+});
+
+// ── Novel chapter (teks) ────────────────────────────────────────────────────
+app.get('/:sourceId/novel-chapter/*', async (req, res) => {
+  try {
+    const sourceId = req.params.sourceId;
+    const raw = (req.params as any)[0] || '';
+    const chapterId = '/' + String(raw).replace(/^\/+/, '');
+    if (!chapterId || chapterId === '/') {
+      return res.status(400).json({ error: 'Invalid chapterId' });
+    }
+    const adapter = getSource(sourceId) as any;
+    if (typeof adapter.getChapterContent !== 'function') {
+      return res.status(400).json({
+        error: `Source "${sourceId}" does not support novel chapters (no getChapterContent)`
+      });
+    }
+    const data = await adapter.getChapterContent(chapterId);
+    // Pass novelId through so novel-reader can key read-markers to the same
+    // manga.id used on the detail page (Themesia: /series/{slug}).
+    const novelId = data?.novelId || data?.novelInfo?.id || null;
+    res.json({
+      title: data?.title || 'Chapter',
+      content: data?.content || '',
+      prevChapterId: data?.prevChapterId ?? null,
+      nextChapterId: data?.nextChapterId ?? null,
+      prevChapter: data?.prevChapterId ? { id: data.prevChapterId } : null,
+      nextChapter: data?.nextChapterId ? { id: data.nextChapterId } : null,
+      novelId,
+      novelInfo: data?.novelInfo || (novelId ? { id: novelId } : null)
+    });
+  } catch (e: any) {
+    console.error('[novel-chapter]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'scraping failed' });
+  }
+});
+
+app.get('/:sourceId/manga-from-chapter', async (req, res) => {
+  try {
+    const { sourceId } = req.params;
+    const chapter = String(req.query.chapter || '').trim();
+    if (!chapter) {
+      return res.status(400).json({ error: 'chapter query required' });
+    }
+    const adapter = getSource(sourceId) as any;
+    if (typeof adapter.resolveMangaIdFromChapter === 'function') {
+      const mangaId = await adapter.resolveMangaIdFromChapter(chapter);
+      return res.json({ mangaId: mangaId || null });
+    }
+
+    const hierarchical = chapter.replace(
+      /\/(chapter|ch|episode|ep)[-/_]?[\d.-]*\/?$/i,
+      ''
+    );
+    const mangaId =
+      hierarchical !== chapter && hierarchical.length > 1 ? hierarchical : null;
+    res.json({ mangaId });
+  } catch (e: any) {
+    console.error('[manga-from-chapter]', req.params.sourceId, e);
+    res.status(500).json({ error: e?.message || 'resolve failed' });
+  }
+});
+
+app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[mikoroku-scraper] :${PORT}`);
+    console.log(`[mikoroku-scraper] Byparr: ${isByparrEnabled() ? 'enabled' : 'disabled'}`);
+  });
+}
+
+export default app;

@@ -1,0 +1,2083 @@
+<script lang="ts">
+	import type { PageData } from './$types';
+	import { onMount } from 'svelte';
+	import { toggleBookmark, isBookmarked } from '$lib/stores/bookmark.svelte';
+	import { toggleNotification, isNotified } from '$lib/stores/notification.svelte';
+	import { saveReading } from '$lib/stores/history';
+	import {
+		markChapterRead,
+		getReadSets,
+		unmarkChapterRead
+	} from '$lib/utils/readChapters';
+	import { downloadChapter, type DownloadProgress } from '$lib/utils/downloadManga';
+	import { downloadNovelChapterPdf, type NovelDownloadProgress } from '$lib/utils/downloadNovel';
+	import { getOfflineChapterIds, ensureLibraryLoaded, isLibraryReady } from '$lib/stores/download.svelte';
+	import { Bell, BellOff, Check } from 'lucide-svelte';
+	import { chapterHref, isNovelSource } from '$lib/utils/novelSources';
+	import coverNotFound from '$lib/assets/cover not found.jpg';
+
+	const { data }: { data: PageData } = $props();
+
+	let manga = $derived((data as any).manga);
+	let source = $derived((data as any).source as string);
+	let canonicalUrl = $derived((data as any).canonicalUrl as string | undefined);
+	let fromBackup = $derived(Boolean((data as any).fromBackup));
+
+	const VIEW_KEY = 'mikoroku-chapter-view';
+	const SORT_KEY = 'mikoroku-chapter-sort';
+	const LOAD_MORE_STEP = 30;
+
+	let sortNewest = $state(true);
+	let viewMode = $state<'grid-thumb' | 'grid-text' | 'list-thumb'>('grid-text');
+	let bookmarked = $state(false);
+	let notified = $state(false);
+	let readIds = $state<Set<string>>(new Set());
+	let readNums = $state<Set<number>>(new Set());
+	let loadMoreEl: HTMLElement | null = $state(null);
+
+	let loadingMore = $state(false);
+
+	type ChapterDlProgress =
+		| DownloadProgress
+		| NovelDownloadProgress
+		| { phase: 'idle' };
+	let dlState = $state<Record<string, ChapterDlProgress>>({});
+
+	function isDownloading(chapterId: string): boolean {
+		const s = dlState[chapterId];
+		return !!s && s.phase !== 'idle' && s.phase !== 'done' && s.phase !== 'error';
+	}
+
+	let offlineIds = $state<Set<string>>(new Set());
+	let offlineReady = $state(false);
+
+	async function refreshOfflineChapters() {
+		if (!manga?.id || !source) {
+			offlineIds = new Set();
+			offlineReady = true;
+			return;
+		}
+		if (isLibraryReady()) {
+			offlineIds = getOfflineChapterIds(source, manga.id);
+			offlineReady = true;
+		} else {
+			offlineReady = false;
+		}
+		try {
+			await ensureLibraryLoaded();
+		} catch {
+		}
+		offlineIds = getOfflineChapterIds(source, manga.id);
+		offlineReady = true;
+	}
+
+	function isOffline(chapterId: string | number | undefined): boolean {
+		if (!offlineReady) return false;
+		if (chapterId == null || chapterId === '') return false;
+		const n = String(chapterId);
+		if (offlineIds.has(n)) return true;
+		const alt = n.startsWith('/') ? n.slice(1) : `/${n}`;
+		return offlineIds.has(alt);
+	}
+
+	function onChapterAction(e: MouseEvent, chapter: any) {
+		if (isOffline(chapter?.id)) {
+			e.preventDefault();
+			e.stopPropagation();
+			const href = chapterHref(String(source), String(chapter.id));
+			if (href) window.location.href = href;
+			return;
+		}
+		void handleDownloadChapter(e, chapter);
+	}
+
+	function dlLabel(chapterId: string): string {
+		const s = dlState[chapterId];
+		if (!s || s.phase === 'idle') return '';
+		if (s.phase === 'error') return '!';
+		if (s.phase === 'done') return '✓';
+		if (s.phase === 'images' && 'total' in s && s.total) return `${s.current}/${s.total}`;
+		if (s.phase === 'zip') return '…';
+		return '…';
+	}
+
+	function dlPercent(chapterId: string): number {
+		const s = dlState[chapterId];
+		if (!s || s.phase === 'idle' || s.phase === 'error') return 0;
+		if (s.phase === 'done') return 100;
+		if (s.phase === 'zip') return 95;
+		if (s.phase === 'pages') return 5;
+		if ('total' in s && s.total > 0) {
+			return Math.min(90, Math.round((s.current / s.total) * 90) + 5);
+		}
+		return 10;
+	}
+
+	async function handleDownloadChapter(e: MouseEvent, chapter: any) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!chapter?.id || isDownloading(chapter.id)) return;
+		const id = String(chapter.id);
+		const novel = isNovelSource(source);
+		try {
+			if (novel) {
+				await downloadNovelChapterPdf({
+					source,
+					chapterId: id,
+					chapterTitle: chapter.title || `Chapter ${chapter.number}`,
+					novelTitle: manga?.title,
+					mangaId: manga?.id,
+					author,
+					artist: artists,
+					type,
+					synopsis,
+					genres: manga?.genres,
+					cover: manga?.cover || '',
+					onProgress: (p) => {
+						dlState = {
+							...dlState,
+							[id]: p as ChapterDlProgress
+						};
+					}
+				});
+			} else {
+				await downloadChapter({
+					source,
+					chapterId: id,
+					chapterTitle: chapter.title || `Chapter ${chapter.number}`,
+					mangaTitle: manga?.title,
+					mangaId: manga?.id,
+					synopsis,
+					genres: manga?.genres,
+					author,
+					artist: artists,
+					type,
+					cover: manga?.cover || '',
+					onProgress: (p) => {
+						dlState = { ...dlState, [id]: p };
+					}
+				});
+			}
+			await refreshOfflineChapters();
+			setTimeout(() => {
+				dlState = { ...dlState, [id]: { phase: 'idle' } };
+			}, 800);
+		} catch (err: any) {
+			console.error('[download chapter]', err);
+			dlState = {
+				...dlState,
+				[id]: { phase: 'error', current: 0, total: 0, message: err?.message || 'Failed' }
+			};
+		}
+	}
+
+
+	let loadedChapters = $state<any[]>([]);
+	let chapterTotal = $state(0);
+	let chapterOffset = $state(0);
+	let hasMoreChapters = $state(false);
+	let chapterLanguages = $state<string[]>([]);
+	let chapterLangFilter = $state('all');
+	let chapterRequestId = 0;
+	let languageFilterOpen = $state(false);
+	let languageFilterContainer: HTMLDivElement | null = $state(null);
+
+	let mangaIdPath = $derived((data as any).mangaId as string || manga?.id || '');
+	let selectedLang = $derived(((data as any).selectedLang as string) || 'all');
+	let lastChapterFilterSeries = '';
+
+	$effect(() => {
+		const seriesKey = `${source}:${mangaIdPath}`;
+		if (!mangaIdPath || seriesKey === lastChapterFilterSeries) return;
+		lastChapterFilterSeries = seriesKey;
+		chapterLangFilter = 'all';
+		languageFilterOpen = false;
+		chapterRequestId++;
+	});
+
+	let displayedChapters = $derived(
+		chapterLangFilter === 'all'
+			? loadedChapters
+			: loadedChapters.filter(
+					(chapter) => String(chapter.lang || '').trim().toLowerCase() === chapterLangFilter
+				)
+	);
+	let remainingChapters = $derived(Math.max(0, chapterTotal - displayedChapters.length));
+
+	const CHAPTERS_CACHE_PREFIX = 'rokuyomu:ch-cache:';
+
+	function chaptersCacheKey(
+		src: string,
+		id: string,
+		lang: string,
+		newest: boolean,
+		chapterLanguage: string
+	) {
+		return `${CHAPTERS_CACHE_PREFIX}${src}:${id}:${lang}:${newest ? 'new' : 'old'}:${chapterLanguage}`;
+	}
+
+	function saveChaptersCache() {
+		if (!source || !mangaIdPath) return;
+		try {
+			sessionStorage.setItem(
+				chaptersCacheKey(source, mangaIdPath, selectedLang, sortNewest, chapterLangFilter),
+				JSON.stringify({
+					chapters: loadedChapters,
+					total: chapterTotal,
+					offset: chapterOffset,
+					hasMore: hasMoreChapters,
+					sortNewest,
+					ts: Date.now()
+				})
+			);
+		} catch {
+		}
+	}
+
+	function readChaptersCache(
+		src: string,
+		id: string,
+		lang: string,
+		newest: boolean,
+		chapterLanguage: string
+	): {
+		chapters: any[];
+		total: number;
+		offset: number;
+		hasMore: boolean;
+		sortNewest: boolean;
+	} | null {
+		try {
+			const raw = sessionStorage.getItem(
+				chaptersCacheKey(src, id, lang, newest, chapterLanguage)
+			);
+			if (!raw) return null;
+			const parsed = JSON.parse(raw);
+			if (!Array.isArray(parsed?.chapters) || parsed.chapters.length === 0) return null;
+			if (typeof parsed.ts === 'number' && Date.now() - parsed.ts > 2 * 60 * 60 * 1000) {
+				sessionStorage.removeItem(chaptersCacheKey(src, id, lang, newest, chapterLanguage));
+				return null;
+			}
+			return {
+				chapters: parsed.chapters,
+				total: typeof parsed.total === 'number' ? parsed.total : parsed.chapters.length,
+				offset: typeof parsed.offset === 'number' ? parsed.offset : parsed.chapters.length,
+				hasMore: Boolean(parsed.hasMore),
+				sortNewest: parsed.sortNewest !== false
+			};
+		} catch {
+			return null;
+		}
+	}
+
+	$effect(() => {
+		const m = manga;
+		const src = source;
+		if (m?.id) refreshReadChapters();
+		const total = (data as any).chapterTotal as number | undefined;
+		const offset = (data as any).chapterOffset as number | undefined;
+		const more = (data as any).hasMoreChapters as boolean | undefined;
+		if (!m) return;
+
+		const initial = [...(m.chapters || [])];
+		const languages = (data as any).chapterLanguages;
+		chapterLanguages = Array.isArray(languages)
+			? languages
+					.map((language: unknown) => String(language || '').trim().toLowerCase())
+					.filter(Boolean)
+			: [...new Set(initial.map((chapter) => String(chapter.lang || '').trim().toLowerCase()))]
+					.filter(Boolean)
+					.sort();
+		const idPath = ((data as any).mangaId as string) || m.id || '';
+		const lang = ((data as any).selectedLang as string) || 'all';
+
+		let preferredNewest = sortNewest;
+		try {
+			const savedSort = localStorage.getItem(SORT_KEY);
+			if (savedSort === 'true' || savedSort === 'false') {
+				preferredNewest = savedSort === 'true';
+			}
+		} catch {
+		}
+
+		const cache = readChaptersCache(src, idPath, lang, preferredNewest, 'all');
+		if (
+			cache &&
+			cache.chapters.length >= initial.length &&
+			(cache.offset > (offset ?? initial.length) || cache.chapters.length > initial.length)
+		) {
+			loadedChapters = cache.chapters;
+			chapterTotal = cache.total || total || cache.chapters.length;
+			chapterOffset = cache.offset;
+			hasMoreChapters = cache.hasMore;
+			return;
+		}
+
+		loadedChapters = initial;
+		chapterTotal = total ?? loadedChapters.length;
+		chapterOffset = offset ?? loadedChapters.length;
+		hasMoreChapters = more ?? false;
+	});
+
+	type ChaptersApiResponse = {
+		chapters?: any[];
+		chapterLanguages?: string[];
+		total?: number;
+		offset?: number;
+		limit?: number;
+		hasMore?: boolean;
+		sort?: string;
+	};
+
+	async function fetchChapterPage(offset: number, limit: number, newest: boolean, replace = false) {
+		if (!source || !mangaIdPath) return;
+		const requestId = replace ? ++chapterRequestId : chapterRequestId;
+		loadingMore = true;
+		try {
+			const params = new URLSearchParams({
+				source,
+				id: mangaIdPath,
+				lang: selectedLang,
+				chapterLang: chapterLangFilter,
+				offset: String(offset),
+				limit: String(limit),
+				sort: newest ? 'newest' : 'oldest'
+			});
+			const res = await fetch(`/api/manga-chapter?${params}`);
+			if (!res.ok) throw new Error(await res.text());
+			const json = (await res.json()) as ChaptersApiResponse;
+			if (requestId !== chapterRequestId) return;
+			if (Array.isArray(json.chapterLanguages)) {
+				chapterLanguages = json.chapterLanguages;
+			}
+			const batch = Array.isArray(json.chapters) ? json.chapters : [];
+			if (replace) {
+				loadedChapters = batch;
+			} else {
+				loadedChapters = [...loadedChapters, ...batch];
+			}
+			chapterTotal = typeof json.total === 'number' ? json.total : chapterTotal;
+			chapterOffset = offset + batch.length;
+			hasMoreChapters = Boolean(json.hasMore);
+			saveChaptersCache();
+		} catch (e) {
+			console.error('[load more chapters]', e);
+		} finally {
+			if (requestId === chapterRequestId) loadingMore = false;
+		}
+	}
+
+	function loadMoreChapters() {
+		if (loadingMore || !hasMoreChapters) return;
+		fetchChapterPage(chapterOffset, LOAD_MORE_STEP, sortNewest, false);
+	}
+
+	async function showAllChapters() {
+		if (loadingMore || !hasMoreChapters) return;
+		const requestId = chapterRequestId;
+		loadingMore = true;
+		try {
+			while (hasMoreChapters) {
+				const params = new URLSearchParams({
+					source,
+					id: mangaIdPath,
+					lang: selectedLang,
+					chapterLang: chapterLangFilter,
+					offset: String(chapterOffset),
+					limit: String(LOAD_MORE_STEP),
+					sort: sortNewest ? 'newest' : 'oldest'
+				});
+				const res = await fetch(`/api/manga-chapter?${params}`);
+				if (!res.ok) break;
+				const json = (await res.json()) as ChaptersApiResponse;
+				if (requestId !== chapterRequestId) break;
+				if (Array.isArray(json.chapterLanguages)) {
+					chapterLanguages = json.chapterLanguages;
+				}
+				const batch = Array.isArray(json.chapters) ? json.chapters : [];
+				if (!batch.length) break;
+				loadedChapters = [...loadedChapters, ...batch];
+				chapterTotal = typeof json.total === 'number' ? json.total : chapterTotal;
+				chapterOffset = chapterOffset + batch.length;
+				hasMoreChapters = Boolean(json.hasMore);
+				if (!json.hasMore) break;
+			}
+			saveChaptersCache();
+		} catch (e) {
+			console.error('[show all chapters]', e);
+		} finally {
+			if (requestId === chapterRequestId) loadingMore = false;
+		}
+	}
+
+
+
+	function refreshReadChapters() {
+		if (!manga?.id) {
+			readIds = new Set();
+			readNums = new Set();
+			return;
+		}
+		const sets = getReadSets(source, manga.id);
+		readIds = sets.ids;
+		readNums = sets.nums;
+	}
+
+	function isChapterRead(chapter: any): boolean {
+		if (!chapter) return false;
+		const cid = chapter.id != null ? String(chapter.id) : '';
+		if (cid && readIds.has(cid)) return true;
+		const num = Number(chapter.number);
+		if (Number.isFinite(num) && num > 0 && readNums.has(num)) return true;
+		return false;
+	}
+
+	async function markChapterAsRead(e: MouseEvent, chapter: any) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!manga || !chapter?.id) return;
+		const already = isChapterRead(chapter);
+		if (already) {
+			unmarkChapterRead(source, manga.id, chapter.id, chapter.number);
+		} else {
+			markChapterRead(source, manga.id, chapter.id, chapter.number);
+			await saveReading({
+				mangaId: manga.id,
+				mangaSlug: manga.id,
+				mangaTitle: manga.title,
+				cover: manga.cover || '',
+				chapterId: String(chapter.id),
+				chapterTitle: String(chapter.title || chapter.name || `Ch. ${chapter.number ?? ''}`),
+				chapterNumber: Number(chapter.number) || 0,
+				sourceId: source
+			});
+		}
+		refreshReadChapters();
+	}
+
+	function parseMeta(desc: string | undefined): Record<string, string> {
+		const out: Record<string, string> = {};
+		if (!desc) return out;
+		for (const line of desc.split(/\n+/)) {
+			const m = line.match(/^\s*([^:]+):\s*(.+)\s*$/);
+			if (m) out[m[1].trim().toLowerCase()] = m[2].trim();
+		}
+		return out;
+	}
+
+	const META_KEYS =
+		/^\s*(alttitle|alt title|alternative(?: title)?|type|language|artists?|groups?|pages|author|publication|published|serialization|demographic|latest(?: update)?|updated|rating|volume|vol)\s*:/i;
+
+	let meta = $derived(parseMeta(manga?.description));
+	let altTitle = $derived(
+		meta['alttitle'] ||
+			meta['alt title'] ||
+			meta['alternative'] ||
+			meta['alternative title'] ||
+			''
+	);
+	let type = $derived(meta['type'] || manga?.type || 'Manga');
+	let language = $derived(meta['language'] || '');
+	let artists = $derived(meta['artists'] || meta['artist'] || manga?.authors?.join(', ') || '');
+	let groups = $derived(meta['groups'] || meta['serialization'] || '');
+	let pages = $derived(meta['pages'] || '');
+	let author = $derived(meta['author'] || manga?.authors?.[0] || '');
+	let publication = $derived(meta['publication'] || meta['published'] || '');
+	let demographic = $derived(meta['demographic'] || '');
+	let latestUpdate = $derived(
+		meta['latest update'] ||
+			meta['latest'] ||
+			meta['updated'] ||
+			[...(manga?.chapters || [])].sort((a, b) => b.number - a.number)[0]?.date ||
+			''
+	);
+	let rating = $derived(meta['rating'] || '0.0');
+	let volume = $derived(meta['volume'] || meta['vol'] || '');
+	let synopsis = $derived(
+		(manga?.description || '')
+			.split(/\n+/)
+			.filter((line: string) => !META_KEYS.test(line))
+			.join('\n')
+			.trim()
+	);
+
+	let isNovel = $derived(isNovelSource(source));
+	let trackerSearchTitle = $derived(
+		String(manga?.title || '')
+			.replace(/\s*\(.*?\)\s*$/g, '')
+			.trim()
+	);
+	let mangaUpdatesSearchUrl = $derived(
+		`https://www.mangaupdates.com/series?search=${encodeURIComponent(trackerSearchTitle)}`
+	);
+	let novelUpdatesUrl = $derived(
+		`https://www.novelupdates.com/series-finder/?sf=1&sh=${encodeURIComponent(trackerSearchTitle)}&sort=srank&order=asc`
+	);
+	let mangaUpdatesUrl = $state<string | null>(null);
+	let mangaUpdatesResolved = $state(false);
+	let mangaUpdatesTitle = $state<string | null>(null);
+
+	async function resolveMangaUpdates(title: string) {
+		if (!title || isNovelSource(source)) {
+			mangaUpdatesUrl = null;
+			mangaUpdatesResolved = true;
+			return;
+		}
+		mangaUpdatesResolved = false;
+		mangaUpdatesUrl = null;
+		mangaUpdatesTitle = null;
+		try {
+			const res = await fetch(`/api/tracker/mangaupdates?q=${encodeURIComponent(title)}`);
+			if (!res.ok) throw new Error(String(res.status));
+			const data = (await res.json()) as {
+				ok?: boolean;
+				matched?: boolean;
+				url?: string;
+				title?: string | null;
+			};
+			if (data?.url) {
+				mangaUpdatesUrl = data.url;
+				mangaUpdatesTitle = data.matched ? (data.title ?? null) : null;
+			} else {
+				mangaUpdatesUrl = mangaUpdatesSearchUrl;
+			}
+		} catch {
+			mangaUpdatesUrl = mangaUpdatesSearchUrl;
+		} finally {
+			mangaUpdatesResolved = true;
+		}
+	}
+
+	$effect(() => {
+		const title = trackerSearchTitle;
+		const novel = isNovel;
+		if (!title || novel) {
+			mangaUpdatesUrl = null;
+			mangaUpdatesResolved = true;
+			return;
+		}
+		const t = setTimeout(() => {
+			resolveMangaUpdates(title);
+		}, 50);
+		return () => clearTimeout(t);
+	});
+
+	let pageTitle = $derived(
+		manga?.title ? `${manga.title} - RokuYomu` : 'RokuYomu'
+	);
+	let pageDesc = $derived(
+		(synopsis || manga?.title || 'Baca manga di RokuYomu')
+			.replace(/\s+/g, ' ')
+			.trim()
+			.slice(0, 160)
+	);
+	let pageImage = $derived(
+		manga?.cover && /^https?:\/\//i.test(String(manga.cover).trim())
+			? String(manga.cover).trim()
+			: ''
+	);
+
+	let genreTags = $derived.by(() => {
+		const all = manga?.genres || [];
+		const normal: string[] = [];
+		const female: string[] = [];
+		const male: string[] = [];
+		for (const raw of all) {
+			const t = String(raw || '').trim();
+			if (!t) continue;
+			const lower = t.toLowerCase();
+			if (lower.startsWith('female:')) female.push(t.slice(7).trim() || t);
+			else if (lower.startsWith('male:')) male.push(t.slice(5).trim() || t);
+			else normal.push(t);
+		}
+		return { normal, female, male };
+	});
+
+	function genreSearchHref(genre: string): string {
+		const g = String(genre || '').trim();
+		if (!g) return '/deep-search';
+		return `/deep-search?tags=${encodeURIComponent(g)}`;
+	}
+
+	function proxyImage(url: string, w?: number, h?: number): string {
+	if (!url) return '';
+	let u = String(url).trim();
+	if (!u || u === '-') return '';
+	if (u.startsWith('//')) u = 'https:' + u;
+
+	if (/wsrv\.nl|images\.weserv\.nl/i.test(u)) return u;
+
+	const params = new URLSearchParams({
+		url: u,
+		source: source || ''
+	});
+	if (w && w > 0) params.set('w', String(w));
+	if (h && h > 0) params.set('h', String(h));
+
+	return `/api/proxy?${params.toString()}`;
+}
+
+	function onCoverError(e: Event) {
+	const img = e.currentTarget as HTMLImageElement;
+	const original = img.dataset.original;
+	if (!original || img.dataset.fallback === '1') {
+		img.src = coverNotFound;
+		img.onerror = null;
+		return;
+	}
+	img.dataset.fallback = '1';
+	img.src = `/api/proxy?url=${encodeURIComponent(original)}&source=${source}`;
+}
+
+	function formatDateOnly(raw: string | undefined | null): string {
+		if (!raw) return '';
+		const s = String(raw).trim();
+		if (!s) return '';
+		const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+		if (iso) return iso[1];
+		if (/\b(ago|hour|day|week|month|year|minute|just now|hari|jam|menit)\b/i.test(s)) return s;
+		const d = new Date(s);
+		if (!isNaN(d.getTime())) {
+			const y = d.getFullYear();
+			const mo = String(d.getMonth() + 1).padStart(2, '0');
+			const day = String(d.getDate()).padStart(2, '0');
+			return `${y}-${mo}-${day}`;
+		}
+		return s;
+	}
+
+	function statusClass(status: string) {
+		const s = (status || '').toLowerCase();
+		if (s.includes('completed') || s.includes('complete')) return 'text-sky-500 dark:text-sky-400';
+		if (s.includes('ongoing')) return 'text-emerald-600 dark:text-emerald-400';
+		if (s.includes('hiatus')) return 'text-yellow-600 dark:text-yellow-300';
+		if (s.includes('dropped')) return 'text-orange-600 dark:text-orange-500';
+		return 'text-zinc-600 dark:text-zinc-300';
+	}
+
+	async function handleBookmark() {
+		if (!manga) return;
+		bookmarked = await toggleBookmark({
+			mangaId: manga.id,
+			mangaSlug: manga.id,
+			mangaTitle: manga.title,
+			cover: manga.cover || '',
+			sourceId: source
+		});
+	}
+
+	async function handleNotify() {
+		if (!manga) return;
+		const chapters = manga.chapters || [];
+		const latest = [...chapters].sort(
+			(a: any, b: any) => (b.number || 0) - (a.number || 0)
+		)[0];
+		notified = await toggleNotification({
+			mangaId: manga.id,
+			mangaSlug: manga.id,
+			mangaTitle: manga.title,
+			cover: manga.cover || '',
+			sourceId: source,
+			lastChapterId: latest ? String(latest.id || latest.number || '') : '',
+			lastChapterTitle: latest
+				? String(latest.title || latest.name || `Ch. ${latest.number ?? ''}`)
+				: '',
+			lastChapterNumber: latest ? Number(latest.number) || 0 : 0
+		});
+	}
+
+	function setViewMode(mode: 'grid-thumb' | 'grid-text' | 'list-thumb') {
+		viewMode = mode;
+		try {
+			localStorage.setItem(VIEW_KEY, mode);
+		} catch {
+		}
+	}
+
+	function toggleSort() {
+		sortNewest = !sortNewest;
+		try {
+			localStorage.setItem(SORT_KEY, String(sortNewest));
+		} catch {
+		}
+
+		chapterOffset = 0;
+		hasMoreChapters = true;
+		fetchChapterPage(0, 20, sortNewest, true);
+	}
+
+	function setChapterLanguage(language: string) {
+		if (chapterLangFilter === language) return;
+		chapterLangFilter = language;
+		loadedChapters = chapterLangFilter === 'all'
+			? [...(manga?.chapters || [])]
+			: loadedChapters.filter(
+					(chapter) =>
+						String(chapter.lang || '').trim().toLowerCase() === chapterLangFilter
+				);
+		chapterOffset = 0;
+		chapterTotal = 0;
+		hasMoreChapters = false;
+		void fetchChapterPage(0, 20, sortNewest, true);
+	}
+
+	function chapterLanguageLabel(language: string): string {
+		try {
+			return new Intl.DisplayNames(['en'], { type: 'language' }).of(language) || language;
+		} catch {
+			return language.toUpperCase();
+		}
+	}
+
+	function handleLanguageFilterPointerDown(event: PointerEvent) {
+		if (
+			languageFilterOpen &&
+			languageFilterContainer &&
+			event.target instanceof Node &&
+			!languageFilterContainer.contains(event.target)
+		) {
+			languageFilterOpen = false;
+		}
+	}
+
+	function handleLanguageFilterKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') languageFilterOpen = false;
+	}
+
+	function chapterCover(chapter: any): string {
+		return chapter?.cover || manga?.cover || '';
+	}
+
+	function chapterFlag(lang?: string): string {
+		const l = String(lang || '').trim().toLowerCase();
+		const map: Record<string, string> = {
+			en: 'gb',
+			'en-us': 'us',
+			id: 'id',
+			ja: 'jp',
+			'ja-ro': 'jp',
+			ko: 'kr',
+			'ko-ro': 'kr',
+			zh: 'cn',
+			'zh-hk': 'hk',
+			'zh-ro': 'cn',
+			fr: 'fr',
+			pl: 'pl',
+			es: 'es',
+			'es-la': 'mx',
+			'pt-br': 'br',
+			pt: 'pt',
+			ru: 'ru',
+			vi: 'vn',
+			th: 'th',
+			ar: 'sa',
+			de: 'de',
+			it: 'it',
+			tr: 'tr',
+			uk: 'ua',
+			hi: 'in',
+			ms: 'my',
+			nl: 'nl'
+		};
+		return map[l] || '';
+	}
+
+	function displayChapterTitle(chapter: { title?: string; number?: number | string }): string {
+		const t = String(chapter?.title ?? '').trim();
+		if (!t) {
+			const n = chapter?.number;
+			return n != null && n !== '' ? `Ch ${n}` : 'Ch ?';
+		}
+		const m = t.match(/^(?:Chapter|Ch\.?|Bab)\s*(\d+(?:\.\d+)?)\b/i);
+		if (m) return `Ch ${m[1]}`;
+		return t;
+	}
+
+	onMount(() => {
+		try {
+			const savedView = localStorage.getItem(VIEW_KEY) as typeof viewMode | null;
+			if (savedView === 'grid-thumb' || savedView === 'grid-text' || savedView === 'list-thumb') {
+				viewMode = savedView;
+			}
+			const savedSort = localStorage.getItem(SORT_KEY);
+			if (savedSort === 'true' || savedSort === 'false') {
+				sortNewest = savedSort === 'true';
+			}
+		} catch {
+		}
+
+		if (manga?.id) {
+			bookmarked = isBookmarked(manga.id, source);
+			notified = isNotified(manga.id, source);
+		}
+
+		refreshReadChapters();
+
+		const onChange = () => {
+			if (manga?.id) {
+				bookmarked = isBookmarked(manga.id, source);
+				notified = isNotified(manga.id, source);
+				refreshReadChapters();
+			}
+		};
+		const onLibrary = () => void refreshOfflineChapters();
+		offlineReady = false;
+		void refreshOfflineChapters();
+		window.addEventListener('bookmarks-changed', onChange);
+		window.addEventListener('notifications-changed', onChange);
+		window.addEventListener('history-changed', onChange);
+		window.addEventListener('read-chapters-changed', onChange);
+		window.addEventListener('library-changed', onLibrary);
+		document.addEventListener('pointerdown', handleLanguageFilterPointerDown);
+		document.addEventListener('keydown', handleLanguageFilterKeydown);
+		return () => {
+			window.removeEventListener('bookmarks-changed', onChange);
+			window.removeEventListener('notifications-changed', onChange);
+			window.removeEventListener('history-changed', onChange);
+			window.removeEventListener('read-chapters-changed', onChange);
+			window.removeEventListener('library-changed', onLibrary);
+			document.removeEventListener('pointerdown', handleLanguageFilterPointerDown);
+			document.removeEventListener('keydown', handleLanguageFilterKeydown);
+		};
+	});
+
+	$effect(() => {
+		const el = loadMoreEl;
+		if (!el || !hasMoreChapters) return;
+
+		let locked = false;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries[0]?.isIntersecting || locked) return;
+				if (window.scrollY < 80) return;
+				locked = true;
+				observer.unobserve(el);
+				loadMoreChapters();
+			},
+			{ rootMargin: '120px', threshold: 0.15 }
+		);
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
+</script>
+
+<svelte:head>
+	<title>{pageTitle}</title>
+	<meta name="description" content={pageDesc} />
+
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="RokuYomu" />
+	<meta property="og:title" content={pageTitle} />
+	<meta property="og:description" content={pageDesc} />
+	{#if pageImage}
+		<meta property="og:image" content={pageImage} />
+	{/if}
+	{#if canonicalUrl}
+		<meta property="og:url" content={canonicalUrl} />
+		<link rel="canonical" href={canonicalUrl} />
+	{/if}
+
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content={pageTitle} />
+	<meta name="twitter:description" content={pageDesc} />
+	{#if pageImage}
+		<meta name="twitter:image" content={pageImage} />
+	{/if}
+</svelte:head>
+
+{#if !manga}
+	<div class="py-20 text-center text-zinc-500">Manga not found</div>
+{:else}
+	<div
+          class="detail-page mx-auto w-full max-w-[480px] md:max-w-[720px] md:px-4 md:py-5 lg:max-w-none lg:px-3 lg:py-5 xl:px-4"
+         >
+		<div
+			class="detail-container relative min-h-screen overflow-hidden rounded-none md:min-h-0 md:rounded-2xl md:border md:shadow-2xl lg:rounded-3xl"
+		>
+			{#if manga.cover}
+				<div
+					class="detail-bg pointer-events-none absolute inset-0 scale-[1.05] bg-cover bg-center"
+					style="background-image: url('{proxyImage(manga.cover, 120, 180)}');"
+				></div>
+				<div class="detail-overlay absolute inset-0"></div>
+			{/if}
+
+			<div class="relative z-10 p-[18px_14px_14px] md:p-[28px_24px_20px] lg:p-[28px_24px_22px] xl:p-[32px_28px_24px]">
+			{#if fromBackup}
+					<div
+						class="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-200"
+						role="alert"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mt-0.5 shrink-0" aria-hidden="true">
+							<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+							<path d="M12 9v4" /><path d="M12 17h.01" />
+						</svg>
+						<span>Source is broken / down — displaying backup metadata. The chapter list may not be available.</span>
+					</div>
+				{/if}
+				<!-- Cover + Info -->
+				<div class="flex items-start gap-3.5 md:gap-7 lg:gap-10">
+					<div class="flex w-[100px] shrink-0 flex-col items-center gap-3 md:w-[200px] lg:w-[240px]">
+						<div
+							class="detail-cover relative h-[150px] w-[100px] overflow-hidden rounded-xl shadow-2xl ring-1 md:h-[280px] md:w-[200px] lg:h-[340px] lg:w-[240px]"
+						>
+							{#if manga.cover}
+	                           <img
+		                          src={proxyImage(manga.cover, 200, 300)}
+		                          data-original={manga.cover}
+		                          alt="{manga.title} cover"
+		                          class="h-full w-full object-cover"
+		                          onerror={onCoverError}
+	                            />
+                            {:else}
+	                            <img
+		                          src={coverNotFound}
+		                          alt="Cover not found"
+		                          class="h-full w-full object-cover"
+	                            />
+                            {/if}
+							{#if volume}
+								<span
+									class="absolute right-2 bottom-2 flex h-7 w-7 items-center justify-center rounded-md bg-black/75 text-xs font-bold text-white ring-1 ring-white/20"
+								>
+									{volume}
+								</span>
+							{/if}
+						</div>
+
+						<div class="flex items-center gap-1">
+							<div class="flex gap-0.5 text-amber-400">
+								{#each Array(5) as _, i}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										width="12"
+										height="12"
+										viewBox="0 0 24 24"
+										fill={i < Math.round(parseFloat(rating) / 2) ? 'currentColor' : 'none'}
+										stroke="currentColor"
+										stroke-width="1.5"
+										class={i < Math.round(parseFloat(rating) / 2) ? '' : 'text-zinc-500'}
+									>
+										<path
+											d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+										/>
+									</svg>
+								{/each}
+							</div>
+							<span class="detail-muted text-[12px] font-medium">{rating}</span>
+						</div>
+
+						<div
+							class="bookmark-group flex w-full max-w-[120px] items-stretch overflow-hidden rounded-lg border md:max-w-[180px]"
+							role="group"
+							aria-label="Notify and bookmark"
+						>
+							<button
+								type="button"
+								onclick={handleNotify}
+								class="bookmark-btn bookmark-btn-left flex shrink-0 items-center justify-center px-2.5 py-1.5 transition md:px-3 md:py-2.5 {notified
+									? 'bookmarked'
+									: ''}"
+								title={notified ? 'Turn off chapter notifications' : 'Enable new chapter notifications'}
+								aria-label={notified ? 'Turn off notifications' : 'Enable notifications'}
+							>
+								{#if notified}
+									<Bell class="h-3.5 w-3.5 md:h-4 md:w-4" />
+								{:else}
+									<BellOff class="h-3.5 w-3.5 md:h-4 md:w-4" />
+								{/if}
+							</button>
+							<span class="bookmark-group-divider" aria-hidden="true"></span>
+							<button
+								type="button"
+								onclick={handleBookmark}
+								class="bookmark-btn bookmark-btn-right flex min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 py-1.5 text-[10px] font-semibold transition md:px-3 md:py-2.5 md:text-sm {bookmarked
+									? 'bookmarked'
+									: ''}"
+							>
+								{#if bookmarked}
+									Added
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+								{:else}
+									Add
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" /></svg>
+								{/if}
+							</button>
+						</div>
+					</div>
+
+					<div class="min-w-0 flex-1">
+						<h1 class="detail-title text-[14px] leading-[1.25] font-bold md:text-lg lg:text-xl">
+							{manga.title}
+						</h1>
+						<div class="detail-divider my-1.5 h-px w-full rounded-sm"></div>
+						{#if altTitle}
+							<p class="detail-muted text-[11px] leading-relaxed opacity-90 md:text-sm">{altTitle}</p>
+						{/if}
+
+						<div class="detail-meta mt-2.5 space-y-1.5 text-[11px] md:mt-3.5 md:space-y-2 md:text-[14px]">
+							<div class="mb-1.5 flex items-center gap-2">
+								<span
+									class="flex h-2.5 w-2.5 shrink-0 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.6)]"
+								></span>
+								<span class="font-bold tracking-wider uppercase {statusClass(manga.status)}">
+									{manga.status || 'ONGOING'}
+								</span>
+							</div>
+
+							{#if type}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" /></svg>
+									<span
+										><strong class="detail-label">Type:</strong>
+										<span class="detail-value capitalize">{type}</span></span
+									>
+								</div>
+							{/if}
+
+							{#if manga.chapters?.length}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
+									<span
+										><strong class="detail-label">Chapter:</strong>
+										<span class="detail-value">{chapterTotal || manga.chapters?.length || 0} Chapters</span></span
+									>
+								</div>
+							{/if}
+
+							{#if pages}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+									<span
+										><strong class="detail-label">Pages:</strong>
+										<span class="detail-value">{pages}</span></span
+									>
+								</div>
+							{/if}
+
+							{#if publication}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><rect width="18" height="18" x="3" y="4" rx="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>
+									<span
+										><strong class="detail-label">Publication:</strong>
+										<span class="detail-value">{publication}</span></span
+									>
+								</div>
+							{/if}
+
+							{#if author}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+									<span
+										><strong class="detail-label">Author:</strong>
+										<span class="detail-value">{author}</span></span
+									>
+								</div>
+							{/if}
+
+							{#if artists}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+									<span
+										><strong class="detail-label">Artist:</strong>
+										<span class="detail-value">{artists}</span></span
+									>
+								</div>
+							{/if}
+
+							{#if groups}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+									<span
+										><strong class="detail-label">Group:</strong>
+										<span class="detail-value">{groups}</span></span
+									>
+								</div>
+							{/if}
+
+							{#if latestUpdate}
+								<div class="mb-3 flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+									<span>
+										<strong class="detail-label">Latest Update:</strong>
+										<span class="font-semibold text-emerald-600 dark:text-emerald-400"
+											>{formatDateOnly(latestUpdate)}</span
+										>
+									</span>
+								</div>
+							{/if}
+
+							{#if isNovel}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
+									<span class="flex min-w-0 items-center gap-1.5">
+										<strong class="detail-label">Tracker:</strong>
+										<a
+											href={novelUpdatesUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="tracker-link inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold transition md:text-[13px]"
+											title="Search on NovelUpdates"
+										>
+											<img
+												src="https://www.google.com/s2/favicons?domain=novelupdates.com&sz=32"
+												alt=""
+												width="14"
+												height="14"
+												class="h-3.5 w-3.5 shrink-0 rounded-sm"
+												loading="lazy"
+											/>
+											NovelUpdates
+										</a>
+									</span>
+								</div>
+							{:else}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
+									<span class="flex min-w-0 items-center gap-1.5">
+										<strong class="detail-label">Tracker:</strong>
+										<a
+											href={mangaUpdatesUrl || mangaUpdatesSearchUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="tracker-link inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold transition md:text-[13px]"
+											title={mangaUpdatesTitle
+												? `Open on MangaUpdates: ${mangaUpdatesTitle}`
+												: 'Search on MangaUpdates'}
+										>
+											<img
+												src="https://www.google.com/s2/favicons?domain=mangaupdates.com&sz=32"
+												alt=""
+												width="14"
+												height="14"
+												class="h-3.5 w-3.5 shrink-0 rounded-sm"
+												loading="lazy"
+											/>
+											MangaUpdates
+										</a>
+									</span>
+								</div>
+							{/if}
+
+						{#if demographic}
+								<div class="flex flex-wrap items-start gap-1">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon mt-0.5 w-5 shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+									<span class="detail-label"><strong>Demographic:</strong></span>
+									<span
+										class="rounded-lg bg-red-500/15 px-2.5 py-0.5 text-[10px] font-bold text-red-600 capitalize ring-1 ring-red-500/30 dark:bg-red-500/20 dark:text-red-300 dark:ring-red-500/35"
+										>{demographic}</span
+									>
+								</div>
+							{/if}
+
+							{#if language}
+								<div class="flex items-center gap-1.5">
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="detail-icon w-5 shrink-0"><circle cx="12" cy="12" r="10" /><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /><path d="M2 12h20" /></svg>
+									<span
+										><strong class="detail-label">Language:</strong>
+										<span class="detail-value">{language}</span></span
+									>
+								</div>
+							{/if}
+						</div>
+					</div>
+				</div>
+
+				<!-- Genres -->
+				{#if genreTags.normal.length}
+					<div
+						class="mt-5 grid grid-cols-4 gap-2 md:mt-6 md:grid-cols-[repeat(auto-fit,minmax(110px,1fr))] md:gap-2.5"
+					>
+						{#each genreTags.normal as genre}
+							<a
+								href={genreSearchHref(genre)}
+								class="detail-chip truncate rounded-lg border px-2 py-1.5 text-center text-[11px] font-medium capitalize transition hover:border-violet-500/50 hover:bg-violet-500/15 hover:text-violet-300"
+								title="Search genre: {genre}"
+							>{genre}</a>
+						{/each}
+					</div>
+				{/if}
+
+				{#if genreTags.female.length || genreTags.male.length}
+					<section class="detail-card mt-4 rounded-[14px] border px-4 py-4 md:mt-5">
+						{#if genreTags.female.length}
+							<div class="mb-4 last:mb-0">
+								<div class="detail-title mb-2 flex items-center gap-2 text-[14.5px] font-semibold">
+									<span class="text-[#ffb2ce]">♀</span><span>Female</span>
+								</div>
+								<div class="flex flex-wrap gap-1.5">
+									{#each genreTags.female as tag}
+										<a
+											href={genreSearchHref(tag)}
+											class="rounded-lg border border-[rgba(255,77,141,0.5)] bg-[rgba(255,77,141,0.28)] px-2.5 py-1 text-[11.5px] font-semibold text-[#ffb2ce] capitalize transition hover:brightness-110"
+											title="Search genre: {tag}"
+										>{tag}</a>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						{#if genreTags.male.length}
+							<div>
+								<div class="detail-title mb-2 flex items-center gap-2 text-[14.5px] font-semibold">
+									<span class="text-[#b5c9ff]">♂</span><span>Male</span>
+								</div>
+								<div class="flex flex-wrap gap-1.5">
+									{#each genreTags.male as tag}
+										<a
+											href={genreSearchHref(tag)}
+											class="rounded-lg border border-[rgba(77,125,255,0.5)] bg-[rgba(77,125,255,0.28)] px-2.5 py-1 text-[11.5px] font-semibold text-[#b5c9ff] capitalize transition hover:brightness-110"
+											title="Search genre: {tag}"
+										>{tag}</a>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</section>
+				{/if}
+
+				{#if synopsis}
+					<section
+						class="detail-card mt-4 rounded-[14px] border p-4 md:mt-5 md:p-5"
+						style="background: color-mix(in srgb, var(--accent) 1%, transparent) !important; background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important; background-image: none !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;"
+					>
+						<h2 class="detail-title mb-3.5 text-lg font-semibold">Synopsis</h2>
+						<p class="detail-value text-[13px] leading-relaxed whitespace-pre-line">{synopsis}</p>
+					</section>
+				{/if}
+
+
+				<!-- Controls -->
+				<div class="mt-6 flex flex-wrap items-center justify-between gap-2">
+					<div class="flex min-w-0 items-center gap-2">
+						{#if chapterLanguages.length > 1}
+							<div class="relative" bind:this={languageFilterContainer}>
+								<button
+									type="button"
+									class="chapter-language-trigger flex h-[38px] max-w-[min(11rem,42vw)] items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition"
+									aria-label="Filter chapters by language"
+									aria-expanded={languageFilterOpen}
+									aria-controls="chapter-language-options"
+									onclick={() => (languageFilterOpen = !languageFilterOpen)}
+								>
+									<svg
+										class="h-4 w-4 shrink-0 text-[var(--accent)]"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.8"
+										aria-hidden="true"
+									>
+										<circle cx="12" cy="12" r="9" />
+										<path d="M3 12h18M12 3a15 15 0 0 1 0 18m0-18a15 15 0 0 0 0 18" />
+									</svg>
+									<span class="truncate">
+										{chapterLangFilter === 'all'
+											? 'All languages'
+											: chapterLanguageLabel(chapterLangFilter)}
+									</span>
+									<svg
+										class="h-3.5 w-3.5 shrink-0 opacity-60 transition {languageFilterOpen
+											? 'rotate-180'
+											: ''}"
+										viewBox="0 0 20 20"
+										fill="currentColor"
+										aria-hidden="true"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M5.22 7.47a.75.75 0 0 1 1.06 0L10 11.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.53a.75.75 0 0 1 0-1.06Z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</button>
+								{#if languageFilterOpen}
+									<div
+										id="chapter-language-options"
+										class="chapter-language-menu absolute top-[calc(100%+0.5rem)] left-0 z-30 w-[min(15rem,80vw)] overflow-hidden rounded-xl border p-1.5 shadow-2xl"
+										role="group"
+										aria-label="Chapter languages"
+									>
+										{#each ['all', ...chapterLanguages] as language (language)}
+											<button
+												type="button"
+												class="chapter-language-option flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-xs transition"
+												class:chapter-language-option-active={chapterLangFilter === language}
+												aria-pressed={chapterLangFilter === language}
+												onclick={() => {
+													setChapterLanguage(language);
+													languageFilterOpen = false;
+												}}
+											>
+												<span class="truncate">
+													{language === 'all'
+														? 'All languages'
+														: chapterLanguageLabel(language)}
+												</span>
+												{#if chapterLangFilter === language}
+													<svg
+														class="h-4 w-4 shrink-0 text-[var(--accent)]"
+														viewBox="0 0 20 20"
+														fill="currentColor"
+														aria-hidden="true"
+													>
+														<path
+															fill-rule="evenodd"
+															d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.2 7.26a1 1 0 0 1-1.42 0l-3.8-3.83a1 1 0 1 1 1.42-1.41l3.09 3.11 6.49-6.54a1 1 0 0 1 1.414-.004Z"
+															clip-rule="evenodd"
+														/>
+													</svg>
+												{/if}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						{/if}
+					</div>
+
+					<div class="flex items-center gap-2">
+						<button
+							type="button"
+							class="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border {sortNewest
+								? 'border-fuchsia-400 bg-fuchsia-500 text-white'
+								: 'border-amber-500 bg-amber-500 text-white'}"
+							onclick={toggleSort}
+							title={sortNewest ? 'Urutkan dari terlama' : 'Urutkan dari terbaru'}
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="15"
+								height="15"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								class={sortNewest ? '' : 'rotate-180'}
+							>
+								<path d="m3 16 4 4 4-4" /><path d="M7 20V4" /><path d="M11 4h10" /><path d="M11 8h7" /><path d="M11 12h4" />
+							</svg>
+						</button>
+						<button
+	type="button"
+	class="detail-view-btn flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border {viewMode === 'grid-text'
+		? 'border-blue-500 bg-blue-500 text-white'
+		: ''}"
+	onclick={() => setViewMode('grid-text')}
+	title="Tampilan grid teks"
+	aria-label="Tampilan grid teks"
+>
+	<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+		<rect x="3" y="4" width="18" height="4" rx="1" />
+		<rect x="3" y="10" width="18" height="4" rx="1" />
+		<rect x="3" y="16" width="18" height="4" rx="1" />
+	</svg>
+</button>
+
+<button
+	type="button"
+	class="detail-view-btn flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border {viewMode === 'grid-thumb'
+		? 'border-red-500 bg-red-500 text-white'
+		: ''}"
+	onclick={() => setViewMode('grid-thumb')}
+	title="Tampilan grid thumbnail"
+	aria-label="Tampilan grid thumbnail"
+>
+	<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+		<rect width="7" height="7" x="3" y="3" rx="1" />
+		<rect width="7" height="7" x="14" y="3" rx="1" />
+		<rect width="7" height="7" x="14" y="14" rx="1" />
+		<rect width="7" height="7" x="3" y="14" rx="1" />
+	</svg>
+</button>
+
+<button
+	type="button"
+	class="detail-view-btn flex h-[38px] w-[38px] items-center justify-center rounded-[10px] border {viewMode === 'list-thumb'
+		? 'border-green-500 bg-green-500 text-white'
+		: ''}"
+	onclick={() => setViewMode('list-thumb')}
+	title="Tampilan list thumbnail"
+	aria-label="Tampilan list thumbnail"
+>
+	<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+		<line x1="8" x2="21" y1="6" y2="6" />
+		<line x1="8" x2="21" y1="12" y2="12" />
+		<line x1="8" x2="21" y1="18" y2="18" />
+		<line x1="3" x2="3.01" y1="6" y2="6" />
+		<line x1="3" x2="3.01" y1="12" y2="12" />
+		<line x1="3" x2="3.01" y1="18" y2="18" />
+	</svg>
+</button>
+					</div>
+				</div>
+
+				<!-- Chapters -->
+				<div class="mt-3 mb-3 flex items-center">
+					<div class="detail-divider h-px flex-1"></div>
+					<h2 class="detail-title mx-3 text-[15px] font-semibold md:text-xl">Chapters</h2>
+					<div class="detail-divider h-px flex-1"></div>
+				</div>
+
+								{#if displayedChapters.length || chapterTotal}
+					{#if viewMode === 'grid-thumb'}
+						<div
+							class="grid w-full grid-cols-4 gap-2.5 pb-8 sm:grid-cols-5 md:grid-cols-6 md:gap-3.5 lg:grid-cols-8 lg:gap-4"
+						>
+							{#each displayedChapters as chapter}
+								<a
+									href={chapterHref(source, chapter.id)}
+									class="detail-chapter-thumb relative aspect-square w-full overflow-hidden rounded-[10px] transition hover:z-[2] hover:scale-105 {isChapterRead(chapter) ? 'chapter-read' : ''}"
+								>
+									{#if isDownloading(chapter.id)}
+										<div class="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-black/40">
+											<div
+												class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+												style="width: {dlPercent(chapter.id)}%"
+											></div>
+										</div>
+										<div class="absolute inset-x-0 top-1 z-20 flex justify-center">
+											<span class="rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
+												{dlLabel(chapter.id) || '…'}
+											</span>
+										</div>
+									{/if}
+									{#if chapterCover(chapter)}
+										<img
+											src={proxyImage(chapterCover(chapter), 150, 150)}
+											data-original={chapterCover(chapter)}
+											alt={chapter.title}
+											loading="lazy"
+											class="h-full w-full object-cover"
+											onerror={onCoverError}
+										/>
+									{/if}
+									<button
+										type="button"
+										class="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded border transition disabled:opacity-50 {isOffline(chapter.id)
+											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
+										title={!offlineReady ? "Checking offline…" : isOffline(chapter.id) ? "Read offline" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Read offline ${chapter.title}` : `Download ${chapter.title}`}
+										disabled={isDownloading(chapter.id) || !offlineReady}
+										onclick={(e) => onChapterAction(e, chapter)}
+									>
+										{#if isDownloading(chapter.id)}
+										<span class="text-[8px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
+									{:else if !offlineReady}
+										<svg class="animate-spin opacity-70" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 12a9 9 0 1 1-6.219-8.56" />
+										</svg>
+									{:else if isOffline(chapter.id)}
+										<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 6 9 17l-5-5" />
+										</svg>
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" x2="12" y1="15" y2="3" />
+										</svg>
+									{/if}
+									</button>
+									<div class="absolute inset-x-0 bottom-0 bg-black/85 px-1 py-1.5 text-center">
+										<p
+											class="line-clamp-2 flex items-center justify-center gap-1 text-[11px] leading-snug font-bold text-white sm:text-xs"
+										>
+{#if chapter.isLocked}
+												<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
+													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											{/if}
+											{#if chapterFlag(chapter.lang)}
+												<span
+													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[12px]"
+												></span>
+											{/if}
+											<span class="min-w-0 md:hidden">{displayChapterTitle(chapter)}</span>
+											<span class="min-w-0 hidden md:inline">{chapter.title}</span>
+										</p>
+										{#if chapter.date}
+											<p class="mt-0.5 text-[9px] text-white/80">{formatDateOnly(chapter.date)}</p>
+										{/if}
+									</div>
+								</a>
+							{/each}
+						</div>
+					{:else if viewMode === 'grid-text'}
+						<div class="grid grid-cols-3 gap-2.5 pb-8 md:grid-cols-4 lg:grid-cols-6">
+							{#each displayedChapters as chapter}
+								<div class="relative overflow-hidden rounded-[10px]">
+									{#if isDownloading(chapter.id)}
+										<div class="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-zinc-800/80">
+											<div
+												class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+												style="width: {dlPercent(chapter.id)}%"
+											></div>
+										</div>
+									{/if}
+									<a
+										href={chapterHref(source, chapter.id)}
+										class="detail-chapter-text flex min-h-[60px] flex-col justify-center rounded-[10px] border px-3 py-3 pr-9 hover:border-blue-500/40 {chapter.isLocked ? 'opacity-70' : ''} {isChapterRead(chapter) ? 'chapter-read' : ''}"
+									>
+										<p class="detail-title flex items-center gap-1.5 text-[12px] leading-tight font-bold">
+											{#if chapter.isLocked}
+												<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
+													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											{/if}
+											{#if chapterFlag(chapter.lang)}
+												<span
+													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[14px]"
+												></span>
+											{/if}
+											<span class="min-w-0 md:hidden">{displayChapterTitle(chapter)}</span>
+											<span class="min-w-0 hidden md:inline">{chapter.title}</span>
+										</p>
+										{#if chapter.date}
+											<p class="detail-muted mt-1 text-[10px] opacity-70">
+												{formatDateOnly(chapter.date)}
+											</p>
+										{/if}
+									</a>
+									<button
+										type="button"
+										class="absolute top-1.5 right-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-50 {isOffline(chapter.id)
+											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
+										title={!offlineReady ? "Checking offline…" : isOffline(chapter.id) ? "Read offline" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Read offline ${chapter.title}` : `Download ${chapter.title}`}
+										disabled={isDownloading(chapter.id) || !offlineReady}
+										onclick={(e) => onChapterAction(e, chapter)}
+									>
+										{#if isDownloading(chapter.id)}
+										<span class="text-[9px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
+									{:else if !offlineReady}
+										<svg class="animate-spin opacity-70" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 12a9 9 0 1 1-6.219-8.56" />
+										</svg>
+									{:else if isOffline(chapter.id)}
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 6 9 17l-5-5" />
+										</svg>
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" x2="12" y1="15" y2="3" />
+										</svg>
+									{/if}
+									</button>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<div class="flex flex-col gap-2.5 pb-8">
+							{#each displayedChapters as chapter}
+								<div class="relative overflow-hidden rounded-xl">
+									{#if isDownloading(chapter.id)}
+										<div class="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden bg-zinc-800/80">
+											<div
+												class="h-full bg-emerald-500 transition-all duration-300 ease-out"
+												style="width: {dlPercent(chapter.id)}%"
+											></div>
+										</div>
+									{/if}
+									<a
+										href={chapterHref(source, chapter.id)}
+										class="detail-chapter-list flex h-20 items-center overflow-hidden rounded-xl border hover:border-green-500/40 {isChapterRead(chapter) ? 'chapter-read' : ''}"
+									>
+									<div class="h-full w-[90px] shrink-0 overflow-hidden bg-zinc-300 dark:bg-zinc-900">
+										{#if chapterCover(chapter)}
+											<img
+												src={proxyImage(chapterCover(chapter), 150, 150)}
+												data-original={chapterCover(chapter)}
+												alt={chapter.title}
+												loading="lazy"
+												class="h-full w-full object-cover"
+												onerror={onCoverError}
+											/>
+										{/if}
+									</div>
+									<div class="min-w-0 flex-1 px-3 py-3">
+										<p class="detail-title flex items-center gap-2 truncate text-sm font-bold">
+											{#if chapter.isLocked}
+												<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 text-amber-400" aria-label="Locked">
+													<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+												</svg>
+											{/if}
+											{#if chapterFlag(chapter.lang)}
+												<span
+													class="fi fi-{chapterFlag(chapter.lang)} shrink-0 rounded-[2px] text-[16px]"
+												></span>
+											{/if}
+											<span class="truncate">{chapter.title}</span>
+										</p>
+										<p class="detail-muted mt-1 text-[11px]">
+											{formatDateOnly(chapter.date) || '—'}
+										</p>
+									</div>
+									<button
+										type="button"
+										class="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-50 {isOffline(chapter.id)
+											? 'border-violet-400/70 bg-violet-600/35 text-violet-100 shadow-[0_0_10px_rgba(139,92,246,0.45)]'
+											: 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 hover:text-emerald-100'}"
+										title={!offlineReady ? "Checking offline…" : isOffline(chapter.id) ? "Read offline" : "Download chapter"}
+										aria-label={isOffline(chapter.id) ? `Read offline ${chapter.title}` : `Download ${chapter.title}`}
+										disabled={isDownloading(chapter.id) || !offlineReady}
+										onclick={(e) => onChapterAction(e, chapter)}
+									>
+										{#if isDownloading(chapter.id)}
+										<span class="text-[10px] font-bold tabular-nums text-amber-300">{dlLabel(String(chapter.id)) || '…'}</span>
+									{:else if !offlineReady}
+										<svg class="animate-spin opacity-70" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 12a9 9 0 1 1-6.219-8.56" />
+										</svg>
+									{:else if isOffline(chapter.id)}
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 6 9 17l-5-5" />
+										</svg>
+									{:else}
+										<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" x2="12" y1="15" y2="3" />
+										</svg>
+									{/if}
+									</button>
+								</a>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				{#if hasMoreChapters}
+					<div
+						bind:this={loadMoreEl}
+						class="flex flex-col items-center gap-3 pb-12 pt-4"
+					>
+						<div class="load-more-row flex w-full items-center">
+							<span class="load-more-line load-more-line-left" aria-hidden="true"></span>
+							<button
+								type="button"
+								onclick={loadMoreChapters}
+								disabled={loadingMore}
+								class="detail-load-more load-more-btn shrink-0 rounded-xl border px-5 py-2.5 text-sm font-semibold transition hover:border-blue-500/50 disabled:opacity-60"
+							>
+								{loadingMore ? 'Loading…' : `Load more (+${Math.min(LOAD_MORE_STEP, remainingChapters)}) · ${remainingChapters} left`}
+							</button>
+							<span class="load-more-line load-more-line-right" aria-hidden="true"></span>
+						</div>
+						<button
+							type="button"
+							onclick={showAllChapters}
+							class="detail-muted text-xs underline-offset-2 hover:underline"
+						>
+							Show all {chapterTotal} chapters
+						</button>
+					</div>
+				{/if}
+				{:else}
+					<p class="detail-muted py-12 text-center text-sm">No chapter yet</p>
+				{/if}
+			</div>
+		</div>
+	</div>
+{/if}
+
+<style>
+	.detail-container {
+		background: #0f0f1e;
+		color: #fff;
+		border-color: rgba(255, 255, 255, 0.1);
+	}
+	.detail-bg {
+		opacity: 0.50;
+	}
+	.detail-overlay {
+		background: rgba(15, 15, 30, 0.514);
+	}
+	.detail-title {
+		color: #fff;
+	}
+	.detail-muted {
+		color: #a1a1aa;
+	}
+	.detail-label {
+		color: #d4d4d8;
+	}
+	.detail-value {
+		color: #f4f4f5;
+	}
+	.detail-icon {
+		color: #a1a1aa;
+	}
+	.detail-divider {
+		background: rgba(255, 255, 255, 0.35);
+	}
+	.detail-load-more {
+		background: rgba(255, 255, 255, 0.06);
+		border-color: rgba(255, 255, 255, 0.28);
+		color: #e4e4e7;
+		position: relative;
+		z-index: 1;
+	}
+	.detail-load-more:hover {
+		background: rgba(59, 130, 246, 0.15);
+		border-color: rgba(59, 130, 246, 0.55);
+		color: #fff;
+	}
+	:global(html.light) .detail-load-more {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.18);
+		color: #18181b;
+	}
+	:global(html.light) .detail-load-more:hover {
+		background: rgba(59, 130, 246, 0.12);
+		border-color: rgba(59, 130, 246, 0.45);
+	}
+
+	.load-more-row {
+		gap: 0;
+	}
+	.load-more-line {
+		flex: 1 1 0;
+		height: 1px;
+		min-width: 24px;
+		position: relative;
+		background: rgba(255, 255, 255, 0.28);
+	}
+	.load-more-line-left {
+		mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 100%);
+		-webkit-mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 100%);
+	}
+	.load-more-line-right {
+		mask-image: linear-gradient(to left, transparent 0%, #000 18%, #000 100%);
+		-webkit-mask-image: linear-gradient(to left, transparent 0%, #000 18%, #000 100%);
+	}
+	.load-more-line-left::before,
+	.load-more-line-right::after {
+		content: '';
+		position: absolute;
+		top: 50%;
+		width: 0;
+		height: 0;
+		border-style: solid;
+		transform: translateY(-50%);
+	}
+	.load-more-line-left::before {
+		left: 0;
+		border-width: 3px 8px 3px 0;
+		border-color: transparent rgba(255, 255, 255, 0.28) transparent transparent;
+	}
+	.load-more-line-right::after {
+		right: 0;
+		border-width: 3px 0 3px 8px;
+		border-color: transparent transparent transparent rgba(255, 255, 255, 0.28);
+	}
+
+	:global(html.light) .load-more-line {
+		background: rgba(0, 0, 0, 0.2);
+	}
+	:global(html.light) .load-more-line-left::before {
+		border-color: transparent rgba(0, 0, 0, 0.2) transparent transparent;
+	}
+	:global(html.light) .load-more-line-right::after {
+		border-color: transparent transparent transparent rgba(0, 0, 0, 0.2);
+	}
+	.detail-cover {
+		background: #18181b;
+		--tw-ring-color: rgba(255, 255, 255, 0.15);
+	}
+	.detail-chip {
+		background: rgba(0, 0, 0, 0.35);
+		border-color: rgba(255, 255, 255, 0.1);
+		color: #f4f4f5;
+		text-decoration: none;
+		display: block;
+		cursor: pointer;
+	}
+	a.detail-chip:hover {
+		border-color: rgba(139, 92, 246, 0.55);
+	}
+	.detail-card {
+		background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+		background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+		background-image: none !important;
+		border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+		backdrop-filter: none !important;
+		-webkit-backdrop-filter: none !important;
+		box-shadow: none !important;
+	}
+	.detail-chapter-thumb {
+		background: rgba(0, 0, 0, 0.25);
+	}
+	.detail-chapter-text {
+		background: rgba(0, 0, 0, 0.1);
+		border-color: rgba(255, 255, 255, 0.204);
+		backdrop-filter: none;
+	}
+	.detail-chapter-list {
+		background: rgba(0, 0, 0, 0.2);
+		border-color: rgba(255, 255, 255, 0.1);
+	}
+	.detail-view-btn:not(.border-blue-500):not(.border-red-500):not(.border-green-500) {
+		border-color: rgba(255, 255, 255, 0.15);
+		background: rgba(255, 255, 255, 0.05);
+		color: #d4d4d8;
+	}
+	.chapter-language-trigger {
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		background-color: color-mix(in srgb, var(--accent) 14%, #18181b);
+		color: #f4f4f5;
+	}
+	.chapter-language-trigger:hover,
+	.chapter-language-trigger[aria-expanded='true'] {
+		border-color: color-mix(in srgb, var(--accent) 80%, white 10%);
+		background-color: color-mix(in srgb, var(--accent) 20%, #18181b);
+	}
+	.chapter-language-trigger:focus-visible,
+	.chapter-language-option:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.chapter-language-menu {
+		border-color: color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.12));
+		background-color: #18181b;
+		color: #f4f4f5;
+		box-shadow:
+			0 18px 42px rgba(0, 0, 0, 0.42),
+			0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+	}
+	.chapter-language-option:hover,
+	.chapter-language-option-active {
+		background-color: color-mix(in srgb, var(--accent) 18%, #18181b);
+	}
+	.bookmark-group {
+		background: rgba(255, 255, 255, 0.06);
+		border-color: rgba(255, 255, 255, 0.18);
+	}
+	.bookmark-group-divider {
+		width: 1px;
+		align-self: stretch;
+		background: rgba(255, 255, 255, 0.14);
+		flex-shrink: 0;
+	}
+	.bookmark-btn {
+		background: transparent;
+		border: none;
+		color: #fff;
+	}
+	.bookmark-btn:hover {
+		background: rgba(0, 0, 0, 0.22);
+	}
+	.bookmark-btn.bookmarked {
+		background: #ffcc00 !important;
+		color: #000 !important;
+	}
+	.tracker-link {
+		background: rgba(255, 255, 255, 0.06);
+		border-color: rgba(255, 255, 255, 0.18);
+		color: #e4e4e7;
+	}
+	.tracker-link:hover {
+		background: rgba(255, 255, 255, 0.12);
+		border-color: rgba(255, 255, 255, 0.28);
+		color: #fff;
+	}
+
+	:global(html.light) .detail-container {
+		background: rgba(255, 255, 255, 0.74);
+		color: #050000;
+		border-color: rgba(0, 0, 0, 0.1);
+	}
+	:global(html.light) .detail-bg {
+		opacity: 0.22 !important;
+	}
+	:global(html.light) .detail-overlay {
+		background: rgba(126, 125, 125, 0.103) !important;
+	}
+	:global(html.light) .detail-title {
+		color: #111 !important;
+	}
+	:global(html.light) .detail-muted {
+		color: #52525b;
+	}
+	:global(html.light) .detail-label {
+		color: #3f3f46;
+	}
+	:global(html.light) .detail-value {
+		color: #18181b;
+	}
+	:global(html.light) .detail-icon {
+		color: #71717a;
+	}
+	:global(html.light) .detail-divider {
+		background: rgba(0, 0, 0, 0.12);
+	}
+	:global(html.light) .detail-cover {
+		background: #e4e4e7;
+		--tw-ring-color: rgba(0, 0, 0, 0.1);
+	}
+	:global(html.light) .detail-chip {
+		background: rgba(0, 0, 0, 0.06);
+		border-color: rgba(0, 0, 0, 0.1);
+		color: #18181b;
+	}
+	:global(html.light) .detail-card {
+		background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+		background-color: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+		background-image: none !important;
+		border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+		backdrop-filter: none !important;
+		-webkit-backdrop-filter: none !important;
+		box-shadow: none !important;
+	}
+	:global(html.dark) .detail-card {
+		background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+		background-color: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+		background-image: none !important;
+		border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+		backdrop-filter: none !important;
+		-webkit-backdrop-filter: none !important;
+		box-shadow: none !important;
+	}
+	:global(html.light) .detail-chapter-thumb {
+		background: rgba(0, 0, 0, 0.06);
+	}
+	:global(html.light) .detail-chapter-text {
+		background: rgba(0, 0, 0, 0.1);
+		border-color: rgba(0, 0, 0, 0.14);
+		backdrop-filter: none;
+	}
+	:global(html.light) .detail-chapter-list {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.1);
+	}
+	:global(html.light) .detail-view-btn:not(.border-blue-500):not(.border-red-500):not(.border-green-500) {
+		border-color: rgba(0, 0, 0, 0.12);
+		background: rgba(0, 0, 0, 0.04);
+		color: #3f3f46;
+	}
+	:global(html.light) .chapter-language-trigger {
+		border-color: color-mix(in srgb, var(--accent) 48%, rgba(0, 0, 0, 0.18));
+		background-color: color-mix(in srgb, var(--accent) 10%, white);
+		color: #27272a;
+	}
+	:global(html.light) .chapter-language-trigger:hover,
+	:global(html.light) .chapter-language-trigger[aria-expanded='true'] {
+		border-color: color-mix(in srgb, var(--accent) 70%, rgba(0, 0, 0, 0.2));
+		background-color: color-mix(in srgb, var(--accent) 18%, white);
+	}
+	:global(html.light) .chapter-language-menu {
+		border-color: color-mix(in srgb, var(--accent) 30%, rgba(0, 0, 0, 0.14));
+		background-color: white;
+		color: #27272a;
+		box-shadow:
+			0 18px 42px rgba(0, 0, 0, 0.16),
+			0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+	}
+	:global(html.light) .chapter-language-option:hover,
+	:global(html.light) .chapter-language-option-active {
+		background-color: color-mix(in srgb, var(--accent) 16%, white);
+	}
+	:global(html.light) .bookmark-group {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.15);
+	}
+	:global(html.light) .bookmark-group-divider {
+		background: rgba(0, 0, 0, 0.12);
+	}
+	:global(html.light) .bookmark-btn:not(.bookmarked) {
+		background: transparent;
+		color: #111;
+	}
+	:global(html.light) .bookmark-btn:not(.bookmarked):hover {
+		background: rgba(0, 0, 0, 0.06);
+	}
+	:global(html.light) .tracker-link {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.15);
+		color: #18181b;
+	}
+	:global(html.light) .tracker-link:hover {
+		background: rgba(0, 0, 0, 0.08);
+		border-color: rgba(0, 0, 0, 0.22);
+		color: #000;
+	}
+
+	.chapter-read {
+		opacity: 1;
+		filter: none;
+		background: rgba(0, 0, 0, 0.42) !important;
+	}
+	.chapter-read .detail-title,
+	.chapter-read .detail-title span {
+		color: #a1a1aa !important;
+		font-weight: 600 !important;
+	}
+	.chapter-read .detail-muted {
+		color: #71717a !important;
+	}
+	.chapter-read:hover {
+		background: rgba(0, 0, 0, 0.36) !important;
+	}
+	.chapter-read:hover .detail-title,
+	.chapter-read:hover .detail-title span {
+		color: #d4d4d8 !important;
+	}
+	.chapter-mark-read {
+		background: rgba(139, 92, 246, 0.15);
+		border-color: rgba(139, 92, 246, 0.4);
+		color: #c4b5fd;
+	}
+	.chapter-mark-read:hover {
+		background: rgba(139, 92, 246, 0.3);
+		color: #ede9fe;
+	}
+	.chapter-mark-read.is-read {
+		background: rgba(113, 113, 122, 0.2);
+		border-color: rgba(113, 113, 122, 0.35);
+		color: #a1a1aa;
+	}
+	:global(html.light) .chapter-read {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.27) !important;
+	}
+	:global(html.light) .chapter-read:hover {
+		background: rgba(0, 0, 0, 0.12) !important;
+	}
+	:global(html.light) .chapter-read .detail-title,
+	:global(html.light) .chapter-read .detail-title span {
+		color: #626262 !important;
+	}
+	:global(html.light) .chapter-read .detail-muted {
+		color: #71717a !important;
+	}
+	:global(html.light) .chapter-mark-read {
+		background: rgba(139, 92, 246, 0.12);
+		border-color: rgba(139, 92, 246, 0.35);
+		color: #6d28d9;
+	}
+	.detail-chapter-thumb.chapter-read img {
+		filter: grayscale(0.4) brightness(0.55);
+	}
+	.detail-chapter-thumb.chapter-read .absolute.inset-x-0.bottom-0 {
+		background: rgba(0, 0, 0, 0.92);
+	}
+	.detail-chapter-thumb.chapter-read .absolute.inset-x-0.bottom-0 p {
+		color: #a1a1aa !important;
+	}
+	:global(html.light) .detail-chapter-thumb.chapter-read img {
+		filter: grayscale(0.35) brightness(0.7);
+	}
+	.detail-chapter-list.chapter-read img {
+		filter: grayscale(0.35) brightness(0.5);
+		opacity: 0.85;
+	}
+	:global(html.light) .detail-chapter-list.chapter-read img {
+		filter: grayscale(0.3) brightness(0.65);
+		opacity: 0.9;
+	}
+</style>

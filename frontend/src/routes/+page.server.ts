@@ -1,0 +1,355 @@
+import { getSourceList, filterEnabledSources } from '$lib/server/sources';
+import { getDisabledSourceIds } from '$lib/server/sourceConfig';
+import { parseLastSourceFromCookie } from '$lib/stores/impl';
+import { remoteLatest } from '$lib/server/scraperClient';
+import {
+	parsePreferredFromCookie,
+	parseHomeLayoutFromCookie,
+	type HomeLayout
+} from '$lib/stores/preferredSources';
+import { parseUpdatedAt, syntheticUpdatedAt } from '$lib/server/parseUpdatedAt';
+import { getCached } from '$lib/server/cache';
+import {
+	fallbackBrowseList,
+	listToBackupItems,
+	saveSourceBackup
+} from '$lib/server/backupMeta';
+import type { PageServerLoad } from './$types';
+import type { Manga } from '$lib/server/sources/types';
+
+const LOAD_TIMEOUT_MS = 12_000;
+const MAX_MANGAS = 24;
+const MAX_PREFERRED = 4;
+const CONCURRENCY = 2;
+const LIST_CACHE_TTL = 60 * 30;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+	return new Promise((resolve, reject) => {
+		const t = setTimeout(() => reject(new Error('load_timeout')), ms);
+		promise
+			.then((v) => {
+				clearTimeout(t);
+				resolve(v);
+			})
+			.catch((e) => {
+				clearTimeout(t);
+				reject(e);
+			});
+	});
+}
+
+function ensureUpdatedAt(m: Manga, page: number, index: number): Manga {
+	const fromField = parseUpdatedAt(m.updatedAt);
+	if (fromField > 0) return { ...m, updatedAt: fromField };
+
+	const any = m as Manga & { date?: string; updated?: string; upload_date?: number };
+	const fromAlt =
+		parseUpdatedAt(any.date) ||
+		parseUpdatedAt(any.updated) ||
+		parseUpdatedAt(any.upload_date);
+
+	if (fromAlt > 0) return { ...m, updatedAt: fromAlt };
+
+	return { ...m, updatedAt: syntheticUpdatedAt(page, index) };
+}
+
+function mergeByTime(lists: Manga[][], preferredOrder: string[]): Manga[] {
+	const orderMap = new Map(preferredOrder.map((id, i) => [id, i]));
+
+	const flat = lists.flat();
+	flat.sort((a, b) => {
+		const ta = a.updatedAt || 0;
+		const tb = b.updatedAt || 0;
+		if (tb !== ta) return tb - ta;
+		const oa = orderMap.get(a.sourceId) ?? 999;
+		const ob = orderMap.get(b.sourceId) ?? 999;
+		return oa - ob;
+	});
+	return flat;
+}
+
+function normalizeTitle(title: string): string {
+	return String(title || '')
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}\s]/gu, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function parseSectionPages(raw: string | null): Record<string, number> {
+	const out: Record<string, number> = {};
+	if (!raw) return out;
+	for (const part of raw.split(',')) {
+		const idx = part.lastIndexOf(':');
+		if (idx <= 0) continue;
+		const id = part.slice(0, idx).trim();
+		const p = parseInt(part.slice(idx + 1), 10);
+		if (id && !isNaN(p) && p >= 1) out[id] = p;
+	}
+	return out;
+}
+
+async function fetchSourceList(
+	id: string,
+	pageNum: number,
+	query: string,
+	lang: string,
+	type: string,
+	kv?: KVNamespace | null,
+	limit: number = 6
+): Promise<Manga[]> {
+	const q = (query || '').trim();
+	const l = (lang || 'all').toLowerCase();
+	const t = (type || 'all').toLowerCase();
+
+	const cacheKey = `browse:${id}:p${pageNum}:q${q}:l${l}:t${t}:lim${limit}`;
+
+	try {
+		return await getCached(
+			cacheKey,
+			async () => {
+				const result = await withTimeout(
+					remoteLatest(id, pageNum, { lang: l, type: t, q }),
+					LOAD_TIMEOUT_MS
+				);
+				const list = Array.isArray(result) ? result : [];
+				const mapped = list.slice(0, limit).map((m, index) =>
+					ensureUpdatedAt({ ...m, sourceId: m.sourceId || id }, pageNum, index)
+				);
+
+				if (pageNum === 1 && !q && kv && mapped.length > 0) {
+					saveSourceBackup(id, listToBackupItems(mapped, id), kv).catch(() => {});
+				}
+
+				return mapped;
+			},
+			LIST_CACHE_TTL,
+			kv
+		);
+	} catch (e) {
+		console.error(`[Browse] ${id} failed:`, e);
+		const fb = await fallbackBrowseList(id, kv, limit);
+		if (fb.length) {
+			console.warn(`[Browse] ${id} using backup (${fb.length} items)`);
+			return fb;
+		}
+		return [];
+	}
+}
+
+export const load: PageServerLoad = async ({ url, request, setHeaders, depends, locals }) => {
+	let sourceParam = url.searchParams.get('source');
+	if (!sourceParam && !url.searchParams.get('q')?.trim()) {
+		const last = parseLastSourceFromCookie(request.headers.get('cookie'));
+		if (last) sourceParam = last;
+	}
+	const pageNum = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
+	const query = (url.searchParams.get('q') || '').trim();
+	const lang = (url.searchParams.get('lang') || 'all').toLowerCase();
+	const type = (url.searchParams.get('type') || 'all').toLowerCase();
+	const sectionPages = parseSectionPages(url.searchParams.get('sp'));
+
+	const disabledIds = await getDisabledSourceIds(locals.kv);
+	const sources = filterEnabledSources(getSourceList(), disabledIds);
+	let mangas: Manga[] = [];
+	let currentSource: string | null = sourceParam;
+	let isMulti = false;
+	let preferredSources: string[] = [];
+	let homeLayout: HomeLayout = 'merged';
+	let sections: Array<{
+		sourceId: string;
+		name: string;
+		mangas: Manga[];
+		page: number;
+		hasMore: boolean;
+	}> = [];
+
+	// ── Multi mode ───────────────────────────────────────────────────────────
+	if (!sourceParam) {
+		const cookie = request.headers.get('cookie');
+		preferredSources = parsePreferredFromCookie(cookie);
+		homeLayout = parseHomeLayoutFromCookie(cookie);
+		const validIds = new Set(sources.map((s) => s.id));
+		preferredSources = preferredSources
+			.filter((id) => validIds.has(id))
+			.slice(0, MAX_PREFERRED);
+
+		isMulti = true;
+		depends('browse:multi');
+
+		if (preferredSources.length === 0) {
+			mangas = [];
+			sections = [];
+		} else if (homeLayout === 'sectioned') {
+			const pageKey = preferredSources
+				.map((id) => `${id}:${sectionPages[id] || 1}`)
+				.join(',');
+			const cacheKey = `browse:sectioned:${pageKey}:q${query}:l${lang}:t${type}:lim${MAX_MANGAS}`;
+
+			const sectionLists = await getCached(
+				cacheKey,
+				async () => {
+					const lists: Manga[][] = [];
+					const conc = CONCURRENCY;
+
+					for (let i = 0; i < preferredSources.length; i += conc) {
+						const batch = preferredSources.slice(i, i + conc);
+						const batchResults = await Promise.all(
+							batch.map((id) => {
+								const p = sectionPages[id] || 1;
+								return fetchSourceList(id, p, query, lang, type, locals.kv, MAX_MANGAS);
+							})
+						);
+						lists.push(...batchResults);
+					}
+					return lists;
+				},
+				LIST_CACHE_TTL,
+				locals.kv
+			);
+
+			const nameById = new Map(sources.map((s) => [s.id, s.name]));
+			sections = preferredSources.map((id, idx) => {
+				const list = sectionLists[idx] || [];
+				const seen = new Set<string>();
+				const seenTitle = new Set<string>();
+				const deduped = list.filter((m) => {
+					const key = `${m.sourceId ?? ''}:${m.id}`;
+					if (seen.has(key)) return false;
+					seen.add(key);
+					const titleKey = `${(m.sourceId ?? '').toLowerCase()}:${normalizeTitle(m.title)}`;
+					if (seenTitle.has(titleKey)) return false;
+					seenTitle.add(titleKey);
+					return true;
+				});
+				const sliced = deduped.slice(0, MAX_MANGAS);
+				const p = sectionPages[id] || 1;
+				return {
+					sourceId: id,
+					name: nameById.get(id) || id,
+					mangas: sliced,
+					page: p,
+					hasMore: sliced.length >= MAX_MANGAS
+				};
+			});
+			mangas = [];
+		} else {
+			// Merged (default)
+			const perSourceLimit = Math.ceil(MAX_MANGAS / preferredSources.length);
+
+			const sortedSources = [...preferredSources].sort().join(',');
+			const cacheKey = `browse:multi:${sortedSources}:p${pageNum}:q${query}:l${lang}:t${type}:ps${perSourceLimit}`;
+
+			mangas = await getCached(
+				cacheKey,
+				async () => {
+					const lists: Manga[][] = [];
+					const conc = pageNum <= 1 ? CONCURRENCY : 1;
+
+					for (let i = 0; i < preferredSources.length; i += conc) {
+						const batch = preferredSources.slice(i, i + conc);
+						const batchResults = await Promise.all(
+							batch.map((id) =>
+								fetchSourceList(id, pageNum, query, lang, type, locals.kv, perSourceLimit)
+							)
+						);
+						lists.push(...batchResults);
+					}
+
+					return mergeByTime(lists, preferredSources).slice(0, MAX_MANGAS);
+				},
+				LIST_CACHE_TTL,
+				locals.kv
+			);
+		}
+	}
+	// ── Single source mode ───────────────────────────────────────────────────
+	else {
+		depends(`browse:${sourceParam}`);
+		try {
+			const q = (query || '').trim();
+			const l = (lang || 'all').toLowerCase();
+			const t = (type || 'all').toLowerCase();
+
+			const cacheKey = `browse:${sourceParam}:p${pageNum}:q${q}:l${l}:t${t}:lim${MAX_MANGAS}`;
+
+			mangas = await getCached(
+				cacheKey,
+				async () => {
+					const result = await withTimeout(
+						remoteLatest(sourceParam, pageNum, { lang: l, type: t, q }),
+						LOAD_TIMEOUT_MS
+					);
+					const list = Array.isArray(result) ? result : [];
+
+					const mapped = list.slice(0, MAX_MANGAS).map((m, index) =>
+						ensureUpdatedAt(
+							{ ...m, sourceId: m.sourceId || sourceParam },
+							pageNum,
+							index
+						)
+					);
+
+					if (pageNum === 1 && !q && locals.kv && mapped.length > 0) {
+						saveSourceBackup(
+							sourceParam!,
+							listToBackupItems(mapped, sourceParam!),
+							locals.kv
+						).catch(() => {});
+					}
+
+					return mapped;
+				},
+				LIST_CACHE_TTL,
+				locals.kv
+			);
+		} catch (e) {
+			console.error('[Browse] load failed:', e);
+			mangas = await fallbackBrowseList(sourceParam, locals.kv, MAX_MANGAS);
+			if (mangas.length) {
+				console.warn(`[Browse] ${sourceParam} using backup fallback`);
+			}
+		}
+	}
+
+	if (isMulti) {
+		setHeaders({
+			'Cache-Control': 'private, max-age=60, stale-while-revalidate=300'
+		});
+	} else {
+		setHeaders({
+			'Cache-Control': 'public, s-maxage=180, stale-while-revalidate=900'
+		});
+	}
+
+	const seen = new Set<string>();
+	mangas = mangas.filter((m) => {
+		const key = `${m.sourceId ?? ''}:${m.id}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+
+	const seenTitle = new Set<string>();
+	mangas = mangas.filter((m) => {
+		const titleKey = `${(m.sourceId ?? '').toLowerCase()}:${normalizeTitle(m.title)}`;
+		if (seenTitle.has(titleKey)) return false;
+		seenTitle.add(titleKey);
+		return true;
+	});
+
+	return {
+		mangas,
+		sources,
+		currentSource,
+		currentPage: pageNum,
+		searchQuery: query,
+		selectedLang: lang,
+		selectedType: type,
+		needsSource: false,
+		isMulti,
+		preferredSources,
+		homeLayout,
+		sections
+	};
+};

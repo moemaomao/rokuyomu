@@ -1,0 +1,625 @@
+@import 'tailwindcss';
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root, html.light {
+    --bg-card: #ffffff; --text-color: #18181b; --border-color: #e4e4e7;
+    --bg-subtle: #f4f4f5; --text-muted: #71717a; --hover-bg: #f4f4f5;
+    --accent: #706683; --page-bg: #ffffff; --sidebar-bg: #fafafa;
+}
+html.dark {
+    --bg-card: #18181b; --text-color: #f4f4f5; --border-color: #27272a;
+    --bg-subtle: #27272a; --text-muted: #a1a1aa; --hover-bg: #27272a;
+    --accent: #a57eff; --page-bg: #09090b; --sidebar-bg: #0c0a14;
+}
+body { background-color: inherit; color: inherit; }
+::-webkit-scrollbar { width: 6px; background-color: #111; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+.shine-effect { animation: shine 3s linear infinite; }
+@keyframes shine {
+    0% { transform: translateX(-150%) skewX(-25deg); }
+    100% { transform: translateX(500%) skewX(-25deg); }
+}
+html.dark { color-scheme: dark; background-color: #09090b; }
+html.light { color-scheme: light; background-color: #ffffff; }
+html.light body, html.light .theme-root { background-color: #ffffff; color: #18181b; }
+html.light header.theme-header { background: rgba(255,255,255,.9) !important; border-color: #e4e4e7 !important; }
+html.light .theme-card { background: #fff !important; border-color: #e4e4e7 !important; color: #18181b !important; }
+html.light .theme-muted { color: #71717a !important; }
+html.light .theme-input { background: #fff !important; border-color: #d4d4d8 !important; color: #18181b !important; }
+html.light aside.theme-sidebar { background: #fff !important; border-color: #e4e4e7 !important; }
+html.light ::-webkit-scrollbar { background-color: #f4f4f5; }
+html.light ::-webkit-scrollbar-thumb { background: #d4d4d8; }
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]):not(:has([data-reader])) {
+    background-color: var(--page-bg) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) body {
+    background-color: var(--page-bg) !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside a,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside button,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside span {
+    background-image: none !important;
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside {
+    background-color: var(--sidebar-bg) !important;
+    border-color: var(--border-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) header {
+    background-color: color-mix(in srgb, var(--page-bg) 92%, transparent) !important;
+    background-image: none !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) header a,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) header button,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) header span {
+    color: var(--text-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main {
+    background-color: var(--page-bg) !important;
+    background-image: none !important;
+    color: var(--text-color);
+}
+
+/* Jangan timpa tombol purple di reader (bg-purple-600, bg-purple-800, dll) */
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="from-violet"],
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="via-violet"],
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="to-violet"],
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="bg-zinc-9"],
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="bg-zinc-950"] {
+    background-color: var(--page-bg) !important;
+    background-image: none !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main section,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main [class*="rounded-2xl"] {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme] .border-violet-500 { border-color: var(--accent) !important; }
+html[data-theme] .bg-violet-600\/15,
+html[data-theme] .bg-violet-600\/10 {
+    background-color: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+html[data-theme] .text-violet-700,
+html[data-theme] .text-violet-300,
+html[data-theme] .text-violet-400,
+html[data-theme] .text-violet-600 { color: var(--accent) !important; }
+html[data-theme] .bg-violet-600 { background-color: var(--accent) !important; }
+
+html[data-theme="miku"] .text-black,
+html[data-theme="luka-dark"] .text-black,
+html[data-theme="kagamine-dark"] .text-black,
+html[data-theme="kaito"] .text-black,
+html[data-theme="meiko"] .text-black,
+html[data-theme="gumi"] .text-black,
+html[data-theme="miku"] .text-zinc-900,
+html[data-theme="luka-dark"] .text-zinc-900,
+html[data-theme="kagamine-dark"] .text-zinc-900,
+html[data-theme="kaito"] .text-zinc-900,
+html[data-theme="meiko"] .text-zinc-900,
+html[data-theme="gumi"] .text-zinc-900,
+html[data-theme="miku"] .text-zinc-800,
+html[data-theme="luka-dark"] .text-zinc-800,
+html[data-theme="kagamine-dark"] .text-zinc-800,
+html[data-theme="kaito"] .text-zinc-800,
+html[data-theme="meiko"] .text-zinc-800,
+html[data-theme="gumi"] .text-zinc-800 {
+    color: var(--text-color) !important;
+}
+
+html[data-theme] [class*="reader"] .text-white,
+html[data-theme] [class*="Reader"] .text-white {
+    color: inherit;
+}
+
+/* Miku Dark */
+html[data-theme="miku"] {
+    color-scheme: dark;
+    --page-bg:#061820; --sidebar-bg:#0a2430; --bg-card:#0d2f3d; --text-color:#e0f7ff;
+    --border-color:#134e64; --bg-subtle:#0f3a4a; --text-muted:#7dd3fc; --hover-bg:#134e64; --accent:#00b7e0;
+}
+/* Miku Light */
+html[data-theme="miku-light"] {
+    color-scheme: light;
+    --page-bg:#e8f8fc; --sidebar-bg:#d5f1f8; --bg-card:#ffffff; --text-color:#0c4a5c;
+    --border-color:#a5e4f5; --bg-subtle:#d5f1f8; --text-muted:#0891b2; --hover-bg:#bae6fd; --accent:#00b7e0;
+}
+
+/* Luka Light */
+html[data-theme="luka"] {
+    color-scheme: light;
+    --page-bg:#fff0f5; --sidebar-bg:#fce4ec; --bg-card:#ffffff; --text-color:#6b2148;
+    --border-color:#f5c6d8; --bg-subtle:#fce4ec; --text-muted:#c2185b; --hover-bg:#f8bbd0; --accent:#ff7ccc;
+}
+/* Luka Dark */
+html[data-theme="luka-dark"] {
+    color-scheme: dark;
+    --page-bg:#1a0a12; --sidebar-bg:#2a1020; --bg-card:#3b1530; --text-color:#fce7f3;
+    --border-color:#5c1a40; --bg-subtle:#4a1235; --text-muted:#f9a8d4; --hover-bg:#5c1a40; --accent:#ff7ccc;
+}
+
+/* Kagamine Light */
+html[data-theme="kagamine"] {
+    color-scheme: light;
+    --page-bg:#fffbeb; --sidebar-bg:#fef3c7; --bg-card:#fffef5; --text-color:#78350f;
+    --border-color:#fde68a; --bg-subtle:#fef3c7; --text-muted:#b45309; --hover-bg:#fde68a; --accent:#f59e0b;
+}
+/* Kagamine Dark */
+html[data-theme="kagamine-dark"] {
+    color-scheme: dark;
+    --page-bg:#1a1408; --sidebar-bg:#2a1f0c; --bg-card:#3b2a10; --text-color:#fef3c7;
+    --border-color:#5c4510; --bg-subtle:#4a3510; --text-muted:#fcd34d; --hover-bg:#5c4510; --accent:#f59e0b;
+}
+
+/* KAITO Dark */
+html[data-theme="kaito"] {
+    color-scheme: dark;
+    --page-bg:#0a1628; --sidebar-bg:#0f1f3a; --bg-card:#132a4a; --text-color:#dbeafe;
+    --border-color:#1e3a5f; --bg-subtle:#1a3050; --text-muted:#93c5fd; --hover-bg:#1e3a5f; --accent:#3b82f6;
+}
+/* KAITO Light */
+html[data-theme="kaito-light"] {
+    color-scheme: light;
+    --page-bg:#eff6ff; --sidebar-bg:#dbeafe; --bg-card:#ffffff; --text-color:#1e3a5f;
+    --border-color:#93c5fd; --bg-subtle:#dbeafe; --text-muted:#2563eb; --hover-bg:#bfdbfe; --accent:#3b82f6;
+}
+
+/* MEIKO Dark */
+html[data-theme="meiko"] {
+    color-scheme: dark;
+    --page-bg:#1a0a0a; --sidebar-bg:#2a1010; --bg-card:#3b1515; --text-color:#fee2e2;
+    --border-color:#5c1a1a; --bg-subtle:#4a1212; --text-muted:#fca5a5; --hover-bg:#5c1a1a; --accent:#ef4444;
+}
+/* MEIKO Light */
+html[data-theme="meiko-light"] {
+    color-scheme: light;
+    --page-bg:#fef2f2; --sidebar-bg:#fecaca; --bg-card:#ffffff; --text-color:#7f1d1d;
+    --border-color:#fca5a5; --bg-subtle:#fecaca; --text-muted:#dc2626; --hover-bg:#fecaca; --accent:#ef4444;
+}
+
+/* GUMI Dark */
+html[data-theme="gumi"] {
+    color-scheme: dark;
+    --page-bg:#0a1a0c; --sidebar-bg:#0f2a14; --bg-card:#14351c; --text-color:#dcfce7;
+    --border-color:#1a4a28; --bg-subtle:#163d20; --text-muted:#86efac; --hover-bg:#1a4a28; --accent:#22c55e;
+}
+/* GUMI Light */
+html[data-theme="gumi-light"] {
+    color-scheme: light;
+    --page-bg:#f0fdf4; --sidebar-bg:#dcfce7; --bg-card:#ffffff; --text-color:#14532d;
+    --border-color:#86efac; --bg-subtle:#dcfce7; --text-muted:#16a34a; --hover-bg:#bbf7d0; --accent:#22c55e;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"])
+header button.relative > span.absolute,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"])
+header a.relative > span.absolute,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"])
+header .relative > span.absolute.rounded-full,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"])
+header .relative > span[class*="rounded-full"] {
+    background-color: var(--accent) !important;
+    color: #fff !important;
+    border: 2px solid var(--page-bg) !important;
+    font-weight: 700 !important;
+    font-size: 10px !important;
+    min-width: 16px !important;
+    height: 16px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 20 !important;
+    max-width: 24px !important;
+    padding: 0 3px !important;
+    line-height: 1 !important;
+}
+
+html[data-theme="miku-light"] header button.relative > span.absolute,
+html[data-theme="luka"] header button.relative > span.absolute,
+html[data-theme="kagamine"] header button.relative > span.absolute,
+html[data-theme="kaito-light"] header button.relative > span.absolute,
+html[data-theme="meiko-light"] header button.relative > span.absolute,
+html[data-theme="gumi-light"] header button.relative > span.absolute,
+html[data-theme="miku-light"] header a.relative > span.absolute,
+html[data-theme="luka"] header a.relative > span.absolute,
+html[data-theme="kagamine"] header a.relative > span.absolute,
+html[data-theme="kaito-light"] header a.relative > span.absolute,
+html[data-theme="meiko-light"] header a.relative > span.absolute,
+html[data-theme="gumi-light"] header a.relative > span.absolute {
+    color: #ffffff !important;
+    background-color: var(--accent) !important;
+}
+
+html[data-theme] header [class*="dropdown"],
+html[data-theme] header [class*="popover"],
+html[data-theme] header [class*="panel"],
+html[data-theme] header [class*="menu"],
+html[data-theme] header [role="menu"],
+html[data-theme] header [role="listbox"] {
+    background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
+    border-color: var(--border-color) !important;
+    background-image: none !important;
+}
+
+html[data-theme] header [class*="dropdown"] *,
+html[data-theme] header [class*="popover"] *,
+html[data-theme] header [class*="panel"] *,
+html[data-theme] header [class*="menu"] * {
+    max-width: none;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer {
+    background-color: var(--page-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-muted) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer p,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer a,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer span {
+    color: var(--text-muted) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer .font-medium,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer p.font-medium {
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) footer a:hover {
+    color: var(--accent) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) aside + * [class*="history"],
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) [class*="History"] {
+    background-color: var(--sidebar-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main .border-t {
+    border-color: var(--border-color) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.rounded-xl.border {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.rounded-xl.border:hover:not(:disabled) {
+    background-color: var(--hover-bg) !important;
+    border-color: var(--accent) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600,
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.pagination-active {
+    background-color: var(--accent) !important;
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent) !important;
+    color: #fff !important;
+    border-color: transparent !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.bg-red-600:hover:not(:disabled),
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main button.pagination-active:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+/* Jump-to-page input */
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main input[type="number"] {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main input[type="number"]:focus {
+    border-color: var(--accent) !important;
+    --tw-ring-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main .text-xs.font-medium {
+    color: var(--text-muted) !important;
+}
+
+html[data-theme]:not([data-theme="dark"]):not([data-theme="light"]):not([data-theme="system"]) main span.text-xs.font-semibold {
+    color: var(--text-muted) !important;
+}
+
+html[data-theme="miku-light"] aside .text-white,
+html[data-theme="luka"] aside .text-white,
+html[data-theme="kagamine"] aside .text-white,
+html[data-theme="kaito-light"] aside .text-white,
+html[data-theme="meiko-light"] aside .text-white,
+html[data-theme="gumi-light"] aside .text-white,
+html[data-theme="miku-light"] header .text-white,
+html[data-theme="luka"] header .text-white,
+html[data-theme="kagamine"] header .text-white,
+html[data-theme="kaito-light"] header .text-white,
+html[data-theme="meiko-light"] header .text-white,
+html[data-theme="gumi-light"] header .text-white,
+html[data-theme="miku-light"] aside .text-zinc-100,
+html[data-theme="luka"] aside .text-zinc-100,
+html[data-theme="kagamine"] aside .text-zinc-100,
+html[data-theme="kaito-light"] aside .text-zinc-100,
+html[data-theme="meiko-light"] aside .text-zinc-100,
+html[data-theme="gumi-light"] aside .text-zinc-100,
+html[data-theme="miku-light"] header .text-zinc-100,
+html[data-theme="luka"] header .text-zinc-100,
+html[data-theme="kagamine"] header .text-zinc-100,
+html[data-theme="kaito-light"] header .text-zinc-100,
+html[data-theme="meiko-light"] header .text-zinc-100,
+html[data-theme="gumi-light"] header .text-zinc-100 {
+    color: var(--text-color) !important;
+}
+
+html[data-theme] main a .text-white,
+html[data-theme] main [class*="from-black"] .text-white,
+html[data-theme] main [class*="from-black"] span,
+html[data-theme] main [class*="bg-gradient"] .text-white {
+    color: #fff !important;
+}
+
+html[data-theme="miku-light"] main section:not(.detail-card),
+html[data-theme="luka"] main section:not(.detail-card),
+html[data-theme="kagamine"] main section:not(.detail-card),
+html[data-theme="kaito-light"] main section:not(.detail-card),
+html[data-theme="meiko-light"] main section:not(.detail-card),
+html[data-theme="gumi-light"] main section:not(.detail-card),
+html[data-theme="miku-light"] main [class*="rounded-2xl"],
+html[data-theme="luka"] main [class*="rounded-2xl"],
+html[data-theme="kagamine"] main [class*="rounded-2xl"],
+html[data-theme="kaito-light"] main [class*="rounded-2xl"],
+html[data-theme="meiko-light"] main [class*="rounded-2xl"],
+html[data-theme="gumi-light"] main [class*="rounded-2xl"],
+html[data-theme="miku-light"] main [class*="rounded-xl"],
+html[data-theme="luka"] main [class*="rounded-xl"],
+html[data-theme="kagamine"] main [class*="rounded-xl"],
+html[data-theme="kaito-light"] main [class*="rounded-xl"],
+html[data-theme="meiko-light"] main [class*="rounded-xl"],
+html[data-theme="gumi-light"] main [class*="rounded-xl"] {
+    background-color: color-mix(in srgb, var(--bg-subtle) 55%, transparent) !important;
+    border-color: color-mix(in srgb, var(--border-color) 80%, transparent) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--text-color) !important;
+}
+
+html[data-theme="miku-light"] main button.rounded-xl,
+html[data-theme="luka"] main button.rounded-xl,
+html[data-theme="kagamine"] main button.rounded-xl,
+html[data-theme="kaito-light"] main button.rounded-xl,
+html[data-theme="meiko-light"] main button.rounded-xl,
+html[data-theme="gumi-light"] main button.rounded-xl {
+    background-color: color-mix(in srgb, var(--bg-subtle) 70%, transparent) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme="miku"] main section:not(.detail-card),
+html[data-theme="luka-dark"] main section:not(.detail-card),
+html[data-theme="kagamine-dark"] main section:not(.detail-card),
+html[data-theme="kaito"] main section:not(.detail-card),
+html[data-theme="meiko"] main section:not(.detail-card),
+html[data-theme="gumi"] main section:not(.detail-card),
+html[data-theme="miku"] main [class*="rounded-2xl"],
+html[data-theme="luka-dark"] main [class*="rounded-2xl"],
+html[data-theme="kagamine-dark"] main [class*="rounded-2xl"],
+html[data-theme="kaito"] main [class*="rounded-2xl"],
+html[data-theme="meiko"] main [class*="rounded-2xl"],
+html[data-theme="gumi"] main [class*="rounded-2xl"] {
+    background-color: color-mix(in srgb, var(--bg-card) 75%, transparent) !important;
+    border-color: var(--border-color) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+html.light[data-theme="miku-light"] .detail-container,
+html.light[data-theme="luka"] .detail-container,
+html.light[data-theme="kagamine"] .detail-container,
+html.light[data-theme="kaito-light"] .detail-container,
+html.light[data-theme="meiko-light"] .detail-container,
+html.light[data-theme="gumi-light"] .detail-container,
+html[data-theme="miku-light"] .detail-container,
+html[data-theme="luka"] .detail-container,
+html[data-theme="kagamine"] .detail-container,
+html[data-theme="kaito-light"] .detail-container,
+html[data-theme="meiko-light"] .detail-container,
+html[data-theme="gumi-light"] .detail-container {
+    background: transparent !important;
+    border-color: var(--border-color) !important;
+    box-shadow: none !important;
+}
+
+html.light[data-theme="miku-light"] .detail-overlay,
+html.light[data-theme="luka"] .detail-overlay,
+html.light[data-theme="kagamine"] .detail-overlay,
+html.light[data-theme="kaito-light"] .detail-overlay,
+html.light[data-theme="meiko-light"] .detail-overlay,
+html.light[data-theme="gumi-light"] .detail-overlay,
+html[data-theme="miku-light"] .detail-overlay,
+html[data-theme="luka"] .detail-overlay,
+html[data-theme="kagamine"] .detail-overlay,
+html[data-theme="kaito-light"] .detail-overlay,
+html[data-theme="meiko-light"] .detail-overlay,
+html[data-theme="gumi-light"] .detail-overlay {
+    background: color-mix(in srgb, var(--page-bg) 70%, transparent) !important;
+}
+
+html.light[data-theme="miku-light"] .detail-card,
+html.light[data-theme="luka"] .detail-card,
+html.light[data-theme="kagamine"] .detail-card,
+html.light[data-theme="kaito-light"] .detail-card,
+html.light[data-theme="meiko-light"] .detail-card,
+html.light[data-theme="gumi-light"] .detail-card,
+html[data-theme="miku-light"] section.detail-card,
+html[data-theme="luka"] section.detail-card,
+html[data-theme="kagamine"] section.detail-card,
+html[data-theme="kaito-light"] section.detail-card,
+html[data-theme="meiko-light"] section.detail-card,
+html[data-theme="gumi-light"] section.detail-card,
+html[data-theme="miku-light"] .detail-card,
+html[data-theme="luka"] .detail-card,
+html[data-theme="kagamine"] .detail-card,
+html[data-theme="kaito-light"] .detail-card,
+html[data-theme="meiko-light"] .detail-card,
+html[data-theme="gumi-light"] .detail-card {
+    background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+    background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+    background-image: none !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    color: var(--text-color) !important;
+    box-shadow: none !important;
+}
+
+html.light[data-theme="miku-light"] .detail-title,
+html.light[data-theme="luka"] .detail-title,
+html.light[data-theme="kagamine"] .detail-title,
+html.light[data-theme="kaito-light"] .detail-title,
+html.light[data-theme="meiko-light"] .detail-title,
+html.light[data-theme="gumi-light"] .detail-title,
+html[data-theme="miku-light"] .detail-title,
+html[data-theme="luka"] .detail-title,
+html[data-theme="kagamine"] .detail-title,
+html[data-theme="kaito-light"] .detail-title,
+html[data-theme="meiko-light"] .detail-title,
+html[data-theme="gumi-light"] .detail-title,
+html[data-theme="miku-light"] .detail-value,
+html[data-theme="luka"] .detail-value,
+html[data-theme="kagamine"] .detail-value,
+html[data-theme="kaito-light"] .detail-value,
+html[data-theme="meiko-light"] .detail-value,
+html[data-theme="gumi-light"] .detail-value {
+    color: var(--text-color) !important;
+}
+
+html.dark[data-theme="miku"] .detail-container,
+html.dark[data-theme="luka-dark"] .detail-container,
+html.dark[data-theme="kagamine-dark"] .detail-container,
+html.dark[data-theme="kaito"] .detail-container,
+html.dark[data-theme="meiko"] .detail-container,
+html.dark[data-theme="gumi"] .detail-container,
+html[data-theme="miku"] .detail-container,
+html[data-theme="luka-dark"] .detail-container,
+html[data-theme="kagamine-dark"] .detail-container,
+html[data-theme="kaito"] .detail-container,
+html[data-theme="meiko"] .detail-container,
+html[data-theme="gumi"] .detail-container {
+    background: color-mix(in srgb, var(--page-bg) 40%, transparent) !important;
+    border-color: var(--border-color) !important;
+}
+html.dark[data-theme="miku"] .detail-card,
+html.dark[data-theme="luka-dark"] .detail-card,
+html.dark[data-theme="kagamine-dark"] .detail-card,
+html.dark[data-theme="kaito"] .detail-card,
+html.dark[data-theme="meiko"] .detail-card,
+html.dark[data-theme="gumi"] .detail-card,
+html[data-theme="miku"] .detail-card,
+html[data-theme="luka-dark"] .detail-card,
+html[data-theme="kagamine-dark"] .detail-card,
+html[data-theme="kaito"] .detail-card,
+html[data-theme="meiko"] .detail-card,
+html[data-theme="gumi"] .detail-card {
+    background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+    background-color: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+    background-image: none !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    color: var(--text-color) !important;
+}
+
+html[data-theme="miku-light"] main section.detail-card,
+html[data-theme="luka"] main section.detail-card,
+html[data-theme="kagamine"] main section.detail-card,
+html[data-theme="kaito-light"] main section.detail-card,
+html[data-theme="meiko-light"] main section.detail-card,
+html[data-theme="gumi-light"] main section.detail-card,
+html[data-theme="miku"] main section.detail-card,
+html[data-theme="luka-dark"] main section.detail-card,
+html[data-theme="kagamine-dark"] main section.detail-card,
+html[data-theme="kaito"] main section.detail-card,
+html[data-theme="meiko"] main section.detail-card,
+html[data-theme="gumi"] main section.detail-card,
+html.light main section.detail-card,
+html.dark main section.detail-card,
+html main section.detail-card,
+section.detail-card {
+	background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+	background-color: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+	background-image: none !important;
+	box-shadow: none !important;
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
+	color: var(--text-color) !important;
+}
+
+html[data-theme] main .reader-menu-btn,
+html[data-theme] main .reader-nav-btn {
+	background-color: var(--accent) !important;
+	background-image: none !important;
+	color: #fff !important;
+}
+html[data-theme] main .reader-nav-btn {
+	background-color: color-mix(in srgb, var(--accent) 85%, transparent) !important;
+}
+html[data-theme] main .reader-gear {
+	color: var(--accent) !important;
+}
+
+html[data-theme] main button.fixed[class*="text-"] {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+html[data-theme] main .fixed.right-0.bottom-0.left-0 {
+	background-color: transparent !important;
+	border-color: transparent !important;
+}
+html.dark[data-theme] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="miku"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="luka-dark"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="kagamine-dark"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="kaito"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="meiko"] main .fixed.right-0.bottom-0.left-0,
+html[data-theme="gumi"] main .fixed.right-0.bottom-0.left-0 {
+	background-color: transparent !important;
+	border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html[data-theme="light"] section.detail-card,
+html[data-theme="dark"] section.detail-card,
+html[data-theme="system"] section.detail-card,
+html[data-theme="light"] .detail-card,
+html[data-theme="dark"] .detail-card,
+html[data-theme="system"] .detail-card {
+	background: rgba(0, 0, 0, 0.2) !important;
+	background-color: rgba(0, 0, 0, 0.2) !important;
+	background-image: none !important;
+	backdrop-filter: none !important;
+	box-shadow: none !important;
+}
+
+html[data-theme] aside.theme-sidebar,
+html[data-theme] aside[class*="fixed"][class*="border-r"],
+html[data-theme] .history-widget {
+    border-color: var(--border-color) !important;
+}
+html[data-theme] aside[class*="fixed"] [class*="border-b"],
+html[data-theme] aside[class*="fixed"] [class*="border-t"],
+html[data-theme] .history-widget [class*="border-b"],
+html[data-theme] .history-widget [class*="border-t"],
+html[data-theme] header.theme-header,
+html[data-theme] header[class*="sticky"][class*="border-b"] {
+    border-color: var(--border-color) !important;
+}

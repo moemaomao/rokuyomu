@@ -1,0 +1,590 @@
+/**
+ * Art Lapsa adapter (artlapsa.com)
+ *
+ * Theme     : Laravel + Livewire (server-rendered HTML)
+ * Latest    : GET /latest?page=N  (~24 series / page)
+ * Search    : GET /search?q=
+ * Detail    : GET /series/{uuid}
+ * Chapter   : GET /read/{uuid}
+ * Pages     : CDN sequential
+ *   NEW: https://cdn.artlapsa.com/series/webtoon/{seriesUuid}/chapters/{chapterUuid}/001.jpg
+ *   OLD: .../chapters/.../revisions/{rev}/001.jpg  (still supported)
+ *   pageCount from Livewire wire:snapshot ("pageCount":N)
+ *
+ * Locked chapters: needsToUnlock / .chapter-lock-badge → isLocked
+ *
+ * ID format:
+ *   manga   : /series/{seriesUuid}
+ *   chapter : /series/{seriesUuid}/read/{chapterUuid}
+ *             (legacy /read/{chapterUuid} still accepted)
+ */
+
+import { BaseSource } from '../../BaseSource';
+import type { Chapter, Manga, MangaDetails } from '../../types-manga';
+import { fetchWithCf } from '../../../lib/fetchWithCf';
+import * as cheerio from 'cheerio';
+
+export class ArtLapsaSource extends BaseSource {
+	id = 'artlapsa';
+	name = 'Art Lapsa';
+	baseUrl = 'https://artlapsa.com';
+	private readonly PER_PAGE = 24;
+	private readonly DEFAULT_LANG = 'en';
+
+	// ── HTTP ─────────────────────────────────────────────────────────────────
+
+	protected override async fetchHtml(path: string): Promise<string> {
+		const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
+		return fetchWithCf(url, {
+			headers: {
+				...this.headers,
+				Referer: this.baseUrl + '/',
+				'User-Agent':
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+			}
+		});
+	}
+
+	// ── Helpers ──────────────────────────────────────────────────────────────
+
+	private absUrl(href: string): string {
+		if (!href) return '';
+		if (href.startsWith('http')) return href;
+		if (href.startsWith('//')) return `https:${href}`;
+		return `${this.baseUrl}${href.startsWith('/') ? '' : '/'}${href}`;
+	}
+
+	private extractUuid(path: string): string {
+		const m = String(path).match(
+			/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+		);
+		return m ? m[0] : '';
+	}
+
+	private toMangaId(uuid: string): string {
+		return `/series/${uuid}`;
+	}
+
+	private toChapterId(seriesUuid: string, chapterUuid: string): string {
+		return `/series/${seriesUuid}/read/${chapterUuid}`;
+	}
+
+	private parseChapterParts(chapterId: string): {
+		seriesUuid: string;
+		chapterUuid: string;
+	} {
+		const raw = String(chapterId || '');
+		const m = raw.match(
+			/\/series\/([0-9a-f-]{36})\/read\/([0-9a-f-]{36})/i
+		);
+		if (m) return { seriesUuid: m[1], chapterUuid: m[2] };
+
+		const m2 = raw.match(/\/read\/([0-9a-f-]{36})/i);
+		if (m2) return { seriesUuid: '', chapterUuid: m2[1] };
+
+		const only = this.extractUuid(raw);
+		return { seriesUuid: '', chapterUuid: only };
+	}
+
+	async resolveMangaIdFromChapter(chapterId: string): Promise<string | null> {
+		const { seriesUuid, chapterUuid } = this.parseChapterParts(chapterId);
+		if (seriesUuid) return this.toMangaId(seriesUuid);
+
+		if (!chapterUuid) return null;
+		try {
+			const html = await this.fetchHtml(`/read/${chapterUuid}`);
+			const seriesFromHtml =
+				(html.match(/\/series\/([0-9a-f-]{36})/i) ||
+					html.match(
+						/cdn\.artlapsa\.com\/series\/(?:webtoon\/)?([0-9a-f-]{36})/i
+					) ||
+					[])[1];
+			return seriesFromHtml ? this.toMangaId(seriesFromHtml) : null;
+		} catch {
+			return null;
+		}
+	}
+
+	private mapStatus(raw: string): string {
+		const s = (raw || '').toLowerCase();
+		if (s.includes('complet')) return 'Completed';
+		if (s.includes('hiatus')) return 'Hiatus';
+		if (s.includes('drop')) return 'Dropped';
+		return 'Ongoing';
+	}
+
+	private mapType(raw: string): string {
+		const s = (raw || '').toLowerCase();
+		if (s.includes('manhwa')) return 'manhwa';
+		if (s.includes('manhua')) return 'manhua';
+		if (s.includes('novel')) return 'novel';
+		return 'manga';
+	}
+
+	private parseChapterNumber(text: string): number {
+		const m =
+			text.match(/Chapter\s*(\d+(?:\.\d+)?)/i) ||
+			text.match(/\b(\d+(?:\.\d+)?)\b/);
+		return m ? parseFloat(m[1]) : NaN;
+	}
+
+	private parseDateFromText(text: string): string {
+		const t = (text || '').replace(/\s+/g, ' ').trim();
+		const abs = t.match(
+			/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4}/i
+		);
+		if (abs) {
+			const d = new Date(abs[0]);
+			if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+		}
+		const rel = t.match(
+			/(\d+)\s*(m|min|mins|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks)\s*ago/i
+		);
+		if (rel) {
+			const n = parseInt(rel[1], 10);
+			const unit = rel[2].toLowerCase();
+			const ms = unit.startsWith('min')
+				? n * 60_000
+				: unit.startsWith('h')
+					? n * 3_600_000
+					: unit.startsWith('d')
+						? n * 86_400_000
+						: unit.startsWith('w')
+							? n * 604_800_000
+							: unit === 'm'
+								? n * 60_000
+								: 0;
+			if (ms > 0) return new Date(Date.now() - ms).toISOString().slice(0, 10);
+		}
+		return '';
+	}
+
+	private getLabeledValue($: cheerio.CheerioAPI, label: string): string {
+		let value = '';
+		$('dt, span, div, p, strong, b').each((_, el) => {
+			const $el = $(el);
+			const text = $el.text().replace(/\s+/g, ' ').trim();
+			if (text.toLowerCase() !== label.toLowerCase()) return;
+			const next = $el.next();
+			if (next.length) {
+				value = next.text().replace(/\s+/g, ' ').trim();
+				return false;
+			}
+			const parentText = $el.parent().text().replace(/\s+/g, ' ').trim();
+			const m = parentText.match(
+				new RegExp(`${label}\\s+(.+?)(?:\\s{2,}|$)`, 'i')
+			);
+			if (m) value = m[1].split(/\s{2,}/)[0].trim();
+		});
+		return value;
+	}
+
+	private normalizeCover(cover: string, uuid: string): string {
+		let c = (cover || '').trim();
+		if (c) {
+			c = this.absUrl(c);
+			c = c.replace(/\/300x450(\.\w+)$/i, '/600x900$1');
+			c = c.replace(/\/600x450(\.\w+)$/i, '/600x900$1');
+			return c;
+		}
+		if (uuid) {
+			return `https://cdn.artlapsa.com/series/webtoon/${uuid}/600x900.webp`;
+		}
+		return '';
+	}
+
+	private parseSeriesCards($: cheerio.CheerioAPI): Manga[] {
+		const res: Manga[] = [];
+		const seen = new Set<string>();
+
+		const pushCard = ($root: cheerio.Cheerio<any>, href: string) => {
+			const uuid = this.extractUuid(href);
+			if (!uuid) return;
+			if (!/\/series\/[0-9a-f-]{36}\/?$/i.test(href.split('?')[0])) return;
+
+			const id = this.toMangaId(uuid);
+			if (seen.has(id)) return;
+			seen.add(id);
+
+			const img = $root.find('img').first();
+			let title =
+				($root.attr('title') || '').trim() ||
+				(img.attr('alt') || '').replace(/\s*cover\s*$/i, '').trim() ||
+				$root
+					.find('h2, h3, h4, p, span')
+					.first()
+					.text()
+					.replace(/\s+/g, ' ')
+					.trim() ||
+				$root.text().replace(/\s+/g, ' ').trim();
+
+			title = title
+				.replace(/\s*Chapter\s*\d+(?:\.\d+)?.*$/i, '')
+				.replace(/\s+/g, ' ')
+				.trim();
+			if (!title || title.length < 2) return;
+
+			const rawCover =
+				img.attr('src') ||
+				img.attr('data-src') ||
+				(img.attr('srcset') || '').split(/[,\s]/)[0] ||
+				'';
+			const cover = this.normalizeCover(rawCover, uuid);
+
+			const cardText = $root.text().replace(/\s+/g, ' ');
+			const chMatch = cardText.match(/Chapter\s*(\d+(?:\.\d+)?)/i);
+			const latestChapter = chMatch ? chMatch[1] : undefined;
+
+			res.push({
+				id,
+				sourceId: this.id,
+				title,
+				cover,
+				lang: this.DEFAULT_LANG,
+				type: 'manga',
+				status: 'Ongoing',
+				latestChapter
+			});
+		};
+
+		$('.latest-poster').each((_, el) => {
+			const $el = $(el);
+			const $a =
+				$el.is('a') && ($el.attr('href') || '').includes('/series/')
+					? $el
+					: $el.find('a[href*="/series/"]').first();
+			const href = $a.attr('href') || '';
+			if (href) pushCard($el, href);
+		});
+
+		if (res.length === 0) {
+			$('a[href*="/series/"]').each((_, el) => {
+				const $a = $(el);
+				pushCard($a, $a.attr('href') || '');
+			});
+		}
+
+		return res;
+	}
+
+	// ── Catalog ──────────────────────────────────────────────────────────────
+
+	async getLatestManga(
+		page: number,
+		_opts?: { lang?: string; type?: string }
+	): Promise<Manga[]> {
+		try {
+			const p = Math.max(1, Number(page) || 1);
+			const html = await this.fetchHtml(`/latest?page=${p}`);
+			const $ = cheerio.load(html);
+			const list = this.parseSeriesCards($).slice(0, this.PER_PAGE);
+			console.log(`[artlapsa] latest page=${p} → ${list.length}`);
+			return list;
+		} catch (e) {
+			console.error('[artlapsa] getLatestManga', e);
+			return [];
+		}
+	}
+
+	async searchManga(
+		query: string,
+		opts?: { page?: number; lang?: string; type?: string }
+	): Promise<Manga[]> {
+		const q = (query || '').trim();
+		const page = Math.max(1, Number(opts?.page) || 1);
+		if (!q) return this.getLatestManga(page);
+
+		try {
+			const encoded = encodeURIComponent(q);
+			const html = await this.fetchHtml(`/search?q=${encoded}&page=${page}`);
+			const $ = cheerio.load(html);
+			const list = this.parseSeriesCards($).slice(0, this.PER_PAGE);
+			console.log(`[artlapsa] search "${q}" page=${page} → ${list.length}`);
+			return list;
+		} catch (e) {
+			console.error('[artlapsa] searchManga', e);
+			return [];
+		}
+	}
+
+	// ── Details ──────────────────────────────────────────────────────────────
+
+	async getMangaDetails(
+		mangaId: string,
+		_opts?: { lang?: string }
+	): Promise<MangaDetails> {
+		const uuid = this.extractUuid(mangaId);
+		if (!uuid) throw new Error(`Invalid artlapsa id: ${mangaId}`);
+
+		const path = this.toMangaId(uuid);
+		const html = await this.fetchHtml(path);
+		const $ = cheerio.load(html);
+
+		const title =
+			$('h1').first().text().replace(/\s+/g, ' ').trim() ||
+			$('title')
+				.text()
+				.replace(/\s*[-|].*Art Lapsa.*$/i, '')
+				.trim();
+
+		let cover =
+			$('meta[property="og:image"]').attr('content') ||
+			$('img[src*="cdn.artlapsa.com/series/"]').first().attr('src') ||
+			'';
+		cover = this.normalizeCover(cover, uuid);
+
+		const synopsis =
+			$('[class*="synopsis"], [class*="description"], .summary')
+				.first()
+				.text()
+				.replace(/\s+/g, ' ')
+				.trim() ||
+			$('meta[name="description"]').attr('content')?.trim() ||
+			'';
+
+		const author =
+			this.getLabeledValue($, 'Author') ||
+			$('a[href*="author"]').first().text().trim() ||
+			'';
+		const artist =
+			this.getLabeledValue($, 'Artist') ||
+			$('a[href*="artist"]').first().text().trim() ||
+			'';
+		const statusRaw = this.getLabeledValue($, 'Status') || 'Ongoing';
+		const formatRaw =
+			this.getLabeledValue($, 'Format') ||
+			this.getLabeledValue($, 'Type') ||
+			'Manga';
+
+		const authors: string[] = [];
+		for (const a of [author, artist]) {
+			const v = (a || '').trim();
+			if (v && !/^unknown$/i.test(v) && !authors.includes(v)) authors.push(v);
+		}
+
+		const genres: string[] = [];
+		$('a[href*="/genres/"]').each((_, el) => {
+			const g = $(el).text().replace(/\s+/g, ' ').trim();
+			if (g && !genres.includes(g)) genres.push(g);
+		});
+
+		const chapters: Chapter[] = [];
+		const seen = new Set<string>();
+
+		$('.chapter-card').each((_, card) => {
+			const $card = $(card);
+			const $a = $card.find('a[href*="/read/"]').first();
+			const href = $a.attr('href') || '';
+			const chUuid = this.extractUuid(href);
+			if (!chUuid) return;
+
+			const id = this.toChapterId(uuid, chUuid);
+			if (seen.has(id)) return;
+			seen.add(id);
+
+			const rawText = $card.text().replace(/\s+/g, ' ').trim();
+			const number = this.parseChapterNumber(rawText);
+			if (Number.isNaN(number)) return;
+
+			const locked = $card.find('.chapter-lock-badge').length > 0;
+			const date = this.parseDateFromText(rawText);
+
+			chapters.push({
+				id,
+				title: `Chapter ${number}`,
+				number,
+				date: date || undefined,
+				isLocked: locked ? true : undefined
+			});
+		});
+
+		if (chapters.length === 0) {
+			$('a[href*="/read/"]').each((_, el) => {
+				const $a = $(el);
+				const href = $a.attr('href') || '';
+				const chUuid = this.extractUuid(href);
+				if (!chUuid) return;
+				const id = this.toChapterId(uuid, chUuid);
+				if (seen.has(id)) return;
+				seen.add(id);
+				const raw = $a.text().replace(/\s+/g, ' ').trim();
+				if (/start reading|latest chapter/i.test(raw)) return;
+				const number = this.parseChapterNumber(raw);
+				if (Number.isNaN(number)) return;
+				chapters.push({
+					id,
+					title: `Chapter ${number}`,
+					number,
+					isLocked: undefined
+				});
+			});
+		}
+
+		chapters.sort((a, b) => (a.number || 0) - (b.number || 0));
+
+		const description = synopsis || '';
+
+		return {
+			id: path,
+			sourceId: this.id,
+			title,
+			cover,
+			type: this.mapType(formatRaw),
+			status: this.mapStatus(statusRaw),
+			description,
+			authors,
+			genres,
+			chapters,
+			latestChapter:
+				chapters.length > 0
+					? String(chapters[chapters.length - 1].number)
+					: undefined
+		};
+	}
+
+	// ── Pages ────────────────────────────────────────────────────────────────
+
+	private buildPageUrls(
+		baseDir: string,
+		pageCount: number,
+		ext: string
+	): string[] {
+		const urls: string[] = [];
+		const e = (ext || 'jpg').replace(/^\./, '').toLowerCase();
+		for (let i = 1; i <= pageCount; i++) {
+			const num = String(i).padStart(3, '0');
+			urls.push(`${baseDir}/${num}.${e}`);
+		}
+		return urls;
+	}
+
+	private resolvePageBase(
+		html: string,
+		seriesUuid: string,
+		chapterUuid: string
+	): { baseDir: string; ext: string } {
+		const cleaned = html.replace(/\\+\//g, '/').replace(/\\/g, '');
+
+		let m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'\\\s<>]+\/revisions\/[^"'/\\\s<>]+)\/0*1\.(jpg|jpeg|png|webp)/i
+		);
+		if (m) return { baseDir: m[1], ext: m[2].toLowerCase() };
+
+		m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'\\\s<>]+\/revisions\/[^"'/\\\s<>]+)\/thumbnail\.(jpg|jpeg|png|webp)/i
+		);
+		if (m) return { baseDir: m[1], ext: 'jpg' };
+
+		m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'\\\s<>]+\/revisions\/[^"'/\\\s<>]+)\//i
+		);
+		if (m) return { baseDir: m[1], ext: 'jpg' };
+
+		m = cleaned.match(
+			/(https:\/\/cdn\.artlapsa\.com\/series\/[^"'\\\s<>]+\/chapters\/[^"'/\\\s<>]+)\/0*1\.(jpg|jpeg|png|webp)/i
+		);
+		if (m) return { baseDir: m[1], ext: m[2].toLowerCase() };
+
+		let sUuid = seriesUuid;
+		if (!sUuid) {
+			sUuid =
+				(cleaned.match(
+					/cdn\.artlapsa\.com\/series\/(?:webtoon\/)?([0-9a-f-]{36})/i
+				) || [])[1] || '';
+		}
+		if (sUuid && chapterUuid) {
+			return {
+				baseDir: `https://cdn.artlapsa.com/series/webtoon/${sUuid}/chapters/${chapterUuid}`,
+				ext: 'jpg'
+			};
+		}
+
+		return { baseDir: '', ext: 'jpg' };
+	}
+
+	async getChapterPages(chapterId: string): Promise<string[]> {
+		const { seriesUuid, chapterUuid } = this.parseChapterParts(chapterId);
+		if (!chapterUuid) {
+			console.error('[artlapsa] getChapterPages → bad id:', chapterId);
+			return [];
+		}
+
+		try {
+			const html = await this.fetchHtml(`/read/${chapterUuid}`);
+
+			if (
+				/"needsToUnlock"\s*:\s*true/.test(html) ||
+				/needsToUnlock&quot;:true/.test(html)
+			) {
+				console.warn('[artlapsa] chapter locked:', chapterId);
+				return [];
+			}
+
+			const pageCountMatch =
+				html.match(/pageCount&quot;:(\d+)/) ||
+				html.match(/"pageCount"\s*:\s*(\d+)/) ||
+				html.match(/content="[^"]*?(\d+)\s*pages/i) ||
+				html.match(/\b(\d+)\s*pages\b/i);
+			const pageCount = pageCountMatch ? parseInt(pageCountMatch[1], 10) : 0;
+
+			const { baseDir, ext } = this.resolvePageBase(
+				html,
+				seriesUuid,
+				chapterUuid
+			);
+
+			if (baseDir && pageCount > 0) {
+				const urls = this.buildPageUrls(baseDir, pageCount, ext);
+				console.log(
+					`[artlapsa] ${urls.length} pages → ${chapterUuid} base=${baseDir}`
+				);
+				return urls;
+			}
+
+			const $ = cheerio.load(html);
+			const found: string[] = [];
+			const seen = new Set<string>();
+			$('img, link[rel="preload"]').each((_, el) => {
+				const src =
+					$(el).attr('src') ||
+					$(el).attr('href') ||
+					$(el).attr('data-src') ||
+					($(el).attr('srcset') || '').split(/\s/)[0] ||
+					'';
+				if (!src || !/\/chapters\//i.test(src)) return;
+				if (/thumbnail|75x112/i.test(src)) return;
+				const abs = this.absUrl(src);
+				if (seen.has(abs)) return;
+				seen.add(abs);
+				found.push(abs);
+			});
+
+			if (found.length >= 1 && pageCount > found.length) {
+				const one = found[0];
+				const bm = one.match(
+					/^(https:\/\/cdn\.artlapsa\.com\/series\/.+\/chapters\/.+?)\/(?:0*\d+|thumbnail)\.(jpg|jpeg|png|webp)$/i
+				);
+				if (bm) {
+					const urls = this.buildPageUrls(bm[1], pageCount, bm[2] || 'jpg');
+					console.log(
+						`[artlapsa] expanded ${urls.length} from DOM → ${chapterUuid}`
+					);
+					return urls;
+				}
+			}
+
+			found.sort((a, b) => {
+				const na = parseInt((a.match(/\/(\d+)\.\w+$/) || [])[1] || '0', 10);
+				const nb = parseInt((b.match(/\/(\d+)\.\w+$/) || [])[1] || '0', 10);
+				return na - nb;
+			});
+			console.log(`[artlapsa] fallback ${found.length} pages → ${chapterUuid}`);
+			return found;
+		} catch (e) {
+			console.error('[artlapsa] getChapterPages failed', chapterId, e);
+			return [];
+		}
+	}
+}
+
+export default ArtLapsaSource;
