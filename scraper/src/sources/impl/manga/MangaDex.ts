@@ -33,6 +33,47 @@ export class MangaDexSource extends BaseSource {
 
 	// ── HTTP ─────────────────────────────────────────────────────────────────
 
+	private isBlockedBody(status: number, text: string): boolean {
+		const trimmed = text.trim();
+		const lower = trimmed.toLowerCase();
+
+		if (
+			trimmed.startsWith('<') ||
+			lower.includes('<!doctype') ||
+			lower.includes('<html')
+		) {
+			return true;
+		}
+
+		if (
+			lower.includes('bot challenge not passed') ||
+			lower.includes('refresh this page') ||
+			lower.includes('just a moment') ||
+			lower.includes('cf-browser-verification') ||
+			lower.includes('checking your browser')
+		) {
+			return true;
+		}
+
+		if (isCloudflareChallenge(status, text)) return true;
+
+		if ((status === 403 || status === 503) && trimmed.length < 500) {
+			if (
+				!trimmed.startsWith('{') &&
+				!trimmed.startsWith('[') &&
+				(lower.includes('challenge') ||
+					lower.includes('blocked') ||
+					lower.includes('forbidden') ||
+					lower.includes('access denied') ||
+					lower.includes('captcha'))
+			) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private async apiGet<T = any>(
 		path: string,
 		params?: Record<string, string | string[] | number | boolean | undefined | null>
@@ -77,78 +118,101 @@ export class MangaDexSource extends BaseSource {
 				const res = await fetch(target, { headers, redirect: 'follow' });
 				const text = await res.text();
 				const trimmed = text.trim();
-				const isHtml =
-					trimmed.startsWith('<') ||
-					trimmed.toLowerCase().includes('<!doctype') ||
-					trimmed.toLowerCase().includes('<html');
 
-				if (isHtml || isCloudflareChallenge(res.status, text)) {
+				if (this.isBlockedBody(res.status, text)) {
 					console.error(
-						`[mangadex] blocked HTML/challenge attempt=${attempt}`,
+						`[mangadex] blocked attempt=${attempt}`,
 						url.pathname,
 						`status=${res.status}`,
-						trimmed.slice(0, 120)
+						trimmed.slice(0, 160)
 					);
-					lastErr = new Error('MangaDex blocked: response is HTML, not JSON');
+					lastErr = new Error(
+						`MangaDex blocked (${res.status}): ${trimmed.slice(0, 80)}`
+					);
 					clearCfSession(target);
 
 					if (!usedSolver && isByparrEnabled()) {
 						usedSolver = true;
 						try {
-							console.warn(`[mangadex] solving via byparr → ${url.pathname}`);
+							console.warn(
+								`[mangadex] solving via byparr → ${url.pathname}`
+							);
 							const solved = await solveWithByparr(target, {
 								maxTimeoutMs: 60_000
 							});
-							if (solved.cookieHeader) {
-								setCfSession(target, solved.cookieHeader, solved.userAgent);
-								const body = (solved.html || '').trim();
-								if (
-									body &&
-									!body.startsWith('<') &&
-									!body.toLowerCase().includes('<!doctype')
-								) {
-									try {
-										return JSON.parse(body) as T;
-									} catch {
-									}
-								}
+							if (!solved.cookieHeader) {
+								throw new Error('byparr returned empty cookies');
+							}
 
-								const retryHeaders = applyCfSessionHeaders(target, {
-									...baseHeaders,
-									Cookie: solved.cookieHeader,
-									'User-Agent': solved.userAgent
-								});
-								const retry = await fetch(target, {
-									headers: retryHeaders,
-									redirect: 'follow'
-								});
-								const retryText = await retry.text();
-								const retryTrim = retryText.trim();
+							setCfSession(
+								target,
+								solved.cookieHeader,
+								solved.userAgent
+							);
+
+							const body = (solved.html || '').trim();
+							if (
+								body &&
+								!this.isBlockedBody(200, body) &&
+								(body.startsWith('{') || body.startsWith('['))
+							) {
+								try {
+									return JSON.parse(body) as T;
+								} catch {
+								}
+							}
+
+							const retryHeaders = applyCfSessionHeaders(target, {
+								...baseHeaders,
+								Cookie: solved.cookieHeader,
+								'User-Agent': solved.userAgent
+							});
+							const retry = await fetch(target, {
+								headers: retryHeaders,
+								redirect: 'follow'
+							});
+							const retryText = await retry.text();
+							const retryTrim = retryText.trim();
+
+							if (this.isBlockedBody(retry.status, retryText)) {
+								clearCfSession(target);
+								lastErr = new Error(
+									`MangaDex still blocked after byparr (${retry.status})`
+								);
+								await new Promise((r) =>
+									setTimeout(r, 500 * attempt)
+								);
+								continue;
+							}
+
+							if (!retry.ok) {
+								lastErr = new Error(
+									`MangaDex HTTP ${retry.status}`
+								);
 								if (
-									retryTrim.startsWith('<') ||
-									retryTrim.toLowerCase().includes('<!doctype')
+									retry.status === 429 ||
+									retry.status === 503
 								) {
-									clearCfSession(target);
-									lastErr = new Error(
-										'MangaDex still blocked after byparr'
+									await new Promise((r) =>
+										setTimeout(r, 600 * attempt)
 									);
-									await new Promise((r) => setTimeout(r, 500 * attempt));
 									continue;
 								}
-								if (!retry.ok) {
-									lastErr = new Error(`MangaDex HTTP ${retry.status}`);
-									if (retry.status === 429 || retry.status === 503) {
-										await new Promise((r) => setTimeout(r, 600 * attempt));
-										continue;
-									}
-									throw lastErr;
-								}
-								return JSON.parse(retryTrim) as T;
+								throw lastErr;
 							}
+
+							return JSON.parse(retryTrim) as T;
 						} catch (solveErr) {
-							console.error('[mangadex] byparr solve failed', solveErr);
+							console.error(
+								'[mangadex] byparr solve failed',
+								solveErr
+							);
 							lastErr = solveErr;
 						}
+					} else if (!isByparrEnabled()) {
+						console.error(
+							'[mangadex] BYPARR_URL not set — cannot solve bot challenge'
+						);
 					}
 
 					await new Promise((r) => setTimeout(r, 400 * attempt));
@@ -171,7 +235,10 @@ export class MangaDexSource extends BaseSource {
 				try {
 					return JSON.parse(trimmed) as T;
 				} catch {
-					console.error('[mangadex] invalid JSON', trimmed.slice(0, 200));
+					console.error(
+						'[mangadex] invalid JSON',
+						trimmed.slice(0, 200)
+					);
 					throw new Error('MangaDex invalid JSON');
 				}
 			} catch (e) {
