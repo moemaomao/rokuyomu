@@ -14,6 +14,13 @@
 
 import { BaseSource } from '../../BaseSource';
 import type { Chapter, Manga, MangaDetails } from '../../types-manga';
+import {
+	applyCfSessionHeaders,
+	clearCfSession,
+	setCfSession
+} from '../../../lib/cfCookieJar';
+import { isByparrEnabled, solveWithByparr } from '../../../lib/byparr';
+import { isCloudflareChallenge } from '../../../lib/fetchWithCf';
 
 export class MangaDexSource extends BaseSource {
 	id = 'mangadex';
@@ -48,9 +55,11 @@ export class MangaDexSource extends BaseSource {
 			}
 		}
 
-		const headers: Record<string, string> = {
+		const target = url.toString();
+
+		const baseHeaders: Record<string, string> = {
 			'User-Agent':
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
 			Accept: 'application/json, text/plain, */*',
 			'Accept-Language': 'en-US,en;q=0.9',
 			Origin: 'https://mangadex.org',
@@ -60,23 +69,88 @@ export class MangaDexSource extends BaseSource {
 
 		const maxAttempts = 3;
 		let lastErr: unknown;
+		let usedSolver = false;
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 			try {
-				const res = await fetch(url.toString(), { headers });
+				const headers = applyCfSessionHeaders(target, { ...baseHeaders });
+				const res = await fetch(target, { headers, redirect: 'follow' });
 				const text = await res.text();
 				const trimmed = text.trim();
-
-				if (
+				const isHtml =
 					trimmed.startsWith('<') ||
-					trimmed.toLowerCase().includes('<!doctype')
-				) {
+					trimmed.toLowerCase().includes('<!doctype') ||
+					trimmed.toLowerCase().includes('<html');
+
+				if (isHtml || isCloudflareChallenge(res.status, text)) {
 					console.error(
-						`[mangadex] HTML response attempt=${attempt}`,
+						`[mangadex] blocked HTML/challenge attempt=${attempt}`,
 						url.pathname,
+						`status=${res.status}`,
 						trimmed.slice(0, 120)
 					);
 					lastErr = new Error('MangaDex blocked: response is HTML, not JSON');
+					clearCfSession(target);
+
+					if (!usedSolver && isByparrEnabled()) {
+						usedSolver = true;
+						try {
+							console.warn(`[mangadex] solving via byparr → ${url.pathname}`);
+							const solved = await solveWithByparr(target, {
+								maxTimeoutMs: 60_000
+							});
+							if (solved.cookieHeader) {
+								setCfSession(target, solved.cookieHeader, solved.userAgent);
+								const body = (solved.html || '').trim();
+								if (
+									body &&
+									!body.startsWith('<') &&
+									!body.toLowerCase().includes('<!doctype')
+								) {
+									try {
+										return JSON.parse(body) as T;
+									} catch {
+									}
+								}
+
+								const retryHeaders = applyCfSessionHeaders(target, {
+									...baseHeaders,
+									Cookie: solved.cookieHeader,
+									'User-Agent': solved.userAgent
+								});
+								const retry = await fetch(target, {
+									headers: retryHeaders,
+									redirect: 'follow'
+								});
+								const retryText = await retry.text();
+								const retryTrim = retryText.trim();
+								if (
+									retryTrim.startsWith('<') ||
+									retryTrim.toLowerCase().includes('<!doctype')
+								) {
+									clearCfSession(target);
+									lastErr = new Error(
+										'MangaDex still blocked after byparr'
+									);
+									await new Promise((r) => setTimeout(r, 500 * attempt));
+									continue;
+								}
+								if (!retry.ok) {
+									lastErr = new Error(`MangaDex HTTP ${retry.status}`);
+									if (retry.status === 429 || retry.status === 503) {
+										await new Promise((r) => setTimeout(r, 600 * attempt));
+										continue;
+									}
+									throw lastErr;
+								}
+								return JSON.parse(retryTrim) as T;
+							}
+						} catch (solveErr) {
+							console.error('[mangadex] byparr solve failed', solveErr);
+							lastErr = solveErr;
+						}
+					}
+
 					await new Promise((r) => setTimeout(r, 400 * attempt));
 					continue;
 				}
@@ -548,7 +622,6 @@ export class MangaDexSource extends BaseSource {
 			/* ignore */
 		}
 
-		// Detail pakai 512 (cukup tajam, tidak terlalu besar)
 		let cover = this.coverUrl(uuid, item.relationships || [], '512');
 		if (!cover) {
 			cover = await this.fetchCoverUrl(uuid, '512');
